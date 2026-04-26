@@ -1,0 +1,7 @@
+streamlit==1.35.0
+pandas
+gspread
+oauth2client
+google-auth
+pytz
+pydeck
