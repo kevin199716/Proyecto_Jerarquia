@@ -1,0 +1,57 @@
+{
+  "admin": {
+    "password": "1234",
+    "rol": "backoffice",
+    "estado": "activo",
+    "razon": "ALL"
+  },
+
+  "editor1": {
+    "password": "1234",
+    "rol": "editor",
+    "estado": "activo",
+    "razon": "ALL"
+  },
+
+  "malutech": {
+    "password": "1234",
+    "rol": "dealer",
+    "estado": "activo",
+    "razon": "MALUTECH S.A.C."
+  },
+
+  "2connect": {
+    "password": "1234",
+    "rol": "dealer",
+    "estado": "activo",
+    "razon": "2CONNECT SERVICES S.A.C."
+  },
+
+  "interconexion": {
+    "password": "1234",
+    "rol": "dealer",
+    "estado": "activo",
+    "razon": "INTERCONEXION 360 SAC"
+  },
+
+  "nogales": {
+    "password": "1234",
+    "rol": "dealer",
+    "estado": "activo",
+    "razon": "NOGALES HIGH S.A.C."
+  },
+
+  "multiple": {
+    "password": "1234",
+    "rol": "dealer",
+    "estado": "activo",
+    "razon": "MULTIPLE FORCE SAC"
+  },
+
+  "konecta": {
+    "password": "1234",
+    "rol": "dealer",
+    "estado": "activo",
+    "razon": "KONECTA SAC"
+  }
+}
