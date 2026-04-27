@@ -1,6 +1,16 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
+import pytz
+
+# =========================
+# ZONA HORARIA PERÚ
+# =========================
+zona_peru = pytz.timezone("America/Lima")
+
+def ahora_peru():
+    return datetime.now(zona_peru).strftime("%Y-%m-%d %H:%M:%S")
+
 
 # =========================
 # LIMPIAR FORMULARIO
@@ -9,6 +19,7 @@ def limpiar_form():
     for k in list(st.session_state.keys()):
         if k not in ["autenticado", "rol", "razon", "usuario"]:
             del st.session_state[k]
+
 
 # =========================
 # NORMALIZAR DNI
@@ -25,6 +36,7 @@ def normalizar_dni(valor):
 
     return dni
 
+
 # =========================
 # NORMALIZAR TEXTO
 # =========================
@@ -33,6 +45,7 @@ def normalizar_texto(valor):
         return ""
     return str(valor).strip().upper()
 
+
 # =========================
 # FORMULARIO
 # =========================
@@ -40,22 +53,12 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones):
 
     st.subheader("📋 Registro de Vendedores")
 
-    # =========================
-    # MENSAJE VERDE (FIX)
-    # =========================
     if st.session_state.get("mensaje_ok"):
         st.success("✅ Guardado correctamente")
         del st.session_state["mensaje_ok"]
 
-    # =========================
-    # UBICACIONES
-    # =========================
     data_ubi = hoja_ubicaciones.get_all_records()
     df_ubi = pd.DataFrame(data_ubi)
-
-    if df_ubi.empty:
-        st.error("❌ No se encontró data en la hoja ubicaciones")
-        return
 
     df_ubi.columns = df_ubi.columns.str.strip().str.upper()
 
@@ -69,9 +72,6 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones):
 
     provincia = st.selectbox("PROVINCIA", [""] + provincias)
 
-    # =========================
-    # FORMULARIO
-    # =========================
     with st.form("form_registro"):
 
         col1, col2 = st.columns(2)
@@ -79,9 +79,6 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones):
         rol = st.session_state.get("rol", "")
         razon_usuario = st.session_state.get("razon", "")
 
-        # =========================
-        # RAZON SOCIAL
-        # =========================
         razones = [
             "MALUTECH S.A.C.",
             "2CONNECT SERVICES S.A.C.",
@@ -93,7 +90,6 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones):
 
         with col1:
 
-            # 🔥 ADMIN VE TODO
             if rol == "backoffice":
                 razon = st.selectbox("RAZON SOCIAL", [""] + razones)
             else:
@@ -141,9 +137,7 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones):
 
             fecha_creacion = st.date_input(
                 "FECHA CREACION",
-                value=hoy,
-                min_value=hoy - timedelta(days=3),
-                max_value=hoy + timedelta(days=7)
+                value=hoy
             )
 
             contrato_firmado = st.selectbox("CONTRATO FIRMADO", ["SI", "NO"])
@@ -154,47 +148,10 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones):
 
             dni_limpio = normalizar_dni(dni)
 
-            # =========================
-            # VALIDACIONES
-            # =========================
             if not dni_limpio.isdigit() or len(dni_limpio) != 8:
                 st.error("❌ DNI inválido")
                 return
 
-            if not celular.startswith("9"):
-                st.error("❌ Celular inválido")
-                return
-
-            if "@" not in correo:
-                st.error("❌ Correo inválido")
-                return
-
-            if departamento == "" or provincia == "":
-                st.error("❌ Ubicación incompleta")
-                return
-
-            # =========================
-            # VALIDACION DNI
-            # =========================
-            data = hoja_colaboradores.get_all_records()
-            df = pd.DataFrame(data)
-
-            if not df.empty:
-
-                df.columns = df.columns.str.strip().str.upper()
-
-                df["DNI_NORMALIZADO"] = df["DNI"].apply(normalizar_dni)
-                df["ESTADO_NORMALIZADO"] = df["ESTADO"].apply(normalizar_texto)
-
-                historial = df[df["DNI_NORMALIZADO"] == dni_limpio]
-
-                if not historial[historial["ESTADO_NORMALIZADO"] == "ACTIVO"].empty:
-                    st.error("❌ DNI ya tiene registro ACTIVO")
-                    return
-
-            # =========================
-            # GUARDAR
-            # =========================
             hoja_colaboradores.append_row([
                 "",
                 razon,
@@ -221,11 +178,10 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones):
                 "",
                 "",
                 contrato_firmado,
-                datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
+                ahora_peru(),  # 🔥 FIX HORA
                 ""
             ])
 
-            # 🔥 FIX MENSAJE
             st.session_state["mensaje_ok"] = True
             limpiar_form()
             st.rerun()
