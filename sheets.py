@@ -6,17 +6,14 @@ from google.oauth2.service_account import Credentials
 
 
 def conectar_google_sheets(nombre_hoja: str, nombre_worksheet: str):
-    """Conecta con Google Sheets (modo RENDER con variable de entorno)"""
-
     try:
-        # 🔥 Leer credenciales desde Render (variable de entorno)
+        # 🔥 Leer JSON directo (NO base64)
         credenciales_str = os.getenv("GOOGLE_CREDENTIALS")
 
         if not credenciales_str:
-            st.error("⚠️ No se encontraron credenciales en Render")
+            st.error("⚠️ No existe GOOGLE_CREDENTIALS en Render")
             st.stop()
 
-        # 🔥 Convertir string a JSON
         credenciales_json = json.loads(credenciales_str)
 
         creds = Credentials.from_service_account_info(
