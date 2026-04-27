@@ -7,21 +7,19 @@ from google.oauth2.service_account import Credentials
 
 def conectar_google_sheets(nombre_hoja: str, nombre_worksheet: str):
     """
-    Conexión a Google Sheets:
     ✔ Local → usa credenciales.json
-    ✔ Render → usa variable de entorno GOOGLE_CREDENTIALS
+    ✔ Render → usa variable GOOGLE_CREDENTIALS
     """
 
     try:
-        # 🔥 Detecta si está en Render
+        # 🔥 Detecta si existe variable en Render
         credenciales_env = os.getenv("GOOGLE_CREDENTIALS")
 
         if credenciales_env:
-            # 👉 MODO RENDER (PRODUCCIÓN)
+            # 👉 PRODUCCIÓN (Render)
             credenciales_json = json.loads(credenciales_env)
-
         else:
-            # 👉 MODO LOCAL
+            # 👉 LOCAL
             with open("credenciales.json") as f:
                 credenciales_json = json.load(f)
 
@@ -34,9 +32,7 @@ def conectar_google_sheets(nombre_hoja: str, nombre_worksheet: str):
             ]
         )
 
-        # 🔗 Conectar
         client = gspread.authorize(creds)
-
         sheet = client.open(nombre_hoja).worksheet(nombre_worksheet)
 
         return sheet
