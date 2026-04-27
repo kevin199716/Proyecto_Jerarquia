@@ -41,6 +41,13 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones):
     st.subheader("📋 Registro de Vendedores")
 
     # =========================
+    # MENSAJE VERDE (FIX)
+    # =========================
+    if st.session_state.get("mensaje_ok"):
+        st.success("✅ Guardado correctamente")
+        del st.session_state["mensaje_ok"]
+
+    # =========================
     # UBICACIONES
     # =========================
     data_ubi = hoja_ubicaciones.get_all_records()
@@ -53,7 +60,6 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones):
     df_ubi.columns = df_ubi.columns.str.strip().str.upper()
 
     departamentos = sorted(df_ubi["DEPARTAMENTO"].dropna().unique())
-
     departamento = st.selectbox("DEPARTAMENTO", [""] + departamentos)
 
     provincias = []
@@ -74,7 +80,7 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones):
         razon_usuario = st.session_state.get("razon", "")
 
         # =========================
-        # RAZON SOCIAL (FIX ADMIN)
+        # RAZON SOCIAL
         # =========================
         razones = [
             "MALUTECH S.A.C.",
@@ -87,6 +93,7 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones):
 
         with col1:
 
+            # 🔥 ADMIN VE TODO
             if rol == "backoffice":
                 razon = st.selectbox("RAZON SOCIAL", [""] + razones)
             else:
@@ -122,9 +129,7 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones):
             celular = st.text_input("CELULAR")
 
             tipo_doc = st.selectbox("TIPO DE DOC", ["DNI", "CPP", "CEX", "OTROS"])
-
             dni = st.text_input("DNI")
-
             correo = st.text_input("CORREO")
 
             tipo_contrato = st.selectbox(
@@ -183,42 +188,16 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones):
 
                 historial = df[df["DNI_NORMALIZADO"] == dni_limpio]
 
-                # ACTIVO DUPLICADO
                 if not historial[historial["ESTADO_NORMALIZADO"] == "ACTIVO"].empty:
                     st.error("❌ DNI ya tiene registro ACTIVO")
                     return
-
-                # TRASLAPE
-                for _, row in historial.iterrows():
-
-                    f_ini = pd.to_datetime(row["FECHA DE CREACION USUARIO"], errors="coerce")
-                    f_fin = pd.to_datetime(row["FECHA DE CESE"], errors="coerce")
-
-                    if pd.isna(f_ini):
-                        continue
-
-                    f_ini = f_ini.date()
-
-                    if pd.isna(f_fin):
-                        st.error("❌ DNI sin fecha de cese")
-                        return
-
-                    f_fin = f_fin.date()
-
-                    if f_ini <= fecha_creacion <= f_fin:
-                        st.error("❌ DNI en rango activo previo")
-                        return
-
-                    if fecha_creacion <= f_fin:
-                        st.error("❌ Fecha debe ser posterior a baja")
-                        return
 
             # =========================
             # GUARDAR
             # =========================
             hoja_colaboradores.append_row([
                 "",
-                razon,  # 🔥 FIX CLAVE
+                razon,
                 canal,
                 subcanal,
                 region,
@@ -246,6 +225,7 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones):
                 ""
             ])
 
-            st.success("✅ Guardado correctamente")
+            # 🔥 FIX MENSAJE
+            st.session_state["mensaje_ok"] = True
             limpiar_form()
             st.rerun()

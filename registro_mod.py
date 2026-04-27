@@ -15,7 +15,7 @@ def limpiar_fecha(valor):
 
 
 # =========================
-# MOTIVOS ACTUALIZADOS 🔥
+# MOTIVOS
 # =========================
 MOTIVOS = [
     "",
@@ -32,7 +32,7 @@ MOTIVOS = [
 
 
 # =========================
-# TABLA (FILTRADA POR SOCIO)
+# TABLA (🔥 FIX ADMIN)
 # =========================
 def mostrar_tabla(hoja, razon_usuario=None):
 
@@ -45,8 +45,10 @@ def mostrar_tabla(hoja, razon_usuario=None):
     df = pd.DataFrame(data)
     df.columns = df.columns.str.strip().str.upper()
 
-    # 🔥 FILTRO POR SOCIO
-    if razon_usuario:
+    # 🔥 NUEVO FIX ADMIN
+    rol = st.session_state.get("rol", "")
+
+    if rol != "backoffice":
         df = df[df["RAZON SOCIAL"] == razon_usuario]
 
     st.dataframe(df, use_container_width=True)
@@ -62,8 +64,10 @@ def dar_de_baja(df, hoja, razon_usuario=None):
 
     df.columns = df.columns.str.strip().str.upper()
 
-    # 🔥 FILTRO POR SOCIO
-    if razon_usuario:
+    # 🔥 FIX ADMIN
+    rol = st.session_state.get("rol", "")
+
+    if rol != "backoffice":
         df = df[df["RAZON SOCIAL"] == razon_usuario]
 
     dni = st.text_input("DNI", key="dni_baja")
@@ -102,12 +106,10 @@ def dar_de_baja(df, hoja, razon_usuario=None):
 
         fecha_creacion = limpiar_fecha(fila.get("FECHA DE CREACION USUARIO"))
 
-        # 🔴 VALIDACIÓN 1: NO MENOR
         if fecha_creacion and fecha < fecha_creacion:
             st.error("❌ Fecha de baja no puede ser menor a la fecha de creación")
             return
 
-        # 🔴 VALIDACIÓN 2: MÁX 48H
         hoy = datetime.now().date()
         max_fecha = hoy + timedelta(days=2)
 
@@ -121,7 +123,6 @@ def dar_de_baja(df, hoja, razon_usuario=None):
         hoja.update_cell(index_global+2, df.columns.get_loc("FECHA DE CESE")+1, str(fecha))
         hoja.update_cell(index_global+2, df.columns.get_loc("MOTIVO")+1, motivo)
 
-        # 🔥 FECHA MOV
         if "FECHA MOV" in df.columns:
             hoja.update_cell(
                 index_global+2,
@@ -129,7 +130,6 @@ def dar_de_baja(df, hoja, razon_usuario=None):
                 str(fecha)
             )
 
-        # 🔥 TIMESTAMP
         if "FECHA_BAJA_REGISTRO" in df.columns:
             hoja.update_cell(
                 index_global+2,
@@ -141,7 +141,7 @@ def dar_de_baja(df, hoja, razon_usuario=None):
 
 
 # =========================
-# EDITAR (SIN CAMBIOS)
+# EDITAR (🔥 FIX ADMIN)
 # =========================
 def editar_registro(df, hoja, hoja_ubi):
 
@@ -149,6 +149,13 @@ def editar_registro(df, hoja, hoja_ubi):
 
     df.columns = df.columns.str.strip().str.upper()
     df["DNI"] = df["DNI"].astype(str)
+
+    # 🔥 FIX ADMIN
+    rol = st.session_state.get("rol", "")
+    razon_usuario = st.session_state.get("razon", "")
+
+    if rol != "backoffice":
+        df = df[df["RAZON SOCIAL"] == razon_usuario]
 
     dni = st.text_input("DNI a editar", key="dni_edit")
 
@@ -180,4 +187,4 @@ def editar_registro(df, hoja, hoja_ubi):
 
     st.success("Registro seleccionado")
 
-    # 🔴 AQUÍ NO TOCO NADA MÁS (tu lógica queda igual)
+    # 🔴 AQUÍ DEJAS TU LÓGICA TAL CUAL
