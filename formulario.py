@@ -1,6 +1,6 @@
 import streamlit as st
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime
 import pytz
 
 # =========================
@@ -38,25 +38,20 @@ def normalizar_dni(valor):
 
 
 # =========================
-# NORMALIZAR TEXTO
-# =========================
-def normalizar_texto(valor):
-    if pd.isna(valor):
-        return ""
-    return str(valor).strip().upper()
-
-
-# =========================
 # FORMULARIO
 # =========================
 def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones):
 
     st.subheader("📋 Registro de Vendedores")
 
+    # 🔥 MENSAJE OK
     if st.session_state.get("mensaje_ok"):
-        st.success("✅ Guardado correctamente")
+        st.success("✅ Registrado correctamente")
         del st.session_state["mensaje_ok"]
 
+    # =========================
+    # UBICACIONES
+    # =========================
     data_ubi = hoja_ubicaciones.get_all_records()
     df_ubi = pd.DataFrame(data_ubi)
 
@@ -72,6 +67,9 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones):
 
     provincia = st.selectbox("PROVINCIA", [""] + provincias)
 
+    # =========================
+    # FORM
+    # =========================
     with st.form("form_registro"):
 
         col1, col2 = st.columns(2)
@@ -144,7 +142,27 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones):
 
         submit = st.form_submit_button("Guardar")
 
+        # =========================
+        # VALIDACIONES 🔥
+        # =========================
         if submit:
+
+            # 🔴 VALIDAR CAMPOS OBLIGATORIOS
+            if not departamento:
+                st.error("❌ Debes seleccionar DEPARTAMENTO")
+                return
+
+            if not provincia:
+                st.error("❌ Debes seleccionar PROVINCIA")
+                return
+
+            if not nombres or not apellido_p:
+                st.error("❌ Nombres y Apellidos son obligatorios")
+                return
+
+            if not dni:
+                st.error("❌ DNI obligatorio")
+                return
 
             dni_limpio = normalizar_dni(dni)
 
@@ -152,6 +170,9 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones):
                 st.error("❌ DNI inválido")
                 return
 
+            # =========================
+            # GUARDAR
+            # =========================
             hoja_colaboradores.append_row([
                 "",
                 razon,
@@ -178,10 +199,12 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones):
                 "",
                 "",
                 contrato_firmado,
-                ahora_peru(),  # 🔥 FIX HORA
+                ahora_peru(),
                 ""
             ])
 
+            # 🔥 MENSAJE VERDE
             st.session_state["mensaje_ok"] = True
+
             limpiar_form()
             st.rerun()
