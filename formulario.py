@@ -16,15 +16,8 @@ def ahora_peru():
 # LIMPIAR FORM
 # =========================
 def limpiar_form():
-
     for k in list(st.session_state.keys()):
-
-        if k not in [
-            "autenticado",
-            "rol",
-            "razon",
-            "usuario"
-        ]:
+        if k not in ["autenticado", "rol", "razon", "usuario"]:
             del st.session_state[k]
 
 
@@ -32,7 +25,6 @@ def limpiar_form():
 # NORMALIZAR DNI
 # =========================
 def normalizar_dni(valor):
-
     if pd.isna(valor):
         return ""
 
@@ -45,48 +37,89 @@ def normalizar_dni(valor):
 
 
 # =========================
+# LEER UBICACIONES SIN ERROR POR CABECERAS REPETIDAS
+# =========================
+def leer_ubicaciones(hoja_ubicaciones):
+
+    valores = hoja_ubicaciones.get_all_values()
+
+    if not valores:
+        return pd.DataFrame()
+
+    headers = [
+        str(h).strip().upper()
+        for h in valores[0]
+    ]
+
+    headers_limpios = []
+    contador = {}
+
+    for h in headers:
+        if h == "":
+            h = "SIN_NOMBRE"
+
+        if h not in contador:
+            contador[h] = 0
+            headers_limpios.append(h)
+        else:
+            contador[h] += 1
+            headers_limpios.append(f"{h}.{contador[h]}")
+
+    data = valores[1:]
+
+    df = pd.DataFrame(data, columns=headers_limpios)
+
+    df.columns = df.columns.str.strip().str.upper()
+
+    return df
+
+
+# =========================
 # FORMULARIO
 # =========================
-def mostrar_formulario(
-    hoja_colaboradores,
-    hoja_ubicaciones
-):
+def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones):
 
     st.subheader("📋 Registro de Vendedores")
 
-    # =========================
-    # MENSAJE OK
-    # =========================
     if st.session_state.get("mensaje_ok"):
-
         st.success("✅ Registrado correctamente")
-
         del st.session_state["mensaje_ok"]
 
     usuario_actual = st.session_state.get("usuario", "")
-
     rol = st.session_state.get("rol", "")
-
     razon_usuario = st.session_state.get("razon", "")
 
     # =========================
     # UBICACIONES
     # =========================
-    data_ubi = hoja_ubicaciones.get_all_records()
+    df_ubi = leer_ubicaciones(hoja_ubicaciones)
 
-    df_ubi = pd.DataFrame(data_ubi)
+    if df_ubi.empty:
+        st.error("❌ La hoja ubicaciones está vacía.")
+        return
 
-    df_ubi.columns = (
-        df_ubi.columns
-        .str.strip()
-        .str.upper()
-    )
+    columnas_requeridas = [
+        "DEPARTAMENTO",
+        "PROVINCIA",
+        "SUPERVISOR A CARGO FINAL",
+        "DNI FINAL",
+        "COORDINADOR FINAL",
+        "DNI FINAL.1"
+    ]
 
-    # =========================
-    # DEPARTAMENTOS
-    # =========================
+    faltantes = [
+        col for col in columnas_requeridas
+        if col not in df_ubi.columns
+    ]
+
+    if faltantes:
+        st.error(f"❌ Faltan columnas en ubicaciones: {faltantes}")
+        st.write("Columnas detectadas:", list(df_ubi.columns))
+        return
+
     departamentos = sorted(
         df_ubi["DEPARTAMENTO"]
+        .replace("", pd.NA)
         .dropna()
         .unique()
     )
@@ -96,19 +129,16 @@ def mostrar_formulario(
         [""] + departamentos
     )
 
-    # =========================
-    # PROVINCIAS
-    # =========================
     provincias = []
 
     if departamento:
-
         df_filtrado = df_ubi[
             df_ubi["DEPARTAMENTO"] == departamento
         ]
 
         provincias = sorted(
             df_filtrado["PROVINCIA"]
+            .replace("", pd.NA)
             .dropna()
             .unique()
         )
@@ -118,32 +148,25 @@ def mostrar_formulario(
         [""] + provincias
     )
 
-    # =========================
-    # FILTRO PROVINCIA
-    # =========================
     df_provincia = pd.DataFrame()
 
     if provincia:
-
         df_provincia = df_ubi[
             df_ubi["PROVINCIA"] == provincia
         ]
 
-    # ==================================================
-    # COORDINADOR
-    # ==================================================
+    # =========================
+    # COORDINADOR PRIMERO
+    # =========================
     coordinador = ""
-
     dni_coordinador = ""
 
     coordinadores = []
 
     if not df_provincia.empty:
-
         coordinadores = sorted(
-            df_provincia[
-                "COORDINADOR FINAL"
-            ]
+            df_provincia["COORDINADOR FINAL"]
+            .replace("", pd.NA)
             .dropna()
             .astype(str)
             .unique()
@@ -154,24 +177,15 @@ def mostrar_formulario(
         [""] + coordinadores
     )
 
-    # =========================
-    # DNI COORDINADOR
-    # =========================
     if coordinador:
-
         fila_coord = df_provincia[
-            df_provincia[
-                "COORDINADOR FINAL"
-            ] == coordinador
+            df_provincia["COORDINADOR FINAL"] == coordinador
         ]
 
         if not fila_coord.empty:
-
             dni_coordinador = str(
-                fila_coord.iloc[0][
-                    "DNI COORDINADOR"
-                ]
-            )
+                fila_coord.iloc[0]["DNI FINAL.1"]
+            ).replace(".0", "").strip()
 
     st.text_input(
         "DNI COORDINADOR",
@@ -179,21 +193,18 @@ def mostrar_formulario(
         disabled=True
     )
 
-    # ==================================================
-    # SUPERVISOR
-    # ==================================================
+    # =========================
+    # SUPERVISOR DESPUÉS
+    # =========================
     supervisor = ""
-
     dni_supervisor = ""
 
     supervisores = []
 
     if not df_provincia.empty:
-
         supervisores = sorted(
-            df_provincia[
-                "SUPERVISOR A CARGO FINAL"
-            ]
+            df_provincia["SUPERVISOR A CARGO FINAL"]
+            .replace("", pd.NA)
             .dropna()
             .astype(str)
             .unique()
@@ -204,24 +215,15 @@ def mostrar_formulario(
         [""] + supervisores
     )
 
-    # =========================
-    # DNI SUPERVISOR
-    # =========================
     if supervisor:
-
         fila_supervisor = df_provincia[
-            df_provincia[
-                "SUPERVISOR A CARGO FINAL"
-            ] == supervisor
+            df_provincia["SUPERVISOR A CARGO FINAL"] == supervisor
         ]
 
         if not fila_supervisor.empty:
-
             dni_supervisor = str(
-                fila_supervisor.iloc[0][
-                    "DNI SUPERVISOR"
-                ]
-            )
+                fila_supervisor.iloc[0]["DNI FINAL"]
+            ).replace(".0", "").strip()
 
     st.text_input(
         "DNI SUPERVISOR",
@@ -245,22 +247,15 @@ def mostrar_formulario(
             "KONECTA SAC"
         ]
 
-        # =========================
-        # COLUMNA 1
-        # =========================
         with col1:
 
             if rol == "backoffice":
-
                 razon = st.selectbox(
                     "RAZÓN SOCIAL",
                     [""] + razones
                 )
-
             else:
-
                 razon = razon_usuario
-
                 st.text_input(
                     "RAZÓN SOCIAL",
                     value=razon,
@@ -274,19 +269,12 @@ def mostrar_formulario(
 
             subcanal = st.selectbox(
                 "SUB CANAL",
-                [
-                    "VENTAS INDIRECTAS",
-                    "OUTBOUND"
-                ]
+                ["VENTAS INDIRECTAS", "OUTBOUND"]
             )
 
             region = st.selectbox(
                 "REGIÓN",
-                [
-                    "NORORIENTE",
-                    "SUR",
-                    "CENTRO"
-                ]
+                ["NORORIENTE", "SUR", "CENTRO"]
             )
 
             cargo = st.selectbox(
@@ -299,44 +287,20 @@ def mostrar_formulario(
                 ]
             )
 
-        # =========================
-        # COLUMNA 2
-        # =========================
         with col2:
 
-            nombres = st.text_input(
-                "NOMBRES"
-            )
-
-            apellido_p = st.text_input(
-                "APELLIDO PATERNO"
-            )
-
-            apellido_m = st.text_input(
-                "APELLIDO MATERNO"
-            )
-
-            celular = st.text_input(
-                "CELULAR"
-            )
+            nombres = st.text_input("NOMBRES")
+            apellido_p = st.text_input("APELLIDO PATERNO")
+            apellido_m = st.text_input("APELLIDO MATERNO")
+            celular = st.text_input("CELULAR")
 
             tipo_doc = st.selectbox(
                 "TIPO DE DOC",
-                [
-                    "DNI",
-                    "CPP",
-                    "CEX",
-                    "OTROS"
-                ]
+                ["DNI", "CPP", "CEX", "OTROS"]
             )
 
-            dni = st.text_input(
-                "DNI"
-            )
-
-            correo = st.text_input(
-                "CORREO"
-            )
+            dni = st.text_input("DNI")
+            correo = st.text_input("CORREO")
 
             tipo_contrato = st.selectbox(
                 "TIPO DE CONTRATO",
@@ -355,30 +319,48 @@ def mostrar_formulario(
 
             contrato_firmado = st.selectbox(
                 "CONTRATO FIRMADO",
-                [
-                    "SI",
-                    "NO"
-                ]
+                ["SI", "NO"]
             )
 
-        # =========================
-        # BOTÓN
-        # =========================
-        submit = st.form_submit_button(
-            "Guardar"
-        )
+        submit = st.form_submit_button("Guardar")
 
-        # =========================
-        # GUARDAR
-        # =========================
         if submit:
 
-            dni_limpio = normalizar_dni(
-                dni
-            )
+            if not departamento:
+                st.error("❌ Debes seleccionar DEPARTAMENTO")
+                return
+
+            if not provincia:
+                st.error("❌ Debes seleccionar PROVINCIA")
+                return
+
+            if not coordinador:
+                st.error("❌ Debes seleccionar COORDINADOR")
+                return
+
+            if not supervisor:
+                st.error("❌ Debes seleccionar SUPERVISOR")
+                return
+
+            if not razon:
+                st.error("❌ Debes seleccionar RAZÓN SOCIAL")
+                return
+
+            if not nombres or not apellido_p:
+                st.error("❌ Nombres y Apellido Paterno son obligatorios")
+                return
+
+            if not dni:
+                st.error("❌ DNI obligatorio")
+                return
+
+            dni_limpio = normalizar_dni(dni)
+
+            if not dni_limpio.isdigit() or len(dni_limpio) != 8:
+                st.error("❌ DNI inválido")
+                return
 
             hoja_colaboradores.append_row([
-
                 "",
                 razon,
                 canal,
@@ -386,13 +368,10 @@ def mostrar_formulario(
                 region,
                 departamento,
                 provincia,
-
                 supervisor,
                 dni_supervisor,
-
                 coordinador,
                 dni_coordinador,
-
                 cargo,
                 nombres,
                 apellido_p,
@@ -401,30 +380,18 @@ def mostrar_formulario(
                 tipo_doc,
                 dni_limpio,
                 correo.lower(),
-
                 "ACTIVO",
-
                 tipo_contrato,
-
                 str(fecha_creacion),
-
                 "",
                 "",
-
                 contrato_firmado,
-
                 ahora_peru(),
-
                 "",
-
                 usuario_actual,
-
                 ""
-
             ])
 
             st.session_state["mensaje_ok"] = True
-
             limpiar_form()
-
             st.rerun()
