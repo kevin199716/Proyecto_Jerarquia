@@ -53,6 +53,7 @@ def mostrar_tabla(hoja, razon_usuario=None):
         return None
 
     df = pd.DataFrame(data)
+
     df.columns = df.columns.str.strip().str.upper()
 
     rol = st.session_state.get("rol", "")
@@ -62,6 +63,7 @@ def mostrar_tabla(hoja, razon_usuario=None):
         df = df[df["RAZON SOCIAL"] == razon_usuario]
 
     st.dataframe(df, use_container_width=True)
+
     return df
 
 
@@ -75,6 +77,7 @@ def dar_de_baja(df, hoja, razon_usuario=None):
     df.columns = df.columns.str.strip().str.upper()
 
     rol = st.session_state.get("rol", "")
+
     usuario_actual = st.session_state.get("usuario", "")
 
     # 🔥 ADMIN VE TODO
@@ -87,6 +90,7 @@ def dar_de_baja(df, hoja, razon_usuario=None):
         return
 
     df["DNI"] = df["DNI"].astype(str)
+
     df_filtrado = df[df["DNI"] == dni]
 
     if df_filtrado.empty:
@@ -103,66 +107,106 @@ def dar_de_baja(df, hoja, razon_usuario=None):
         seleccion = st.selectbox(
             "Selecciona registro",
             opciones.index,
-            format_func=lambda i: f"{opciones.loc[i,'RAZON SOCIAL']} - {opciones.loc[i,'CARGO (ROL)']}"
+            format_func=lambda i:
+            f"{opciones.loc[i,'RAZON SOCIAL']} - {opciones.loc[i,'CARGO (ROL)']}"
         )
 
         fila = opciones.loc[seleccion]
+
         index_global = fila["index"]
 
     else:
+
         fila = df_filtrado.iloc[0]
+
         index_global = fila.name
 
-    fecha = st.date_input("Fecha de cese")
-    motivo = st.selectbox("Motivo de baja", MOTIVOS)
+    # =========================
+    # FECHA CESE
+    # =========================
+    hoy = datetime.now().date()
+
+    fecha_minima = hoy - timedelta(days=3)
+
+    fecha = st.date_input(
+        "Fecha de cese",
+        value=hoy,
+        min_value=fecha_minima,
+        max_value=hoy
+    )
+
+    motivo = st.selectbox(
+        "Motivo de baja",
+        MOTIVOS
+    )
 
     # =========================
     # BOTÓN BAJA
     # =========================
     if st.button("Dar de baja"):
 
-        fecha_creacion = limpiar_fecha(fila.get("FECHA DE CREACION USUARIO"))
+        fecha_creacion = limpiar_fecha(
+            fila.get("FECHA DE CREACION USUARIO")
+        )
 
-        # 🔴 VALIDACIÓN 1
+        # 🔴 VALIDACIÓN
         if fecha_creacion and fecha < fecha_creacion:
             st.error("❌ Fecha menor a creación")
             return
 
-        # 🔴 VALIDACIÓN 2
-        hoy = datetime.now().date()
-        max_fecha = hoy + timedelta(days=2)
-
-        if fecha > max_fecha:
-            st.error(f"❌ Máximo permitido: {max_fecha}")
-            return
-
         ahora = ahora_peru()
+
+        # 🔥 FECHA MOV
+        fecha_mov = datetime.now().strftime("%Y-%m-%d")
 
         # =========================
         # ACTUALIZAR
         # =========================
-        hoja.update_cell(index_global+2, df.columns.get_loc("ESTADO")+1, "INACTIVO")
-        hoja.update_cell(index_global+2, df.columns.get_loc("FECHA DE CESE")+1, str(fecha))
-        hoja.update_cell(index_global+2, df.columns.get_loc("MOTIVO")+1, motivo)
+        hoja.update_cell(
+            index_global+2,
+            df.columns.get_loc("ESTADO")+1,
+            "INACTIVO"
+        )
 
-        # 🔥 FECHA MOV
+        hoja.update_cell(
+            index_global+2,
+            df.columns.get_loc("FECHA DE CESE")+1,
+            str(fecha)
+        )
+
+        hoja.update_cell(
+            index_global+2,
+            df.columns.get_loc("MOTIVO")+1,
+            motivo
+        )
+
+        # =========================
+        # FECHA MOV
+        # =========================
         if "FECHA MOV" in df.columns:
+
             hoja.update_cell(
                 index_global+2,
                 df.columns.get_loc("FECHA MOV")+1,
-                str(fecha)
+                fecha_mov
             )
 
-        # 🔥 TIMESTAMP
+        # =========================
+        # FECHA BAJA REGISTRO
+        # =========================
         if "FECHA_BAJA_REGISTRO" in df.columns:
+
             hoja.update_cell(
                 index_global+2,
                 df.columns.get_loc("FECHA_BAJA_REGISTRO")+1,
                 ahora
             )
 
-        # 🔥 USUARIO BAJA
+        # =========================
+        # USUARIO BAJA
+        # =========================
         if "USUARIO_BAJA" in df.columns:
+
             hoja.update_cell(
                 index_global+2,
                 df.columns.get_loc("USUARIO_BAJA")+1,
@@ -180,9 +224,11 @@ def editar_registro(df, hoja, hoja_ubi):
     st.subheader("✏️ Editar registro")
 
     df.columns = df.columns.str.strip().str.upper()
+
     df["DNI"] = df["DNI"].astype(str)
 
     rol = st.session_state.get("rol", "")
+
     razon_usuario = st.session_state.get("razon", "")
 
     if rol != "backoffice":
@@ -206,14 +252,18 @@ def editar_registro(df, hoja, hoja_ubi):
         seleccion = st.selectbox(
             "Selecciona registro",
             opciones.index,
-            format_func=lambda i: f"{opciones.loc[i,'RAZON SOCIAL']} - {opciones.loc[i,'CARGO (ROL)']}"
+            format_func=lambda i:
+            f"{opciones.loc[i,'RAZON SOCIAL']} - {opciones.loc[i,'CARGO (ROL)']}"
         )
 
         fila = opciones.loc[seleccion]
+
         index_global = fila["index"]
 
     else:
+
         fila = df_filtrado.iloc[0]
+
         index_global = fila.name
 
     st.success("Registro seleccionado")
