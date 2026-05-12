@@ -1,6 +1,6 @@
 # =========================================================
 # asistencia.py
-# VERSION PRO - OPTIMIZADA
+# VERSION PRO FINAL - OPTIMIZADA
 # =========================================================
 
 import streamlit as st
@@ -19,6 +19,25 @@ from st_aggrid import (
 # =========================================================
 
 DIAS = [f"DIA_{i}" for i in range(1, 32)]
+
+# =========================================================
+# CACHE
+# =========================================================
+
+@st.cache_data(ttl=60)
+def cargar_colaboradores_cache(hoja):
+
+    data = hoja.get_all_records()
+
+    return pd.DataFrame(data)
+
+
+@st.cache_data(ttl=60)
+def cargar_asistencia_cache(hoja):
+
+    data = hoja.get_all_records()
+
+    return pd.DataFrame(data)
 
 # =========================================================
 # PERIODO
@@ -74,7 +93,7 @@ def generar_asistencia_mes(
 
     periodo = obtener_periodo()
 
-    df_asistencia = leer_sheet_seguro(
+    df_asistencia = cargar_asistencia_cache(
         hoja_asistencia
     )
 
@@ -196,6 +215,8 @@ def generar_asistencia_mes(
             valores
         )
 
+        cargar_asistencia_cache.clear()
+
 # =========================================================
 # SEMANA EDITABLE
 # =========================================================
@@ -270,13 +291,8 @@ def mostrar_asistencia(
     # COLABORADORES
     # =====================================================
 
-    data_colab = (
+    df_colab = cargar_colaboradores_cache(
         hoja_colaboradores
-        .get_all_records()
-    )
-
-    df_colab = pd.DataFrame(
-        data_colab
     )
 
     if df_colab.empty:
@@ -306,7 +322,7 @@ def mostrar_asistencia(
     # LEER ASISTENCIA
     # =====================================================
 
-    df = leer_sheet_seguro(
+    df = cargar_asistencia_cache(
         hoja_asistencia
     )
 
@@ -599,13 +615,8 @@ def mostrar_asistencia(
         "💾 Guardar Asistencia"
     ):
 
-        registros = (
+        df_original = cargar_asistencia_cache(
             hoja_asistencia
-            .get_all_records()
-        )
-
-        df_original = pd.DataFrame(
-            registros
         )
 
         batch_updates = []
@@ -662,10 +673,12 @@ def mostrar_asistencia(
                     + 1
                 )
 
+                letra_col = chr(64 + col_index)
+
                 batch_updates.append({
 
                     "range":
-                        f"{chr(64+col_index)}{row_index}",
+                        f"{letra_col}{row_index}",
 
                     "values":
                         [[valor]]
@@ -676,6 +689,8 @@ def mostrar_asistencia(
             hoja_asistencia.batch_update(
                 batch_updates
             )
+
+            cargar_asistencia_cache.clear()
 
         st.success(
             "✅ Asistencia guardada correctamente"
