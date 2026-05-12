@@ -59,41 +59,40 @@ def leer_ubicaciones(hoja_ubicaciones):
         for h in valores[0]
     ]
 
-    headers_limpios = []
-
-    contador = {}
-
-    for h in headers:
-
-        if h == "":
-            h = "SIN_NOMBRE"
-
-        if h not in contador:
-
-            contador[h] = 0
-
-            headers_limpios.append(h)
-
-        else:
-
-            contador[h] += 1
-
-            headers_limpios.append(
-                f"{h}.{contador[h]}"
-            )
-
     data = valores[1:]
 
     df = pd.DataFrame(
         data,
-        columns=headers_limpios
+        columns=headers
     )
 
-    df.columns = (
-        df.columns
-        .str.strip()
-        .str.upper()
-    )
+    # =========================
+    # RENOMBRAR COLUMNAS
+    # =========================
+    nuevas_columnas = []
+
+    contador_dni = 0
+
+    for col in df.columns:
+
+        if col == "DNI FINAL":
+
+            contador_dni += 1
+
+            if contador_dni == 1:
+                nuevas_columnas.append(
+                    "DNI SUPERVISOR"
+                )
+
+            else:
+                nuevas_columnas.append(
+                    "DNI COORDINADOR"
+                )
+
+        else:
+            nuevas_columnas.append(col)
+
+    df.columns = nuevas_columnas
 
     return df
 
@@ -108,9 +107,6 @@ def mostrar_formulario(
 
     st.subheader("📋 Registro de Vendedores")
 
-    # =========================
-    # MENSAJE OK
-    # =========================
     if st.session_state.get("mensaje_ok"):
 
         st.success("✅ Registrado correctamente")
@@ -129,49 +125,6 @@ def mostrar_formulario(
     df_ubi = leer_ubicaciones(
         hoja_ubicaciones
     )
-
-    if df_ubi.empty:
-
-        st.error(
-            "❌ La hoja ubicaciones está vacía."
-        )
-
-        return
-
-    # =========================
-    # VALIDAR COLUMNAS
-    # =========================
-    columnas_requeridas = [
-
-        "DEPARTAMENTO",
-        "PROVINCIA",
-
-        "SUPERVISOR A CARGO FINAL",
-        "DNI FINAL",
-
-        "COORDINADOR FINAL",
-        "DNI FINAL.1"
-    ]
-
-    faltantes = [
-
-        col for col in columnas_requeridas
-
-        if col not in df_ubi.columns
-    ]
-
-    if faltantes:
-
-        st.error(
-            f"❌ Faltan columnas: {faltantes}"
-        )
-
-        st.write(
-            "Columnas detectadas:",
-            list(df_ubi.columns)
-        )
-
-        return
 
     # =========================
     # DEPARTAMENTOS
@@ -214,7 +167,7 @@ def mostrar_formulario(
     )
 
     # ==================================================
-    # COORDINADORES (LISTA GLOBAL)
+    # COORDINADORES
     # ==================================================
     coordinador = ""
 
@@ -236,9 +189,6 @@ def mostrar_formulario(
         [""] + coordinadores
     )
 
-    # =========================
-    # DNI COORDINADOR
-    # =========================
     if coordinador:
 
         fila_coord = df_ubi[
@@ -251,7 +201,7 @@ def mostrar_formulario(
 
             dni_coordinador = str(
                 fila_coord.iloc[0][
-                    "DNI FINAL.1"
+                    "DNI COORDINADOR"
                 ]
             ).replace(".0", "").strip()
 
@@ -262,7 +212,7 @@ def mostrar_formulario(
     )
 
     # ==================================================
-    # SUPERVISORES (LISTA GLOBAL)
+    # SUPERVISORES
     # ==================================================
     supervisor = ""
 
@@ -284,9 +234,6 @@ def mostrar_formulario(
         [""] + supervisores
     )
 
-    # =========================
-    # DNI SUPERVISOR
-    # =========================
     if supervisor:
 
         fila_supervisor = df_ubi[
@@ -299,7 +246,7 @@ def mostrar_formulario(
 
             dni_supervisor = str(
                 fila_supervisor.iloc[0][
-                    "DNI FINAL"
+                    "DNI SUPERVISOR"
                 ]
             ).replace(".0", "").strip()
 
@@ -326,9 +273,6 @@ def mostrar_formulario(
             "KONECTA SAC"
         ]
 
-        # =========================
-        # COLUMNA 1
-        # =========================
         with col1:
 
             if rol == "backoffice":
@@ -380,26 +324,15 @@ def mostrar_formulario(
                 ]
             )
 
-        # =========================
-        # COLUMNA 2
-        # =========================
         with col2:
 
-            nombres = st.text_input(
-                "NOMBRES"
-            )
+            nombres = st.text_input("NOMBRES")
 
-            apellido_p = st.text_input(
-                "APELLIDO PATERNO"
-            )
+            apellido_p = st.text_input("APELLIDO PATERNO")
 
-            apellido_m = st.text_input(
-                "APELLIDO MATERNO"
-            )
+            apellido_m = st.text_input("APELLIDO MATERNO")
 
-            celular = st.text_input(
-                "CELULAR"
-            )
+            celular = st.text_input("CELULAR")
 
             tipo_doc = st.selectbox(
                 "TIPO DE DOC",
@@ -411,13 +344,9 @@ def mostrar_formulario(
                 ]
             )
 
-            dni = st.text_input(
-                "DNI"
-            )
+            dni = st.text_input("DNI")
 
-            correo = st.text_input(
-                "CORREO"
-            )
+            correo = st.text_input("CORREO")
 
             tipo_contrato = st.selectbox(
                 "TIPO DE CONTRATO",
@@ -442,47 +371,11 @@ def mostrar_formulario(
                 ]
             )
 
-        # =========================
-        # BOTÓN
-        # =========================
         submit = st.form_submit_button(
             "Guardar"
         )
 
-        # =========================
-        # GUARDAR
-        # =========================
         if submit:
-
-            if not departamento:
-                st.error(
-                    "❌ Debes seleccionar DEPARTAMENTO"
-                )
-                return
-
-            if not provincia:
-                st.error(
-                    "❌ Debes seleccionar PROVINCIA"
-                )
-                return
-
-            if not coordinador:
-                st.error(
-                    "❌ Debes seleccionar COORDINADOR"
-                )
-                return
-
-            if not supervisor:
-                st.error(
-                    "❌ Debes seleccionar SUPERVISOR"
-                )
-                return
-
-            if not razon:
-                st.error(
-                    "❌ Debes seleccionar RAZÓN SOCIAL"
-                )
-                return
 
             dni_limpio = normalizar_dni(
                 dni
