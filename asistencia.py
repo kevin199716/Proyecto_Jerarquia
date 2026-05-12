@@ -1,9 +1,10 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
+import calendar
 
 # =========================================
-# COLUMNAS DÍAS
+# CONFIG
 # =========================================
 DIAS = [f"DIA_{i}" for i in range(1, 32)]
 
@@ -17,7 +18,42 @@ def obtener_periodo():
 
 
 # =========================================
-# GENERAR ASISTENCIA
+# LEER ASISTENCIA
+# =========================================
+def leer_asistencia(hoja_asistencia):
+
+    try:
+
+        values = hoja_asistencia.get_all_values()
+
+        if not values:
+            return pd.DataFrame()
+
+        headers = values[0]
+
+        data = values[1:]
+
+        if not headers:
+            return pd.DataFrame()
+
+        df = pd.DataFrame(
+            data,
+            columns=headers
+        )
+
+        return df
+
+    except Exception as e:
+
+        st.error(
+            f"Error leyendo asistencia: {e}"
+        )
+
+        return pd.DataFrame()
+
+
+# =========================================
+# GENERAR MES
 # =========================================
 def generar_asistencia_mes(
     hoja_asistencia,
@@ -26,15 +62,20 @@ def generar_asistencia_mes(
 
     periodo = obtener_periodo()
 
-    registros = hoja_asistencia.get_all_records()
-
-    df_asistencia = pd.DataFrame(registros)
+    df_asistencia = leer_asistencia(
+        hoja_asistencia
+    )
 
     filas_nuevas = []
 
     for _, row in df_colab.iterrows():
 
-        dni = str(row["DNI"]).strip()
+        dni = str(
+            row.get("DNI", "")
+        ).strip()
+
+        if not dni:
+            continue
 
         existe = False
 
@@ -68,7 +109,9 @@ def generar_asistencia_mes(
                     dni,
 
                 "NOMBRE":
-                    f"{row['NOMBRES']} {row['APELLIDO PATERNO']} {row['APELLIDO MATERNO']}",
+                    f"{row.get('NOMBRES','')} "
+                    f"{row.get('APELLIDO PATERNO','')} "
+                    f"{row.get('APELLIDO MATERNO','')}",
 
                 "SUPERVISOR":
                     row.get(
@@ -124,6 +167,9 @@ def generar_asistencia_mes(
                     )
             }
 
+            # =========================
+            # DÍAS VACÍOS
+            # =========================
             for dia in DIAS:
 
                 fila[dia] = ""
@@ -158,7 +204,10 @@ def bloquear_dias(row):
     ).upper()
 
     fecha_cese = str(
-        row.get("FECHA_DE_CESE", "")
+        row.get(
+            "FECHA_DE_CESE",
+            ""
+        )
     ).strip()
 
     bloqueados = []
@@ -170,9 +219,11 @@ def bloquear_dias(row):
 
         try:
 
-            dia_cese = int(
-                fecha_cese.split("-")[2]
+            fecha = pd.to_datetime(
+                fecha_cese
             )
+
+            dia_cese = fecha.day
 
             for d in range(
                 dia_cese + 1,
@@ -190,7 +241,25 @@ def bloquear_dias(row):
 
 
 # =========================================
-# MOSTRAR ASISTENCIA
+# ESTILOS
+# =========================================
+def colorear_asistencia(val):
+
+    val = str(val).upper()
+
+    if val == "A":
+
+        return "background-color:#d4edda;color:black"
+
+    elif val == "F":
+
+        return "background-color:#f8d7da;color:black"
+
+    return ""
+
+
+# =========================================
+# MOSTRAR
 # =========================================
 def mostrar_asistencia(
     hoja_asistencia,
@@ -238,19 +307,14 @@ def mostrar_asistencia(
     # =========================================
     # LEER ASISTENCIA
     # =========================================
-    registros = (
+    df = leer_asistencia(
         hoja_asistencia
-        .get_all_records()
-    )
-
-    df = pd.DataFrame(
-        registros
     )
 
     if df.empty:
 
         st.warning(
-            "No hay asistencia"
+            "No hay registros"
         )
 
         return
@@ -260,6 +324,106 @@ def mostrar_asistencia(
     df = df[
         df["PERIODO"] == periodo
     ]
+
+    # =========================================
+    # MÉTRICAS
+    # =========================================
+    total = len(df)
+
+    activos = len(
+        df[
+            df["ESTADO"]
+            == "ACTIVO"
+        ]
+    )
+
+    inactivos = len(
+        df[
+            df["ESTADO"]
+            == "INACTIVO"
+        ]
+    )
+
+    c1, c2, c3 = st.columns(3)
+
+    c1.metric(
+        "👥 Total",
+        total
+    )
+
+    c2.metric(
+        "✅ Activos",
+        activos
+    )
+
+    c3.metric(
+        "❌ Inactivos",
+        inactivos
+    )
+
+    st.divider()
+
+    # =========================================
+    # FILTROS
+    # =========================================
+    f1, f2, f3 = st.columns(3)
+
+    supervisores = sorted(
+        df["SUPERVISOR"]
+        .dropna()
+        .unique()
+    )
+
+    coordinadores = sorted(
+        df["COORDINADOR"]
+        .dropna()
+        .unique()
+    )
+
+    provincias = sorted(
+        df["PROVINCIA"]
+        .dropna()
+        .unique()
+    )
+
+    supervisor_sel = f1.selectbox(
+        "Supervisor",
+        ["TODOS"] + list(supervisores)
+    )
+
+    coordinador_sel = f2.selectbox(
+        "Coordinador",
+        ["TODOS"] + list(coordinadores)
+    )
+
+    provincia_sel = f3.selectbox(
+        "Provincia",
+        ["TODOS"] + list(provincias)
+    )
+
+    # =========================================
+    # FILTROS
+    # =========================================
+    if supervisor_sel != "TODOS":
+
+        df = df[
+            df["SUPERVISOR"]
+            == supervisor_sel
+        ]
+
+    if coordinador_sel != "TODOS":
+
+        df = df[
+            df["COORDINADOR"]
+            == coordinador_sel
+        ]
+
+    if provincia_sel != "TODOS":
+
+        df = df[
+            df["PROVINCIA"]
+            == provincia_sel
+        ]
 
     # =========================================
     # COLUMNAS
@@ -276,7 +440,8 @@ def mostrar_asistencia(
     ]
 
     columnas = (
-        columnas_fijas + DIAS
+        columnas_fijas
+        + DIAS
     )
 
     df_view = df[
@@ -284,13 +449,15 @@ def mostrar_asistencia(
     ].copy()
 
     # =========================================
-    # EDITOR
+    # TABLA
     # =========================================
     edited_df = st.data_editor(
 
         df_view,
 
         use_container_width=True,
+
+        height=600,
 
         num_rows="fixed",
 
@@ -304,6 +471,11 @@ def mostrar_asistencia(
         "💾 Guardar Asistencia"
     ):
 
+        registros = (
+            hoja_asistencia
+            .get_all_records()
+        )
+
         df_original = pd.DataFrame(
             registros
         )
@@ -315,12 +487,15 @@ def mostrar_asistencia(
             ).strip()
 
             fila_sheet = df_original[
+
                 (
                     df_original["DNI"]
                     .astype(str)
                     == dni
                 )
+
                 &
+
                 (
                     df_original["PERIODO"]
                     == periodo
@@ -368,5 +543,5 @@ def mostrar_asistencia(
                 )
 
         st.success(
-            "✅ Asistencia guardada"
+            "✅ Asistencia guardada correctamente"
         )
