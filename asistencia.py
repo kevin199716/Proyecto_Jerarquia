@@ -54,7 +54,7 @@ def ahora_peru():
 
 
 # =====================================================
-# GENERAR MES
+# GENERAR ASISTENCIA DEL MES
 # =====================================================
 
 def generar_asistencia_mes(
@@ -100,7 +100,10 @@ def generar_asistencia_mes(
     ]
 
     for dia in range(1, dias_mes + 1):
-        columnas.append(f"DIA_{dia}")
+
+        columnas.append(
+            f"DIA_{dia}"
+        )
 
     columnas.extend([
         "USUARIO_REGISTRO",
@@ -112,33 +115,85 @@ def generar_asistencia_mes(
     for _, row in df_colab.iterrows():
 
         fila = [
+
             periodo,
-            str(row.get("DNI", "")),
-            f"{row.get('NOMBRES','')} {row.get('APELLIDO PATERNO','')} {row.get('APELLIDO MATERNO','')}",
-            row.get("SUPERVISOR A CARGO", ""),
-            row.get("COORDINADOR", ""),
-            row.get("DEPARTAMENTO", ""),
-            row.get("PROVINCIA", ""),
-            row.get("ESTADO", ""),
-            row.get("FECHA DE CREACION USUARIO", ""),
-            row.get("FECHA DE CESE", "")
+
+            str(
+                row.get("DNI", "")
+            ),
+
+            f"{row.get('NOMBRES','')} "
+            f"{row.get('APELLIDO PATERNO','')} "
+            f"{row.get('APELLIDO MATERNO','')}",
+
+            row.get(
+                "SUPERVISOR A CARGO",
+                ""
+            ),
+
+            row.get(
+                "COORDINADOR",
+                ""
+            ),
+
+            row.get(
+                "DEPARTAMENTO",
+                ""
+            ),
+
+            row.get(
+                "PROVINCIA",
+                ""
+            ),
+
+            row.get(
+                "ESTADO",
+                ""
+            ),
+
+            row.get(
+                "FECHA DE CREACION USUARIO",
+                ""
+            ),
+
+            row.get(
+                "FECHA DE CESE",
+                ""
+            )
         ]
 
         for _ in range(dias_mes):
+
             fila.append("")
 
         fila.extend([
-            st.session_state.get("usuario", ""),
-            ahora_peru().strftime("%Y-%m-%d %H:%M:%S")
+
+            st.session_state.get(
+                "usuario",
+                ""
+            ),
+
+            ahora_peru().strftime(
+                "%Y-%m-%d %H:%M:%S"
+            )
+
         ])
 
         valores.append(fila)
 
-    if len(hoja_asistencia.get_all_values()) == 0:
-        hoja_asistencia.append_row(columnas)
+    if len(
+        hoja_asistencia.get_all_values()
+    ) == 0:
+
+        hoja_asistencia.append_row(
+            columnas
+        )
 
     if valores:
-        hoja_asistencia.append_rows(valores)
+
+        hoja_asistencia.append_rows(
+            valores
+        )
 
 
 # =====================================================
@@ -150,7 +205,20 @@ def mostrar_asistencia(
     hoja_colaboradores
 ):
 
-    st.markdown("## 🗓️ Control de Asistencia")
+    st.markdown("""
+    <style>
+
+    .stDataFrame {
+        border-radius: 12px;
+        border: 1px solid #EAEAEA;
+    }
+
+    </style>
+    """, unsafe_allow_html=True)
+
+    st.markdown(
+        "## 🗓️ Control de Asistencia"
+    )
 
     # =================================================
     # CARGA RAPIDA
@@ -170,6 +238,7 @@ def mostrar_asistencia(
     )
 
     if df.empty:
+
         st.warning("Sin datos")
         return
 
@@ -180,23 +249,36 @@ def mostrar_asistencia(
     total = len(df)
 
     activos = len(
-        df[df["ESTADO"] == "ACTIVO"]
+        df[
+            df["ESTADO"] == "ACTIVO"
+        ]
     )
 
     inactivos = len(
-        df[df["ESTADO"] == "INACTIVO"]
+        df[
+            df["ESTADO"] == "INACTIVO"
+        ]
     )
 
     c1, c2, c3 = st.columns(3)
 
     with c1:
-        st.metric("👥 HC TOTAL", total)
+        st.metric(
+            "👥 HC TOTAL",
+            total
+        )
 
     with c2:
-        st.metric("✅ ACTIVOS", activos)
+        st.metric(
+            "✅ ACTIVOS",
+            activos
+        )
 
     with c3:
-        st.metric("❌ INACTIVOS", inactivos)
+        st.metric(
+            "❌ INACTIVOS",
+            inactivos
+        )
 
     st.divider()
 
@@ -206,12 +288,24 @@ def mostrar_asistencia(
 
     col1, col2 = st.columns(2)
 
-    supervisores = ["TODOS"] + sorted(
-        df["SUPERVISOR"].dropna().astype(str).unique()
+    supervisores = (
+        ["TODOS"] +
+        sorted(
+            df["SUPERVISOR"]
+            .dropna()
+            .astype(str)
+            .unique()
+        )
     )
 
-    coordinadores = ["TODOS"] + sorted(
-        df["COORDINADOR"].dropna().astype(str).unique()
+    coordinadores = (
+        ["TODOS"] +
+        sorted(
+            df["COORDINADOR"]
+            .dropna()
+            .astype(str)
+            .unique()
+        )
     )
 
     with col1:
@@ -231,39 +325,48 @@ def mostrar_asistencia(
     if filtro_supervisor != "TODOS":
 
         df = df[
-            df["SUPERVISOR"] == filtro_supervisor
+            df["SUPERVISOR"]
+            == filtro_supervisor
         ]
 
     if filtro_coord != "TODOS":
 
         df = df[
-            df["COORDINADOR"] == filtro_coord
+            df["COORDINADOR"]
+            == filtro_coord
         ]
 
     # =================================================
-    # SOLO SEMANA ACTUAL
+    # SEMANA EDITABLE
     # =================================================
 
     hoy = ahora_peru()
 
     dia_actual = hoy.day
 
-    inicio_semana = dia_actual - hoy.weekday()
+    inicio_semana = (
+        dia_actual - hoy.weekday()
+    )
 
     columnas_editables = []
 
-    for i in range(inicio_semana, dia_actual + 1):
+    for i in range(
+        inicio_semana,
+        dia_actual + 1
+    ):
 
         if i > 0:
+
             columnas_editables.append(
                 f"DIA_{i}"
             )
 
     # =================================================
-    # CABECERAS
+    # COLUMNAS
     # =================================================
 
     columnas_base = [
+
         "SUPERVISOR",
         "COORDINADOR",
         "DEPARTAMENTO",
@@ -278,28 +381,35 @@ def mostrar_asistencia(
         columnas_editables
     )
 
-    df_view = df[columnas_mostrar].copy()
+    df_view = df[
+        columnas_mostrar
+    ].copy()
 
     # =================================================
-    # INACTIVOS BLOQUEADOS
+    # BLOQUEAR INACTIVOS
     # =================================================
 
     for col in columnas_editables:
 
         df_view.loc[
-            df_view["ESTADO"] == "INACTIVO",
+            df_view["ESTADO"]
+            == "INACTIVO",
             col
         ] = ""
 
     # =================================================
-    # ESTILO
+    # INFO
     # =================================================
 
     st.info(
-        "Solo editable semana actual | "
-        "A = Asistencia | "
-        "F = Falta"
+        "Solo editable semana actual "
+        "| A = Asistencia "
+        "| F = Falta"
     )
+
+    # =================================================
+    # CONFIG COLUMNAS
+    # =================================================
 
     config = {}
 
@@ -307,16 +417,30 @@ def mostrar_asistencia(
 
         config[col] = st.column_config.SelectboxColumn(
             col,
-            options=["", "A", "F"],
+            options=[
+                "",
+                "A",
+                "F"
+            ],
             width="small"
         )
 
+    # =================================================
+    # TABLA
+    # =================================================
+
     edited_df = st.data_editor(
+
         df_view,
+
         use_container_width=True,
+
         hide_index=True,
+
         height=550,
+
         disabled=[
+
             "SUPERVISOR",
             "COORDINADOR",
             "DEPARTAMENTO",
@@ -325,6 +449,7 @@ def mostrar_asistencia(
             "NOMBRE",
             "ESTADO"
         ],
+
         column_config=config
     )
 
@@ -333,36 +458,49 @@ def mostrar_asistencia(
     # =================================================
 
     if st.button(
-        "💾 Guardar Asistencia",
-        use_container_width=False
+        "💾 Guardar Asistencia"
     ):
 
-        registros = hoja_asistencia.get_all_records()
+        registros = (
+            hoja_asistencia
+            .get_all_records()
+        )
 
-        df_real = pd.DataFrame(registros)
+        df_real = pd.DataFrame(
+            registros
+        )
 
-        for idx, row in edited_df.iterrows():
+        for _, row in edited_df.iterrows():
 
-            dni = str(row["DNI"])
+            dni = str(
+                row["DNI"]
+            )
 
             mask = (
-                df_real["DNI"].astype(str)
+                df_real["DNI"]
+                .astype(str)
                 == dni
             )
 
-            index_real = df_real[mask].index
+            index_real = (
+                df_real[mask]
+                .index
+            )
 
             if len(index_real) == 0:
                 continue
 
-            fila_sheet = int(index_real[0]) + 2
+            fila_sheet = (
+                int(index_real[0]) + 2
+            )
 
             for col in columnas_editables:
 
                 valor = row[col]
 
                 col_sheet = (
-                    df_real.columns.get_loc(col)
+                    df_real.columns
+                    .get_loc(col)
                     + 1
                 )
 
@@ -372,6 +510,10 @@ def mostrar_asistencia(
                     valor
                 )
 
+        cargar_asistencia_cache.clear()
+
         st.success(
             "✅ Asistencia guardada correctamente"
         )
+
+        st.rerun()
