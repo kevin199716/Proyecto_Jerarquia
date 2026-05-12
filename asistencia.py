@@ -17,7 +17,11 @@ def cargar_colaboradores_cache(_hoja):
 
     df = pd.DataFrame(data)
 
-    df.columns = df.columns.str.strip().str.upper()
+    df.columns = (
+        df.columns
+        .str.strip()
+        .str.upper()
+    )
 
     return df
 
@@ -34,7 +38,11 @@ def cargar_asistencia_cache(_hoja):
 
         df = pd.DataFrame(data)
 
-        df.columns = df.columns.str.strip().str.upper()
+        df.columns = (
+            df.columns
+            .str.strip()
+            .str.upper()
+        )
 
         return df
 
@@ -46,15 +54,20 @@ def cargar_asistencia_cache(_hoja):
 # HORA PERU
 # =====================================================
 
-zona_peru = pytz.timezone("America/Lima")
+zona_peru = pytz.timezone(
+    "America/Lima"
+)
 
 
 def ahora_peru():
-    return datetime.now(zona_peru)
+
+    return datetime.now(
+        zona_peru
+    )
 
 
 # =====================================================
-# GENERAR ASISTENCIA DEL MES
+# GENERAR MES
 # =====================================================
 
 def generar_asistencia_mes(
@@ -64,10 +77,14 @@ def generar_asistencia_mes(
 
     hoy = ahora_peru()
 
-    periodo = hoy.strftime("%Y-%m")
+    periodo = hoy.strftime(
+        "%Y-%m"
+    )
 
-    registros = cargar_asistencia_cache(
-        hoja_asistencia
+    registros = (
+        cargar_asistencia_cache(
+            hoja_asistencia
+        )
     )
 
     if not registros.empty:
@@ -75,7 +92,8 @@ def generar_asistencia_mes(
         if "PERIODO" in registros.columns:
 
             existe = registros[
-                registros["PERIODO"] == periodo
+                registros["PERIODO"]
+                == periodo
             ]
 
             if len(existe) > 0:
@@ -87,6 +105,7 @@ def generar_asistencia_mes(
     )[1]
 
     columnas = [
+
         "PERIODO",
         "DNI",
         "NOMBRE",
@@ -99,13 +118,17 @@ def generar_asistencia_mes(
         "FECHA_DE_CESE"
     ]
 
-    for dia in range(1, dias_mes + 1):
+    for dia in range(
+        1,
+        dias_mes + 1
+    ):
 
         columnas.append(
             f"DIA_{dia}"
         )
 
     columnas.extend([
+
         "USUARIO_REGISTRO",
         "FECHA_REGISTRO"
     ])
@@ -119,7 +142,10 @@ def generar_asistencia_mes(
             periodo,
 
             str(
-                row.get("DNI", "")
+                row.get(
+                    "DNI",
+                    ""
+                )
             ),
 
             f"{row.get('NOMBRES','')} "
@@ -176,13 +202,15 @@ def generar_asistencia_mes(
             ahora_peru().strftime(
                 "%Y-%m-%d %H:%M:%S"
             )
-
         ])
 
-        valores.append(fila)
+        valores.append(
+            fila
+        )
 
     if len(
-        hoja_asistencia.get_all_values()
+        hoja_asistencia
+        .get_all_values()
     ) == 0:
 
         hoja_asistencia.append_row(
@@ -205,7 +233,12 @@ def mostrar_asistencia(
     hoja_colaboradores
 ):
 
+    # =================================================
+    # ESTILO
+    # =================================================
+
     st.markdown("""
+
     <style>
 
     .stDataFrame {
@@ -213,7 +246,16 @@ def mostrar_asistencia(
         border: 1px solid #EAEAEA;
     }
 
+    div[data-testid="stMetric"] {
+        background: #FFFFFF;
+        border-radius: 14px;
+        padding: 12px;
+        border-left: 6px solid #8B5CF6;
+        box-shadow: 0px 2px 10px rgba(0,0,0,0.05);
+    }
+
     </style>
+
     """, unsafe_allow_html=True)
 
     st.markdown(
@@ -224,8 +266,10 @@ def mostrar_asistencia(
     # CARGA RAPIDA
     # =================================================
 
-    df_colab = cargar_colaboradores_cache(
-        hoja_colaboradores
+    df_colab = (
+        cargar_colaboradores_cache(
+            hoja_colaboradores
+        )
     )
 
     generar_asistencia_mes(
@@ -233,13 +277,18 @@ def mostrar_asistencia(
         df_colab
     )
 
-    df = cargar_asistencia_cache(
-        hoja_asistencia
+    df = (
+        cargar_asistencia_cache(
+            hoja_asistencia
+        )
     )
 
     if df.empty:
 
-        st.warning("Sin datos")
+        st.warning(
+            "Sin datos"
+        )
+
         return
 
     # =================================================
@@ -250,31 +299,36 @@ def mostrar_asistencia(
 
     activos = len(
         df[
-            df["ESTADO"] == "ACTIVO"
+            df["ESTADO"]
+            == "ACTIVO"
         ]
     )
 
     inactivos = len(
         df[
-            df["ESTADO"] == "INACTIVO"
+            df["ESTADO"]
+            == "INACTIVO"
         ]
     )
 
     c1, c2, c3 = st.columns(3)
 
     with c1:
+
         st.metric(
             "👥 HC TOTAL",
             total
         )
 
     with c2:
+
         st.metric(
             "✅ ACTIVOS",
             activos
         )
 
     with c3:
+
         st.metric(
             "❌ INACTIVOS",
             inactivos
@@ -415,14 +469,19 @@ def mostrar_asistencia(
 
     for col in columnas_editables:
 
-        config[col] = st.column_config.SelectboxColumn(
-            col,
-            options=[
-                "",
-                "A",
-                "F"
-            ],
-            width="small"
+        config[col] = (
+            st.column_config.SelectboxColumn(
+
+                col,
+
+                options=[
+                    "",
+                    "A",
+                    "F"
+                ],
+
+                width="small"
+            )
         )
 
     # =================================================
@@ -454,66 +513,94 @@ def mostrar_asistencia(
     )
 
     # =================================================
-    # GUARDAR
+    # GUARDAR RAPIDO
     # =================================================
 
     if st.button(
         "💾 Guardar Asistencia"
     ):
 
-        registros = (
-            hoja_asistencia
-            .get_all_records()
-        )
+        with st.spinner(
+            "Guardando asistencia..."
+        ):
 
-        df_real = pd.DataFrame(
-            registros
-        )
-
-        for _, row in edited_df.iterrows():
-
-            dni = str(
-                row["DNI"]
+            registros = (
+                hoja_asistencia
+                .get_all_records()
             )
 
-            mask = (
-                df_real["DNI"]
-                .astype(str)
-                == dni
+            df_real = pd.DataFrame(
+                registros
             )
 
-            index_real = (
-                df_real[mask]
-                .index
+            df_real.columns = (
+                df_real.columns
+                .str.strip()
+                .str.upper()
             )
 
-            if len(index_real) == 0:
-                continue
-
-            fila_sheet = (
-                int(index_real[0]) + 2
+            columnas_sheet = list(
+                df_real.columns
             )
 
-            for col in columnas_editables:
+            for _, row in edited_df.iterrows():
 
-                valor = row[col]
+                dni = str(
+                    row["DNI"]
+                ).strip()
 
-                col_sheet = (
-                    df_real.columns
-                    .get_loc(col)
-                    + 1
+                mask = (
+
+                    df_real["DNI"]
+                    .astype(str)
+                    .str.strip()
+
+                    == dni
                 )
 
-                hoja_asistencia.update_cell(
-                    fila_sheet,
-                    col_sheet,
-                    valor
+                index_real = (
+                    df_real[mask]
+                    .index
                 )
 
-        cargar_asistencia_cache.clear()
+                if len(index_real) == 0:
+                    continue
 
-        st.success(
-            "✅ Asistencia guardada correctamente"
-        )
+                fila_real = index_real[0]
 
-        st.rerun()
+                for col in columnas_editables:
+
+                    valor = row[col]
+
+                    if pd.isna(valor):
+                        valor = ""
+
+                    df_real.loc[
+                        fila_real,
+                        col
+                    ] = valor
+
+            df_real = (
+                df_real.fillna("")
+            )
+
+            hoja_asistencia.update(
+
+                "A1",
+
+                [
+                    columnas_sheet
+                ] +
+
+                df_real
+                .values
+                .tolist()
+            )
+
+            cargar_asistencia_cache.clear()
+
+            st.success(
+                "✅ Asistencia guardada correctamente"
+            )
+
+            st.rerun()
