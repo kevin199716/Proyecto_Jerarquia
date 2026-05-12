@@ -1,11 +1,12 @@
 # =========================================================
 # asistencia.py
-# VERSION PRO - ASISTENCIA MODERNA
+# VERSION PRO - OPTIMIZADA
 # =========================================================
 
 import streamlit as st
 import pandas as pd
 from datetime import datetime, timedelta
+
 from st_aggrid import (
     AgGrid,
     GridOptionsBuilder,
@@ -19,7 +20,6 @@ from st_aggrid import (
 
 DIAS = [f"DIA_{i}" for i in range(1, 32)]
 
-
 # =========================================================
 # PERIODO
 # =========================================================
@@ -27,7 +27,6 @@ DIAS = [f"DIA_{i}" for i in range(1, 32)]
 def obtener_periodo():
 
     return datetime.now().strftime("%Y-%m")
-
 
 # =========================================================
 # LEER HOJA
@@ -64,9 +63,8 @@ def leer_sheet_seguro(hoja):
 
         return pd.DataFrame()
 
-
 # =========================================================
-# GENERAR ASISTENCIA
+# GENERAR MES
 # =========================================================
 
 def generar_asistencia_mes(
@@ -198,7 +196,6 @@ def generar_asistencia_mes(
             valores
         )
 
-
 # =========================================================
 # SEMANA EDITABLE
 # =========================================================
@@ -223,7 +220,6 @@ def dias_editables():
 
     return editable
 
-
 # =========================================================
 # MOSTRAR
 # =========================================================
@@ -234,7 +230,7 @@ def mostrar_asistencia(
 ):
 
     # =====================================================
-    # CSS
+    # ESTILOS
     # =====================================================
 
     st.markdown("""
@@ -242,22 +238,24 @@ def mostrar_asistencia(
     <style>
 
     .main {
-
-        background-color:#f6f8fb;
+        background-color:#f7f9fc;
     }
 
     .block-container {
-
         padding-top:1rem;
     }
 
     div[data-testid="stMetric"] {
 
         background:white;
+
         padding:15px;
-        border-radius:12px;
+
+        border-radius:14px;
+
         box-shadow:0 2px 10px rgba(0,0,0,0.05);
-        border-left:5px solid #6c5ce7;
+
+        border-left:6px solid #6c5ce7;
     }
 
     </style>
@@ -437,6 +435,12 @@ def mostrar_asistencia(
     ].copy()
 
     # =====================================================
+    # LIMPIAR NULOS
+    # =====================================================
+
+    df_view = df_view.fillna("")
+
+    # =====================================================
     # DIAS EDITABLES
     # =====================================================
 
@@ -448,6 +452,19 @@ def mostrar_asistencia(
 
     gb = GridOptionsBuilder.from_dataframe(
         df_view
+    )
+
+    # =====================================================
+    # DEFAULT COLUMN
+    # =====================================================
+
+    gb.configure_default_column(
+
+        sortable=True,
+
+        filter=True,
+
+        resizable=True
     )
 
     # =====================================================
@@ -532,11 +549,11 @@ def mostrar_asistencia(
 
     gb.configure_grid_options(
 
-        rowHeight=35,
+        rowHeight=38,
 
-        headerHeight=45,
+        headerHeight=42,
 
-        domLayout='normal'
+        domLayout='autoHeight'
     )
 
     gridOptions = gb.build()
@@ -555,15 +572,21 @@ def mostrar_asistencia(
 
         gridOptions=gridOptions,
 
-        update_mode=GridUpdateMode.VALUE_CHANGED,
+        update_mode=GridUpdateMode.MANUAL,
+
+        data_return_mode="AS_INPUT",
 
         fit_columns_on_grid_load=False,
 
-        height=650,
-
         allow_unsafe_jscode=True,
 
-        theme="streamlit"
+        enable_enterprise_modules=False,
+
+        reload_data=False,
+
+        height=650,
+
+        theme="balham"
     )
 
     edited_df = response["data"]
