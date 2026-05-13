@@ -34,7 +34,7 @@ def generar_asistencia_mes(
     valores = hoja_asistencia.get_all_values()
 
     # ====================================
-    # HOJA VACIA
+    # CREAR CABECERA
     # ====================================
 
     if not valores:
@@ -90,7 +90,7 @@ def generar_asistencia_mes(
         return
 
     # ====================================
-    # VALIDAR SI YA EXISTE EL MES
+    # VALIDAR SI YA EXISTE MES
     # ====================================
 
     if not df_existente.empty:
@@ -213,6 +213,14 @@ def mostrar_asistencia(
     st.markdown("## 🗓️ Control de Asistencia")
 
     # ====================================
+    # SESSION
+    # ====================================
+
+    if "grid_key" not in st.session_state:
+
+        st.session_state.grid_key = 0
+
+    # ====================================
     # COLABORADORES
     # ====================================
 
@@ -252,16 +260,16 @@ def mostrar_asistencia(
 
     data = valores[1:]
 
-    df = pd.DataFrame(
+    df_total = pd.DataFrame(
         data,
         columns=headers
     )
 
     # ====================================
-    # VALIDACION
+    # VALIDAR
     # ====================================
 
-    if "PERIODO" not in df.columns:
+    if "PERIODO" not in df_total.columns:
 
         st.error(
             "La hoja Asistencia tiene estructura incorrecta"
@@ -269,16 +277,16 @@ def mostrar_asistencia(
         return
 
     # ====================================
-    # FILTRAR MES ACTUAL
+    # PERIODO ACTUAL
     # ====================================
 
     periodo_actual = datetime.now().strftime("%Y-%m")
 
-    df = df[
-        df["PERIODO"]
+    df = df_total[
+        df_total["PERIODO"]
         .astype(str)
         == periodo_actual
-    ]
+    ].copy()
 
     if df.empty:
 
@@ -341,6 +349,10 @@ def mostrar_asistencia(
             filtro_coord
         ]
 
+    # ====================================
+    # DIAS EDITABLES
+    # ====================================
+
     dias_editables = obtener_semana_actual()
 
     st.info(
@@ -348,6 +360,10 @@ def mostrar_asistencia(
         "A = Asistencia | "
         "F = Falta"
     )
+
+    # ====================================
+    # COLUMNAS
+    # ====================================
 
     columnas_base = [
         "SUPERVISOR",
@@ -359,13 +375,10 @@ def mostrar_asistencia(
         "ESTADO"
     ]
 
-    columnas_dias = []
-
-    for dia in range(1, 32):
-
-        columnas_dias.append(
-            f"DIA_{dia}"
-        )
+    columnas_dias = [
+        f"DIA_{dia}"
+        for dia in range(1, 32)
+    ]
 
     columnas_finales = (
         columnas_base +
@@ -378,16 +391,6 @@ def mostrar_asistencia(
     ]
 
     df = df[columnas_existentes]
-
-    # ====================================
-    # OCULTAR PERIODO
-    # ====================================
-
-    if "PERIODO" in df.columns:
-
-        df = df.drop(
-            columns=["PERIODO"]
-        )
 
     # ====================================
     # GRID
@@ -448,15 +451,20 @@ def mostrar_asistencia(
 
     gridOptions["suppressHorizontalScroll"] = False
 
+    # ====================================
+    # GRID RESPONSE
+    # ====================================
+
     grid_response = AgGrid(
         df,
         gridOptions=gridOptions,
-        update_mode=GridUpdateMode.MANUAL,
+        update_mode=GridUpdateMode.VALUE_CHANGED,
         allow_unsafe_jscode=True,
         fit_columns_on_grid_load=False,
         reload_data=False,
         theme="streamlit",
-        height=500
+        height=500,
+        key=f"grid_{st.session_state.grid_key}"
     )
 
     # ====================================
@@ -474,43 +482,48 @@ def mostrar_asistencia(
         nuevo_df = nuevo_df.fillna("")
 
         # ====================================
-        # HISTORICO
+        # RECUPERAR HISTORICO
         # ====================================
 
-        df_historico = pd.DataFrame(
-            data,
-            columns=headers
-        )
-
-        # ====================================
-        # ELIMINAR MES ACTUAL
-        # ====================================
-
-        df_historico = df_historico[
-            df_historico["PERIODO"]
+        df_historico = df_total[
+            df_total["PERIODO"]
             != periodo_actual
-        ]
+        ].copy()
 
         # ====================================
-        # NUEVO MES
+        # RECUPERAR DATA ORIGINAL MES
         # ====================================
 
-        nuevo_df["PERIODO"] = periodo_actual
+        df_mes_original = df_total[
+            df_total["PERIODO"]
+            == periodo_actual
+        ].copy()
 
-        columnas_completas = headers
+        # ====================================
+        # ACTUALIZAR SOLO LO EDITADO
+        # ====================================
 
-        for col in columnas_completas:
+        for _, row in nuevo_df.iterrows():
 
-            if col not in nuevo_df.columns:
+            dni = str(row["DNI"])
 
-                nuevo_df[col] = ""
+            for dia in range(1, 32):
 
-        nuevo_df = nuevo_df[
-            columnas_completas
-        ]
+                col = f"DIA_{dia}"
+
+                valor = row.get(col, "")
+
+                df_mes_original.loc[
+                    df_mes_original["DNI"].astype(str) == dni,
+                    col
+                ] = valor
+
+        # ====================================
+        # UNIR TODO
+        # ====================================
 
         df_final = pd.concat(
-            [df_historico, nuevo_df],
+            [df_historico, df_mes_original],
             ignore_index=True
         )
 
@@ -525,6 +538,14 @@ def mostrar_asistencia(
             df_final.astype(str).values.tolist()
         )
 
+        # ====================================
+        # REFRESH GRID
+        # ====================================
+
+        st.session_state.grid_key += 1
+
         st.success(
             "✅ Asistencia guardada correctamente"
         )
+
+        st.rerun()
