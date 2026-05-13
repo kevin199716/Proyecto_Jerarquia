@@ -1,425 +1,273 @@
-# asistencia.py
+# =========================
+# app_maestra_vendedores.py
+# =========================
 
 import streamlit as st
-import pandas as pd
-import numpy as np
-from datetime import datetime, timedelta
-from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
-from sheets import conectar_google_sheets
+import sys
+import os
 
-# =========================================================
-# CACHE
-# =========================================================
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
-@st.cache_data(ttl=60)
-def cargar_asistencia():
-    hoja = conectar_google_sheets(
-        "maestra_vendedores",
-        "asistencia"
-    )
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
 
-    data = hoja.get_all_records()
+# =========================================
+# IMPORTS
+# =========================================
 
-    if not data:
-        return pd.DataFrame()
+import registro_mod as registro
 
-    df = pd.DataFrame(data)
+from auth import (
+    cargar_usuarios,
+    login
+)
 
-    df.columns = df.columns.str.strip().str.upper()
+from ui_inicio import (
+    mostrar_bienvenida
+)
 
-    return df
+from sheets import (
+    conectar_google_sheets
+)
 
+from formulario import (
+    mostrar_formulario
+)
 
-@st.cache_data(ttl=60)
-def cargar_colaboradores():
+from asistencia import (
+    mostrar_asistencia
+)
 
-    hoja = conectar_google_sheets(
-        "maestra_vendedores",
-        "colaboradores"
-    )
+# =========================================
+# CONFIG
+# =========================================
 
-    data = hoja.get_all_records()
+st.set_page_config(
+    page_title="Sistema de Vendedores",
+    layout="wide"
+)
 
-    if not data:
-        return pd.DataFrame()
+# =========================================
+# LOGIN
+# =========================================
 
-    df = pd.DataFrame(data)
+USUARIOS = cargar_usuarios()
 
-    df.columns = df.columns.str.strip().str.upper()
+if "autenticado" not in st.session_state:
+    st.session_state["autenticado"] = False
 
-    return df
+if not st.session_state["autenticado"]:
 
+    mostrar_bienvenida()
 
-# =========================================================
-# GENERAR MES
-# =========================================================
+    login(USUARIOS)
 
-def generar_asistencia_mes():
+    st.stop()
 
-    hoja_asistencia = conectar_google_sheets(
-        "maestra_vendedores",
-        "asistencia"
-    )
+# =========================================
+# GOOGLE SHEETS
+# =========================================
 
-    df_asistencia = cargar_asistencia()
-    df_colab = cargar_colaboradores()
+hoja_colaboradores = conectar_google_sheets(
+    "maestra_vendedores",
+    "colaboradores"
+)
 
-    hoy = datetime.now()
+hoja_ubicaciones = conectar_google_sheets(
+    "maestra_vendedores",
+    "ubicaciones"
+)
 
-    periodo_actual = hoy.strftime("%Y-%m")
+# =========================================
+# SESSION
+# =========================================
 
-    # =========================================
-    # VALIDAR SI YA EXISTE EL PERIODO
-    # =========================================
+rol = st.session_state.get("rol")
 
-    if not df_asistencia.empty:
+razon = st.session_state.get("razon")
 
-        if "PERIODO" in df_asistencia.columns:
+# =========================================
+# TITLE
+# =========================================
 
-            existe = (
-                df_asistencia["PERIODO"]
-                .astype(str)
-                .eq(periodo_actual)
-                .any()
-            )
-
-            if existe:
-                return
-
-    # =========================================
-    # CREAR NUEVO MES
-    # =========================================
-
-    columnas_base = [
-        "PERIODO",
-        "SUPERVISOR",
-        "COORDINADOR",
-        "DEPARTAMENTO",
-        "PROVINCIA",
-        "DNI",
-        "NOMBRE",
-        "ESTADO"
-    ]
-
-    dias = [f"DIA_{i}" for i in range(1, 32)]
-
-    columnas = columnas_base + dias
-
-    registros = []
-
-    for _, row in df_colab.iterrows():
-
-        registro = {
-            "PERIODO": periodo_actual,
-            "SUPERVISOR": row.get("SUPERVISOR A CARGO", ""),
-            "COORDINADOR": row.get("COORDINADOR", ""),
-            "DEPARTAMENTO": row.get("DEPARTAMENTO", ""),
-            "PROVINCIA": row.get("PROVINCIA", ""),
-            "DNI": str(row.get("DNI", "")),
-            "NOMBRE": (
-                f"{row.get('NOMBRES','')} "
-                f"{row.get('APELLIDO PATERNO','')} "
-                f"{row.get('APELLIDO MATERNO','')}"
-            ).strip(),
-            "ESTADO": row.get("ESTADO", "")
-        }
-
-        for d in dias:
-            registro[d] = ""
-
-        registros.append(registro)
-
-    nuevo_df = pd.DataFrame(registros)
-
-    if df_asistencia.empty:
-
-        hoja_asistencia.update(
-            [columnas] + nuevo_df.values.tolist()
-        )
-
-    else:
-
-        hoja_asistencia.append_rows(
-            nuevo_df.values.tolist()
-        )
-
-
-# =========================================================
-# TABLA
-# =========================================================
-
-def mostrar_asistencia():
-
-    generar_asistencia_mes()
-
-    hoja_asistencia = conectar_google_sheets(
-        "maestra_vendedores",
-        "asistencia"
-    )
-
-    df = cargar_asistencia()
-
-    if df.empty:
-        st.warning("No hay datos")
-        return
-
-    df.columns = df.columns.str.strip().str.upper()
-
-    # =========================================
-    # PERIODO
-    # =========================================
-
-    periodo_actual = datetime.now().strftime("%Y-%m")
-
-    df = df[
-        df["PERIODO"].astype(str) == periodo_actual
-    ]
-
-    # =========================================
-    # FILTROS
-    # =========================================
-
-    st.markdown("## 📅 Control de Asistencia")
-
-    c1, c2, c3 = st.columns(3)
-
-    with c1:
-        st.metric("👥 HC TOTAL", len(df))
-
-    with c2:
-        st.metric(
-            "✅ ACTIVOS",
-            len(df[df["ESTADO"] == "ACTIVO"])
-        )
-
-    with c3:
-        st.metric(
-            "❌ INACTIVOS",
-            len(df[df["ESTADO"] == "INACTIVO"])
-        )
-
-    supervisores = sorted(
-        [
-            str(x)
-            for x in df["SUPERVISOR"]
-            .dropna()
-            .astype(str)
-            .unique()
-        ]
-    )
-
-    coordinadores = sorted(
-        [
-            str(x)
-            for x in df["COORDINADOR"]
-            .dropna()
-            .astype(str)
-            .unique()
-        ]
-    )
-
-    c1, c2 = st.columns(2)
-
-    with c1:
-        supervisor = st.selectbox(
-            "🔍 Supervisor",
-            ["TODOS"] + supervisores
-        )
-
-    with c2:
-        coordinador = st.selectbox(
-            "🔍 Coordinador",
-            ["TODOS"] + coordinadores
-        )
-
-    if supervisor != "TODOS":
-        df = df[
-            df["SUPERVISOR"] == supervisor
-        ]
-
-    if coordinador != "TODOS":
-        df = df[
-            df["COORDINADOR"] == coordinador
-        ]
-
-    # =========================================
-    # SEMANA EDITABLE
-    # =========================================
-
-    hoy = datetime.now()
-
-    inicio_semana = hoy - timedelta(days=hoy.weekday())
-
-    dias_editables = []
-
-    for i in range(7):
-
-        dia = inicio_semana + timedelta(days=i)
-
-        if dia <= hoy:
-
-            dias_editables.append(
-                f"DIA_{dia.day}"
-            )
-
-    st.info(
-        "Solo editable semana actual | "
-        "A = Asistencia | F = Falta"
-    )
-
-    # =========================================
-    # GRID
-    # =========================================
-
-    gb = GridOptionsBuilder.from_dataframe(df)
-
-    gb.configure_default_column(
-        editable=False,
-        filter=True,
-        sortable=True,
-        resizable=True
-    )
-
-    columnas_fijas = [
-        "SUPERVISOR",
-        "COORDINADOR",
-        "DEPARTAMENTO",
-        "PROVINCIA",
-        "DNI",
-        "NOMBRE",
-        "ESTADO"
-    ]
-
-    for col in columnas_fijas:
-
-        gb.configure_column(
-            col,
-            pinned="left",
-            editable=False
-        )
-
-    for col in dias_editables:
-
-        if col in df.columns:
-
-            gb.configure_column(
-                col,
-                editable=True,
-                cellEditor="agSelectCellEditor",
-                cellEditorParams={
-                    "values": ["A", "F"]
-                }
-            )
-
-    # =========================================
-    # COLOR A / F
-    # =========================================
-
-    estilo = """
-    function(params) {
-
-        if(params.value == 'A') {
-            return {
-                'backgroundColor': '#b7e4c7',
-                'color': '#000',
-                'fontWeight': 'bold'
-            }
-        }
-
-        if(params.value == 'F') {
-            return {
-                'backgroundColor': '#ffadad',
-                'color': '#000',
-                'fontWeight': 'bold'
-            }
-        }
-
-    }
+st.markdown(
     """
+    <h1 style='
+        color:#1f2937;
+        font-weight:800;
+        margin-bottom:10px;
+    '>
+    📊 Sistema de Vendedores
+    </h1>
+    """,
+    unsafe_allow_html=True
+)
 
-    for col in dias_editables:
+# =========================================
+# ADMIN
+# =========================================
 
-        gb.configure_column(
-            col,
-            cellStyle=estilo
+if rol == "backoffice":
+
+    tab1, tab2, tab3 = st.tabs(
+        [
+            "Registro",
+            "Bajas",
+            "Asistencia"
+        ]
+    )
+
+    # =====================================
+    # REGISTRO
+    # =====================================
+
+    with tab1:
+
+        mostrar_formulario(
+            hoja_colaboradores,
+            hoja_ubicaciones
         )
 
-    gridOptions = gb.build()
+    # =====================================
+    # TABLA
+    # =====================================
 
-    respuesta = AgGrid(
-        df,
-        gridOptions=gridOptions,
-        height=600,
-        width='100%',
-        update_mode=GridUpdateMode.VALUE_CHANGED,
-        allow_unsafe_jscode=True,
-        fit_columns_on_grid_load=False,
-        reload_data=False
+    df = registro.mostrar_tabla(
+        hoja_colaboradores,
+        razon
     )
 
-    nuevo_df = pd.DataFrame(
-        respuesta["data"]
+    # =====================================
+    # BAJAS
+    # =====================================
+
+    if df is not None:
+
+        with tab2:
+
+            registro.dar_de_baja(
+                df,
+                hoja_colaboradores,
+                razon
+            )
+
+    # =====================================
+    # ASISTENCIA
+    # =====================================
+
+    with tab3:
+
+        mostrar_asistencia()
+
+# =========================================
+# DEALER
+# =========================================
+
+elif rol == "dealer":
+
+    st.subheader(
+        f"📌 Socio: {razon}"
     )
 
-    # =========================================
-    # GUARDAR
-    # =========================================
+    tab1, tab2, tab3 = st.tabs(
+        [
+            "Registro",
+            "Bajas",
+            "Asistencia"
+        ]
+    )
 
-    if st.button("💾 Guardar Asistencia"):
+    # =====================================
+    # REGISTRO
+    # =====================================
 
-        try:
+    with tab1:
 
-            headers = hoja_asistencia.row_values(1)
+        mostrar_formulario(
+            hoja_colaboradores,
+            hoja_ubicaciones
+        )
 
-            dias_columnas = [
-                f"DIA_{i}"
-                for i in range(1, 32)
-            ]
+    # =====================================
+    # TABLA
+    # =====================================
 
-            progreso = st.progress(0)
+    df = registro.mostrar_tabla(
+        hoja_colaboradores,
+        razon
+    )
 
-            total = len(nuevo_df)
+    # =====================================
+    # BAJAS
+    # =====================================
 
-            for idx, fila in nuevo_df.iterrows():
+    if df is not None:
 
-                fila_sheet = idx + 2
+        with tab2:
 
-                for col in dias_columnas:
-
-                    if col in nuevo_df.columns:
-
-                        valor = fila[col]
-
-                        if pd.isna(valor):
-                            valor = ""
-
-                        try:
-
-                            columna_sheet = (
-                                headers.index(col) + 1
-                            )
-
-                            hoja_asistencia.update_cell(
-                                fila_sheet,
-                                columna_sheet,
-                                valor
-                            )
-
-                        except:
-                            pass
-
-                progreso.progress(
-                    (idx + 1) / total
-                )
-
-            st.success(
-                "✅ Asistencia guardada correctamente"
+            registro.dar_de_baja(
+                df,
+                hoja_colaboradores,
+                razon
             )
 
-            st.cache_data.clear()
+    # =====================================
+    # ASISTENCIA
+    # =====================================
 
-        except Exception as e:
+    with tab3:
 
-            st.error(
-                f"Error guardando asistencia: {e}"
+        mostrar_asistencia()
+
+# =========================================
+# EDITOR
+# =========================================
+
+elif rol == "editor":
+
+    st.subheader(
+        "✏️ Modo edición"
+    )
+
+    tab1, tab2 = st.tabs(
+        [
+            "Edición",
+            "Asistencia"
+        ]
+    )
+
+    # =====================================
+    # EDICION
+    # =====================================
+
+    with tab1:
+
+        df = registro.mostrar_tabla(
+            hoja_colaboradores
+        )
+
+        if df is not None:
+
+            registro.editar_registro(
+                df,
+                hoja_colaboradores,
+                hoja_ubicaciones
             )
+
+    # =====================================
+    # ASISTENCIA
+    # =====================================
+
+    with tab2:
+
+        mostrar_asistencia()
+
+# =========================================
+# SIN PERMISOS
+# =========================================
+
+else:
+
+    st.warning(
+        f"Sin permisos para el rol: {rol}"
+    )
