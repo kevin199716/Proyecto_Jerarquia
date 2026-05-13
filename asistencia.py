@@ -80,7 +80,7 @@ def generar_asistencia_mes(
         )
 
     # ====================================
-    # VALIDAR SI YA EXISTE EL MES
+    # VALIDAR SI YA EXISTE MES
     # ====================================
 
     if not df_existente.empty:
@@ -201,6 +201,20 @@ def mostrar_asistencia(
 ):
 
     st.markdown("## 🗓️ Control de Asistencia")
+
+    # ====================================
+    # OCULTAR UPDATE
+    # ====================================
+
+    st.markdown("""
+    <style>
+
+    button[kind="secondary"] {
+        display: none;
+    }
+
+    </style>
+    """, unsafe_allow_html=True)
 
     # ====================================
     # COLABORADORES
@@ -385,14 +399,47 @@ def mostrar_asistencia(
         resizable=True
     )
 
-    for col in columnas_base:
+    # ====================================
+    # COLUMNAS FIJAS
+    # ====================================
+
+    gb.configure_column(
+        "DNI",
+        pinned="left",
+        width=140,
+        editable=False
+    )
+
+    gb.configure_column(
+        "NOMBRE",
+        pinned="left",
+        width=220,
+        editable=False
+    )
+
+    # ====================================
+    # COLUMNAS NORMALES
+    # ====================================
+
+    columnas_normales = [
+        "SUPERVISOR",
+        "COORDINADOR",
+        "DEPARTAMENTO",
+        "PROVINCIA",
+        "ESTADO"
+    ]
+
+    for col in columnas_normales:
 
         gb.configure_column(
             col,
-            pinned="left",
-            editable=False,
-            width=160
+            width=170,
+            editable=False
         )
+
+    # ====================================
+    # DIAS
+    # ====================================
 
     for dia in range(1, 32):
 
@@ -403,7 +450,7 @@ def mostrar_asistencia(
         gb.configure_column(
             col,
             editable=editable,
-            width=70,
+            width=110,
             cellEditor="agSelectCellEditor",
             cellEditorParams={
                 "values": ["", "A", "F"]
@@ -413,6 +460,10 @@ def mostrar_asistencia(
 
     gridOptions = gb.build()
 
+    gridOptions["suppressMovableColumns"] = True
+
+    gridOptions["alwaysShowHorizontalScroll"] = True
+
     # ====================================
     # GRID
     # ====================================
@@ -420,7 +471,7 @@ def mostrar_asistencia(
     grid_response = AgGrid(
         df,
         gridOptions=gridOptions,
-        update_mode=GridUpdateMode.NO_UPDATE,
+        update_mode=GridUpdateMode.VALUE_CHANGED,
         allow_unsafe_jscode=True,
         fit_columns_on_grid_load=False,
         reload_data=False,
@@ -429,12 +480,18 @@ def mostrar_asistencia(
     )
 
     # ====================================
+    # BOTON GUARDAR
+    # ====================================
+
+    guardar = st.button(
+        "💾 Guardar Asistencia"
+    )
+
+    # ====================================
     # GUARDAR
     # ====================================
 
-    if st.button(
-        "💾 Guardar Asistencia"
-    ):
+    if guardar:
 
         nuevo_df = pd.DataFrame(
             grid_response["data"]
