@@ -12,7 +12,7 @@ def cargar_colaboradores_cache(data):
     return pd.DataFrame(data)
 
 # =====================================================
-# GENERAR MES
+# GENERAR NUEVO MES
 # =====================================================
 
 def generar_asistencia_mes(
@@ -27,12 +27,13 @@ def generar_asistencia_mes(
     valores = hoja_asistencia.get_all_values()
 
     # =================================================
-    # CREAR CABECERA
+    # CREAR ESTRUCTURA
     # =================================================
 
     if not valores:
 
         headers = [
+
             "PERIODO",
             "DNI",
             "NOMBRE",
@@ -58,7 +59,7 @@ def generar_asistencia_mes(
     data = valores[1:]
 
     # =================================================
-    # DATAFRAME
+    # DATAFRAME EXISTENTE
     # =================================================
 
     if data:
@@ -75,12 +76,13 @@ def generar_asistencia_mes(
         )
 
     # =================================================
-    # VALIDAR SI EXISTE MES
+    # VALIDAR SI YA EXISTE MES
     # =================================================
 
     if not df_existente.empty:
 
         existe_periodo = (
+
             df_existente["PERIODO"]
             .astype(str)
             .eq(periodo_actual)
@@ -139,11 +141,19 @@ def generar_asistencia_mes(
             )
         }
 
+        # =============================================
+        # DIAS
+        # =============================================
+
         for dia in range(1, 32):
 
             fila[f"DIA_{dia}"] = ""
 
         registros.append(fila)
+
+    # =================================================
+    # GUARDAR NUEVO MES
+    # =================================================
 
     if registros:
 
@@ -260,7 +270,7 @@ def mostrar_asistencia(
     if "PERIODO" not in df_total.columns:
 
         st.error(
-            "La hoja Asistencia tiene estructura incorrecta"
+            "La hoja asistencia no tiene PERIODO"
         )
 
         return
@@ -280,7 +290,7 @@ def mostrar_asistencia(
     if df.empty:
 
         st.warning(
-            "No hay registros del mes actual"
+            "No existen registros del mes actual"
         )
 
         return
@@ -325,6 +335,10 @@ def mostrar_asistencia(
             ["TODOS"] + coordinadores
         )
 
+    # =================================================
+    # FILTROS
+    # =================================================
+
     if filtro_supervisor != "TODOS":
 
         df = df[
@@ -340,7 +354,7 @@ def mostrar_asistencia(
         ]
 
     # =================================================
-    # SEMANA EDITABLE
+    # SEMANA ACTUAL
     # =================================================
 
     dias_editables = obtener_semana_actual()
@@ -388,13 +402,20 @@ def mostrar_asistencia(
 
     for col in columnas_visibles:
 
+        # =============================================
+        # DIAS
+        # =============================================
+
         if "DIA_" in col:
 
-            column_config[col] = st.column_config.SelectboxColumn(
+            column_config[col] = st.column_config.TextColumn(
                 col,
-                options=["", "A", "F"],
                 width="small"
             )
+
+        # =============================================
+        # BLOQUEADAS
+        # =============================================
 
         else:
 
@@ -416,8 +437,12 @@ def mostrar_asistencia(
         column_config=column_config
     )
 
+    st.caption(
+        "A = Asistencia 🟩 | F = Falta 🟥"
+    )
+
     # =================================================
-    # BOTON GUARDAR
+    # BOTON
     # =================================================
 
     st.markdown("###")
@@ -439,7 +464,28 @@ def mostrar_asistencia(
             nuevo_df = nuevo_df.fillna("")
 
             # =========================================
-            # RECUPERAR COLUMNAS OCULTAS
+            # VALIDAR A/F
+            # =========================================
+
+            for col in nuevo_df.columns:
+
+                if "DIA_" in col:
+
+                    nuevo_df[col] = (
+                        nuevo_df[col]
+                        .astype(str)
+                        .str.upper()
+                        .replace("NAN", "")
+                    )
+
+                    nuevo_df[col] = nuevo_df[col].apply(
+                        lambda x:
+                        x if x in ["", "A", "F"]
+                        else ""
+                    )
+
+            # =========================================
+            # RECUPERAR COLUMNAS
             # =========================================
 
             for col in df.columns:
@@ -464,7 +510,7 @@ def mostrar_asistencia(
             nuevo_df["PERIODO"] = periodo_actual
 
             # =========================================
-            # ORDEN COLUMNAS
+            # ORDEN
             # =========================================
 
             for col in headers:
