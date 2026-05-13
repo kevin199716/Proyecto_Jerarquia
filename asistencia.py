@@ -19,7 +19,7 @@ def cargar_colaboradores_cache(data):
     return pd.DataFrame(data)
 
 # =====================================================
-# GENERAR MES
+# GENERAR MES AUTOMATICO
 # =====================================================
 
 def generar_asistencia_mes(
@@ -34,7 +34,7 @@ def generar_asistencia_mes(
     valores = hoja_asistencia.get_all_values()
 
     # =================================================
-    # CREAR CABECERA
+    # CREAR CABECERA SI NO EXISTE
     # =================================================
 
     if not valores:
@@ -66,7 +66,7 @@ def generar_asistencia_mes(
     data = valores[1:]
 
     # =================================================
-    # DF EXISTENTE
+    # DATAFRAME EXISTENTE
     # =================================================
 
     if data:
@@ -83,7 +83,7 @@ def generar_asistencia_mes(
         )
 
     # =================================================
-    # VALIDAR SI EXISTE MES
+    # VALIDAR SI YA EXISTE EL MES
     # =================================================
 
     if not df_existente.empty:
@@ -217,7 +217,7 @@ def mostrar_asistencia(
     )
 
     # =================================================
-    # COLABORADORES
+    # CARGAR COLABORADORES
     # =================================================
 
     data_colab = (
@@ -236,7 +236,7 @@ def mostrar_asistencia(
     )
 
     # =================================================
-    # GENERAR MES
+    # GENERAR MES AUTOMATICO
     # =================================================
 
     generar_asistencia_mes(
@@ -245,7 +245,7 @@ def mostrar_asistencia(
     )
 
     # =================================================
-    # LEER DATA
+    # LEER DATA ASISTENCIA
     # =================================================
 
     valores = (
@@ -256,7 +256,7 @@ def mostrar_asistencia(
     if not valores:
 
         st.warning(
-            "No hay registros"
+            "No existen registros"
         )
 
         return
@@ -269,6 +269,18 @@ def mostrar_asistencia(
         data,
         columns=headers
     )
+
+    # =================================================
+    # VALIDAR PERIODO
+    # =================================================
+
+    if "PERIODO" not in df_total.columns:
+
+        st.error(
+            "La hoja asistencia no tiene columna PERIODO"
+        )
+
+        return
 
     # =================================================
     # MES ACTUAL
@@ -323,6 +335,10 @@ def mostrar_asistencia(
             ["TODOS"] + coordinadores
         )
 
+    # =================================================
+    # FILTRAR
+    # =================================================
+
     if filtro_supervisor != "TODOS":
 
         df = df[
@@ -338,7 +354,7 @@ def mostrar_asistencia(
         ]
 
     # =================================================
-    # INFO
+    # SEMANA ACTUAL
     # =================================================
 
     dias_editables = obtener_semana_actual()
@@ -361,13 +377,13 @@ def mostrar_asistencia(
     )
 
     # =================================================
-    # COLUMNAS
+    # CONFIG COLUMNAS
     # =================================================
 
     for col in df.columns:
 
         # =============================================
-        # DIAS
+        # COLUMNAS DIA
         # =============================================
 
         if "DIA_" in col:
@@ -431,7 +447,7 @@ def mostrar_asistencia(
             )
 
         # =============================================
-        # COLUMNAS NORMALES
+        # OTRAS COLUMNAS
         # =============================================
 
         else:
@@ -466,9 +482,7 @@ def mostrar_asistencia(
 
         fit_columns_on_grid_load=False,
 
-        reload_data=False,
-
-        update_mode=GridUpdateMode.NO_UPDATE
+        update_mode=GridUpdateMode.VALUE_CHANGED
     )
 
     # =================================================
