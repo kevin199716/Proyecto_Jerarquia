@@ -19,38 +19,7 @@ def cargar_colaboradores_cache(data):
     return pd.DataFrame(data)
 
 # ============================================
-# OBTENER HOJA MES
-# ============================================
-
-def obtener_hoja_mes(spreadsheet):
-
-    hoy = datetime.now()
-
-    nombre_hoja = f"ASISTENCIA_{hoy.strftime('%Y_%m')}"
-
-    hojas = [
-        x.title
-        for x in spreadsheet.worksheets()
-    ]
-
-    if nombre_hoja not in hojas:
-
-        hoja = spreadsheet.add_worksheet(
-            title=nombre_hoja,
-            rows=5000,
-            cols=60
-        )
-
-    else:
-
-        hoja = spreadsheet.worksheet(
-            nombre_hoja
-        )
-
-    return hoja
-
-# ============================================
-# GENERAR ASISTENCIA
+# GENERAR MES
 # ============================================
 
 def generar_asistencia_mes(
@@ -58,15 +27,77 @@ def generar_asistencia_mes(
     df_colab
 ):
 
-    valores = hoja_asistencia.get_all_values()
-
-    # SI YA EXISTE DATA
-    if len(valores) > 1:
-        return
-
     hoy = datetime.now()
 
-    periodo = hoy.strftime("%Y-%m")
+    periodo_actual = hoy.strftime("%Y-%m")
+
+    valores = hoja_asistencia.get_all_values()
+
+    # ====================================
+    # HOJA VACIA
+    # ====================================
+
+    if not valores:
+
+        headers = [
+            "PERIODO",
+            "DNI",
+            "NOMBRE",
+            "SUPERVISOR",
+            "COORDINADOR",
+            "DEPARTAMENTO",
+            "PROVINCIA",
+            "ESTADO"
+        ]
+
+        for dia in range(1, 32):
+
+            headers.append(f"DIA_{dia}")
+
+        hoja_asistencia.append_row(headers)
+
+        valores = hoja_asistencia.get_all_values()
+
+    headers = valores[0]
+
+    data = valores[1:]
+
+    # ====================================
+    # DATAFRAME EXISTENTE
+    # ====================================
+
+    if data:
+
+        df_existente = pd.DataFrame(
+            data,
+            columns=headers
+        )
+
+    else:
+
+        df_existente = pd.DataFrame(
+            columns=headers
+        )
+
+    # ====================================
+    # VALIDAR SI YA EXISTE EL MES
+    # ====================================
+
+    if not df_existente.empty:
+
+        existe_periodo = (
+            df_existente["PERIODO"]
+            .astype(str)
+            .eq(periodo_actual)
+            .any()
+        )
+
+        if existe_periodo:
+            return
+
+    # ====================================
+    # CREAR NUEVO MES
+    # ====================================
 
     registros = []
 
@@ -81,15 +112,14 @@ def generar_asistencia_mes(
     for _, row in df_activos.iterrows():
 
         fila = {
-            "PERIODO": periodo,
+            "PERIODO": periodo_actual,
             "DNI": str(row.get("DNI", "")),
             "NOMBRE": str(row.get("NOMBRES", "")),
             "SUPERVISOR": str(row.get("SUPERVISOR A CARGO", "")),
             "COORDINADOR": str(row.get("COORDINADOR", "")),
             "DEPARTAMENTO": str(row.get("DEPARTAMENTO", "")),
             "PROVINCIA": str(row.get("PROVINCIA", "")),
-            "ESTADO": str(row.get("ESTADO", "")),
-            "FECHA_REGISTRO": datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            "ESTADO": str(row.get("ESTADO", ""))
         }
 
         for dia in range(1, 32):
@@ -98,12 +128,13 @@ def generar_asistencia_mes(
 
         registros.append(fila)
 
-    df_nuevo = pd.DataFrame(registros)
+    if registros:
 
-    hoja_asistencia.update(
-        [df_nuevo.columns.values.tolist()] +
-        df_nuevo.astype(str).values.tolist()
-    )
+        df_nuevo = pd.DataFrame(registros)
+
+        hoja_asistencia.append_rows(
+            df_nuevo.astype(str).values.tolist()
+        )
 
 # ============================================
 # SEMANA EDITABLE
@@ -165,19 +196,11 @@ function(params) {
 # ============================================
 
 def mostrar_asistencia(
-    spreadsheet,
+    hoja_asistencia,
     hoja_colaboradores
 ):
 
     st.markdown("## 🗓️ Control de Asistencia")
-
-    # ====================================
-    # HOJA DEL MES
-    # ====================================
-
-    hoja_asistencia = obtener_hoja_mes(
-        spreadsheet
-    )
 
     # ====================================
     # COLABORADORES
@@ -196,7 +219,7 @@ def mostrar_asistencia(
     )
 
     # ====================================
-    # GENERAR BASE MES
+    # GENERAR MES
     # ====================================
 
     generar_asistencia_mes(
@@ -218,6 +241,17 @@ def mostrar_asistencia(
         data,
         columns=headers
     )
+
+    # ====================================
+    # FILTRAR SOLO MES ACTUAL
+    # ====================================
+
+    periodo_actual = datetime.now().strftime("%Y-%m")
+
+    df = df[
+        df["PERIODO"]
+        == periodo_actual
+    ]
 
     # ====================================
     # FILTROS
@@ -285,10 +319,13 @@ def mostrar_asistencia(
         "ESTADO"
     ]
 
-    columnas_dias = [
-        f"DIA_{dia}"
-        for dia in range(1, 32)
-    ]
+    columnas_dias = []
+
+    for dia in range(1, 32):
+
+        columnas_dias.append(
+            f"DIA_{dia}"
+        )
 
     columnas_finales = (
         columnas_base +
@@ -366,7 +403,9 @@ def mostrar_asistencia(
     # GUARDAR
     # ====================================
 
-    if st.button("💾 Guardar Asistencia"):
+    if st.button(
+        "💾 Guardar Asistencia"
+    ):
 
         nuevo_df = pd.DataFrame(
             grid_response["data"]
@@ -374,9 +413,30 @@ def mostrar_asistencia(
 
         nuevo_df = nuevo_df.fillna("")
 
+        # ====================================
+        # ELIMINAR SOLO PERIODO ACTUAL
+        # ====================================
+
+        df_restante = pd.DataFrame(
+            data,
+            columns=headers
+        )
+
+        df_restante = df_restante[
+            df_restante["PERIODO"]
+            != periodo_actual
+        ]
+
+        df_final = pd.concat(
+            [df_restante, nuevo_df],
+            ignore_index=True
+        )
+
+        hoja_asistencia.clear()
+
         hoja_asistencia.update(
-            [nuevo_df.columns.values.tolist()] +
-            nuevo_df.astype(str).values.tolist()
+            [df_final.columns.values.tolist()] +
+            df_final.astype(str).values.tolist()
         )
 
         st.success(
