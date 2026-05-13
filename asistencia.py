@@ -1,8 +1,3 @@
-# ============================================
-# asistencia.py
-# VERSION FINAL COMPLETA
-# ============================================
-
 import streamlit as st
 import pandas as pd
 
@@ -34,7 +29,6 @@ def generar_asistencia_mes(
 
     valores = hoja_asistencia.get_all_values()
 
-    # SI ESTA VACIO
     if len(valores) <= 1:
 
         hoy = datetime.now()
@@ -54,12 +48,6 @@ def generar_asistencia_mes(
                 "DEPARTAMENTO": str(row.get("DEPARTAMENTO", "")),
                 "PROVINCIA": str(row.get("PROVINCIA", "")),
                 "ESTADO": str(row.get("ESTADO", "")),
-                "FECHA_CREACION_USUARIO": str(
-                    row.get("FECHA DE CREACION USUARIO", "")
-                ),
-                "FECHA_DE_CESE": str(
-                    row.get("FECHA DE CESE", "")
-                ),
             }
 
             for dia in range(1, 32):
@@ -78,7 +66,7 @@ def generar_asistencia_mes(
         )
 
 # ============================================
-# SEMANA ACTUAL
+# SEMANA EDITABLE
 # ============================================
 
 def obtener_semana_actual():
@@ -121,13 +109,6 @@ function(params) {
             'color': 'red',
             'fontWeight': 'bold',
             'textAlign': 'center'
-        }
-    }
-
-    if(params.data.ESTADO == 'INACTIVO') {
-        return {
-            'backgroundColor': '#eeeeee',
-            'color': '#888888'
         }
     }
 
@@ -189,56 +170,6 @@ def mostrar_asistencia(
     )
 
     # ====================================
-    # LIMPIAR COLUMNAS
-    # ====================================
-
-    for col in [
-        "SUPERVISOR",
-        "COORDINADOR",
-        "ESTADO",
-        "NOMBRE",
-        "DEPARTAMENTO",
-        "PROVINCIA",
-        "DNI"
-    ]:
-
-        if col in df.columns:
-
-            df[col] = (
-                df[col]
-                .astype(str)
-                .fillna("")
-                .replace("nan", "")
-            )
-
-    # ====================================
-    # KPIS
-    # ====================================
-
-    total = len(df)
-
-    activos = len(
-        df[df["ESTADO"] == "ACTIVO"]
-    )
-
-    inactivos = len(
-        df[df["ESTADO"] == "INACTIVO"]
-    )
-
-    c1, c2, c3 = st.columns(3)
-
-    with c1:
-        st.metric("👥 HC TOTAL", total)
-
-    with c2:
-        st.metric("✅ ACTIVOS", activos)
-
-    with c3:
-        st.metric("❌ INACTIVOS", inactivos)
-
-    st.divider()
-
-    # ====================================
     # FILTROS
     # ====================================
 
@@ -246,8 +177,7 @@ def mostrar_asistencia(
         [
             str(x)
             for x in df["SUPERVISOR"]
-            .dropna()
-            .unique()
+            .fillna("")
             .tolist()
             if str(x).strip() != ""
         ]
@@ -257,32 +187,27 @@ def mostrar_asistencia(
         [
             str(x)
             for x in df["COORDINADOR"]
-            .dropna()
-            .unique()
+            .fillna("")
             .tolist()
             if str(x).strip() != ""
         ]
     )
 
-    f1, f2 = st.columns(2)
+    c1, c2 = st.columns(2)
 
-    with f1:
+    with c1:
 
         filtro_supervisor = st.selectbox(
             "🔍 Supervisor",
-            ["TODOS"] + supervisores
+            ["TODOS"] + list(set(supervisores))
         )
 
-    with f2:
+    with c2:
 
         filtro_coord = st.selectbox(
             "🔍 Coordinador",
-            ["TODOS"] + coordinadores
+            ["TODOS"] + list(set(coordinadores))
         )
-
-    # ====================================
-    # FILTRAR
-    # ====================================
 
     if filtro_supervisor != "TODOS":
 
@@ -298,10 +223,6 @@ def mostrar_asistencia(
             filtro_coord
         ]
 
-    # ====================================
-    # SEMANA EDITABLE
-    # ====================================
-
     dias_editables = obtener_semana_actual()
 
     st.info(
@@ -309,10 +230,6 @@ def mostrar_asistencia(
         "A = Asistencia | "
         "F = Falta"
     )
-
-    # ====================================
-    # COLUMNAS
-    # ====================================
 
     columnas_base = [
         "SUPERVISOR",
@@ -352,14 +269,8 @@ def mostrar_asistencia(
 
     gb.configure_default_column(
         editable=False,
-        sortable=False,
-        filter=False,
         resizable=True
     )
-
-    # ====================================
-    # COLUMNAS FIJAS
-    # ====================================
 
     columnas_fijas = [
         "SUPERVISOR",
@@ -377,21 +288,14 @@ def mostrar_asistencia(
             col,
             pinned="left",
             editable=False,
-            cellStyle=cellstyle_jscode,
             width=180
         )
-
-    # ====================================
-    # DIAS
-    # ====================================
 
     for dia in range(1, 32):
 
         col = f"DIA_{dia}"
 
-        editable = (
-            dia in dias_editables
-        )
+        editable = dia in dias_editables
 
         gb.configure_column(
             col,
@@ -404,21 +308,7 @@ def mostrar_asistencia(
             cellStyle=cellstyle_jscode
         )
 
-    # ====================================
-    # GRID OPTIONS
-    # ====================================
-
-    gb.configure_grid_options(
-        suppressRowClickSelection=True,
-        rowHeight=38,
-        animateRows=False
-    )
-
     gridOptions = gb.build()
-
-    # ====================================
-    # GRID
-    # ====================================
 
     grid_response = AgGrid(
         df,
@@ -426,10 +316,9 @@ def mostrar_asistencia(
         update_mode=GridUpdateMode.MANUAL,
         allow_unsafe_jscode=True,
         fit_columns_on_grid_load=False,
-        height=700,
-        width="100%",
         reload_data=False,
-        theme="streamlit"
+        theme="streamlit",
+        height=700
     )
 
     # ====================================
