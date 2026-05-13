@@ -233,6 +233,11 @@ def mostrar_asistencia(
 
     valores = hoja_asistencia.get_all_values()
 
+    if not valores:
+
+        st.warning("No hay registros")
+        return
+
     headers = valores[0]
 
     data = valores[1:]
@@ -243,38 +248,46 @@ def mostrar_asistencia(
     )
 
     # ====================================
-    # FILTRAR SOLO MES ACTUAL
+    # FILTRAR MES ACTUAL
     # ====================================
 
     periodo_actual = datetime.now().strftime("%Y-%m")
 
     df = df[
         df["PERIODO"]
+        .astype(str)
         == periodo_actual
     ]
+
+    if df.empty:
+
+        st.warning(
+            "No hay registros del mes actual"
+        )
+        return
 
     # ====================================
     # FILTROS
     # ====================================
 
     supervisores = sorted(
-        list(
-            set(
-                df["SUPERVISOR"]
-                .astype(str)
-                .tolist()
-            )
-        )
+        [
+            str(x)
+            for x in df["SUPERVISOR"]
+            .fillna("")
+            .tolist()
+            if str(x).strip() != ""
+        ]
     )
 
     coordinadores = sorted(
-        list(
-            set(
-                df["COORDINADOR"]
-                .astype(str)
-                .tolist()
-            )
-        )
+        [
+            str(x)
+            for x in df["COORDINADOR"]
+            .fillna("")
+            .tolist()
+            if str(x).strip() != ""
+        ]
     )
 
     c1, c2 = st.columns(2)
@@ -283,31 +296,37 @@ def mostrar_asistencia(
 
         filtro_supervisor = st.selectbox(
             "🔍 Supervisor",
-            ["TODOS"] + supervisores
+            ["TODOS"] + list(set(supervisores))
         )
 
     with c2:
 
         filtro_coord = st.selectbox(
             "🔍 Coordinador",
-            ["TODOS"] + coordinadores
+            ["TODOS"] + list(set(coordinadores))
         )
 
     if filtro_supervisor != "TODOS":
 
         df = df[
-            df["SUPERVISOR"]
-            == filtro_supervisor
+            df["SUPERVISOR"] ==
+            filtro_supervisor
         ]
 
     if filtro_coord != "TODOS":
 
         df = df[
-            df["COORDINADOR"]
-            == filtro_coord
+            df["COORDINADOR"] ==
+            filtro_coord
         ]
 
     dias_editables = obtener_semana_actual()
+
+    st.info(
+        "Solo editable semana actual | "
+        "A = Asistencia | "
+        "F = Falta"
+    )
 
     columnas_base = [
         "SUPERVISOR",
@@ -414,23 +433,49 @@ def mostrar_asistencia(
         nuevo_df = nuevo_df.fillna("")
 
         # ====================================
-        # ELIMINAR SOLO PERIODO ACTUAL
+        # RECUPERAR HISTORICO
         # ====================================
 
-        df_restante = pd.DataFrame(
+        df_historico = pd.DataFrame(
             data,
             columns=headers
         )
 
-        df_restante = df_restante[
-            df_restante["PERIODO"]
+        # ====================================
+        # ELIMINAR SOLO MES ACTUAL
+        # ====================================
+
+        df_historico = df_historico[
+            df_historico["PERIODO"]
             != periodo_actual
         ]
 
+        # ====================================
+        # AGREGAR NUEVO MES
+        # ====================================
+
+        nuevo_df["PERIODO"] = periodo_actual
+
+        columnas_completas = headers
+
+        for col in columnas_completas:
+
+            if col not in nuevo_df.columns:
+
+                nuevo_df[col] = ""
+
+        nuevo_df = nuevo_df[
+            columnas_completas
+        ]
+
         df_final = pd.concat(
-            [df_restante, nuevo_df],
+            [df_historico, nuevo_df],
             ignore_index=True
         )
+
+        # ====================================
+        # GUARDAR TODO
+        # ====================================
 
         hoja_asistencia.clear()
 
