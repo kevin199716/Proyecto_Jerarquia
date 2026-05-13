@@ -65,7 +65,7 @@ def generar_asistencia_mes(
     data = valores[1:]
 
     # =================================================
-    # DATAFRAME
+    # DATAFRAME EXISTENTE
     # =================================================
 
     if data:
@@ -82,7 +82,7 @@ def generar_asistencia_mes(
         )
 
     # =================================================
-    # VALIDAR PERIODO
+    # VALIDAR MES
     # =================================================
 
     if not df_existente.empty:
@@ -99,7 +99,7 @@ def generar_asistencia_mes(
             return
 
     # =================================================
-    # CREAR NUEVO MES
+    # NUEVO MES
     # =================================================
 
     registros = []
@@ -154,7 +154,9 @@ def generar_asistencia_mes(
 
     if registros:
 
-        df_nuevo = pd.DataFrame(registros)
+        df_nuevo = pd.DataFrame(
+            registros
+        )
 
         hoja_asistencia.append_rows(
             df_nuevo.astype(str)
@@ -383,7 +385,7 @@ def mostrar_asistencia(
         ]
 
     # =================================================
-    # DIAS EDITABLES
+    # SEMANA ACTUAL
     # =================================================
 
     dias_editables = obtener_semana_actual()
@@ -429,8 +431,16 @@ def mostrar_asistencia(
     df = df[columnas_existentes]
 
     # =================================================
-    # GRID
+    # GRID SIMPLE
     # =================================================
+
+    columnas_editables = []
+
+    for dia in dias_editables:
+
+        columnas_editables.append(
+            f"DIA_{dia}"
+        )
 
     gb = GridOptionsBuilder.from_dataframe(df)
 
@@ -440,44 +450,29 @@ def mostrar_asistencia(
     )
 
     # =================================================
-    # COLUMNAS
+    # COLUMNAS NORMALES
     # =================================================
 
-    columnas_normales = [
+    for col in df.columns:
 
-        "SUPERVISOR",
-        "COORDINADOR",
-        "DEPARTAMENTO",
-        "PROVINCIA",
-        "DNI",
-        "NOMBRE",
-        "ESTADO"
-    ]
+        if col not in columnas_editables:
 
-    for col in columnas_normales:
+            gb.configure_column(
+                col,
+                editable=False,
+                width=160
+            )
+
+    # =================================================
+    # COLUMNAS EDITABLES
+    # =================================================
+
+    for col in columnas_editables:
 
         gb.configure_column(
             col,
-            width=170,
-            editable=False
-        )
-
-    # =================================================
-    # DIAS
-    # =================================================
-
-    for dia in range(1, 32):
-
-        col = f"DIA_{dia}"
-
-        editable = (
-            dia in dias_editables
-        )
-
-        gb.configure_column(
-            col,
-            editable=editable,
-            width=95,
+            editable=True,
+            width=90,
             cellEditor="agSelectCellEditor",
             cellEditorParams={
                 "values": ["", "A", "F"]
@@ -494,18 +489,23 @@ def mostrar_asistencia(
     grid_response = AgGrid(
         df,
         gridOptions=gridOptions,
-        update_mode=GridUpdateMode.MANUAL,
+        height=450,
+        fit_columns_on_grid_load=False,
         allow_unsafe_jscode=True,
         theme="streamlit",
-        height=500
+        update_mode=GridUpdateMode.MODEL_CHANGED,
+        reload_data=False
     )
 
     # =================================================
     # BOTON GUARDAR
     # =================================================
 
+    st.markdown("###")
+
     guardar = st.button(
-        "💾 Guardar Asistencia"
+        "💾 Guardar Asistencia",
+        use_container_width=False
     )
 
     # =================================================
@@ -582,5 +582,3 @@ def mostrar_asistencia(
         st.success(
             "✅ Asistencia guardada correctamente"
         )
-
-        st.rerun()
