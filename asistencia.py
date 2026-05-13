@@ -80,6 +80,16 @@ def generar_asistencia_mes(
         )
 
     # ====================================
+    # SI NO EXISTE PERIODO
+    # ====================================
+
+    if "PERIODO" not in df_existente.columns:
+
+        hoja_asistencia.clear()
+
+        return
+
+    # ====================================
     # VALIDAR SI YA EXISTE EL MES
     # ====================================
 
@@ -248,6 +258,17 @@ def mostrar_asistencia(
     )
 
     # ====================================
+    # VALIDACION
+    # ====================================
+
+    if "PERIODO" not in df.columns:
+
+        st.error(
+            "La hoja Asistencia tiene estructura incorrecta"
+        )
+        return
+
+    # ====================================
     # FILTRAR MES ACTUAL
     # ====================================
 
@@ -359,6 +380,16 @@ def mostrar_asistencia(
     df = df[columnas_existentes]
 
     # ====================================
+    # OCULTAR PERIODO
+    # ====================================
+
+    if "PERIODO" in df.columns:
+
+        df = df.drop(
+            columns=["PERIODO"]
+        )
+
+    # ====================================
     # GRID
     # ====================================
 
@@ -366,7 +397,9 @@ def mostrar_asistencia(
 
     gb.configure_default_column(
         editable=False,
-        resizable=True
+        resizable=True,
+        filter=True,
+        sortable=True
     )
 
     columnas_fijas = [
@@ -385,7 +418,9 @@ def mostrar_asistencia(
             col,
             pinned="left",
             editable=False,
-            width=180
+            minWidth=170,
+            maxWidth=250,
+            resizable=True
         )
 
     for dia in range(1, 32):
@@ -397,7 +432,9 @@ def mostrar_asistencia(
         gb.configure_column(
             col,
             editable=editable,
-            width=90,
+            width=75,
+            minWidth=70,
+            maxWidth=80,
             cellEditor="agSelectCellEditor",
             cellEditorParams={
                 "values": ["", "A", "F"]
@@ -407,6 +444,10 @@ def mostrar_asistencia(
 
     gridOptions = gb.build()
 
+    gridOptions["domLayout"] = "normal"
+
+    gridOptions["suppressHorizontalScroll"] = False
+
     grid_response = AgGrid(
         df,
         gridOptions=gridOptions,
@@ -415,7 +456,7 @@ def mostrar_asistencia(
         fit_columns_on_grid_load=False,
         reload_data=False,
         theme="streamlit",
-        height=700
+        height=500
     )
 
     # ====================================
@@ -433,7 +474,7 @@ def mostrar_asistencia(
         nuevo_df = nuevo_df.fillna("")
 
         # ====================================
-        # RECUPERAR HISTORICO
+        # HISTORICO
         # ====================================
 
         df_historico = pd.DataFrame(
@@ -442,7 +483,7 @@ def mostrar_asistencia(
         )
 
         # ====================================
-        # ELIMINAR SOLO MES ACTUAL
+        # ELIMINAR MES ACTUAL
         # ====================================
 
         df_historico = df_historico[
@@ -451,7 +492,7 @@ def mostrar_asistencia(
         ]
 
         # ====================================
-        # AGREGAR NUEVO MES
+        # NUEVO MES
         # ====================================
 
         nuevo_df["PERIODO"] = periodo_actual
@@ -474,7 +515,7 @@ def mostrar_asistencia(
         )
 
         # ====================================
-        # GUARDAR TODO
+        # GUARDAR
         # ====================================
 
         hoja_asistencia.clear()
