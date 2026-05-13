@@ -62,10 +62,6 @@ def generar_asistencia_mes(
 
     data = valores[1:]
 
-    # ====================================
-    # DATAFRAME EXISTENTE
-    # ====================================
-
     if data:
 
         df_existente = pd.DataFrame(
@@ -80,17 +76,7 @@ def generar_asistencia_mes(
         )
 
     # ====================================
-    # SI NO EXISTE PERIODO
-    # ====================================
-
-    if "PERIODO" not in df_existente.columns:
-
-        hoja_asistencia.clear()
-
-        return
-
-    # ====================================
-    # VALIDAR SI YA EXISTE MES
+    # VALIDAR PERIODO
     # ====================================
 
     if not df_existente.empty:
@@ -106,12 +92,11 @@ def generar_asistencia_mes(
             return
 
     # ====================================
-    # CREAR NUEVO MES
+    # NUEVO MES
     # ====================================
 
     registros = []
 
-    # SOLO ACTIVOS
     df_activos = df_colab[
         df_colab["ESTADO"]
         .astype(str)
@@ -210,15 +195,19 @@ def mostrar_asistencia(
     hoja_colaboradores
 ):
 
+    st.markdown("""
+
+    <style>
+
+    button[data-testid="baseButton-secondary"] {
+        display:none;
+    }
+
+    </style>
+
+    """, unsafe_allow_html=True)
+
     st.markdown("## 🗓️ Control de Asistencia")
-
-    # ====================================
-    # SESSION
-    # ====================================
-
-    if "grid_key" not in st.session_state:
-
-        st.session_state.grid_key = 0
 
     # ====================================
     # COLABORADORES
@@ -265,21 +254,6 @@ def mostrar_asistencia(
         columns=headers
     )
 
-    # ====================================
-    # VALIDAR
-    # ====================================
-
-    if "PERIODO" not in df_total.columns:
-
-        st.error(
-            "La hoja Asistencia tiene estructura incorrecta"
-        )
-        return
-
-    # ====================================
-    # PERIODO ACTUAL
-    # ====================================
-
     periodo_actual = datetime.now().strftime("%Y-%m")
 
     df = df_total[
@@ -300,23 +274,23 @@ def mostrar_asistencia(
     # ====================================
 
     supervisores = sorted(
-        [
-            str(x)
-            for x in df["SUPERVISOR"]
-            .fillna("")
-            .tolist()
-            if str(x).strip() != ""
-        ]
+        list(
+            set(
+                df["SUPERVISOR"]
+                .astype(str)
+                .tolist()
+            )
+        )
     )
 
     coordinadores = sorted(
-        [
-            str(x)
-            for x in df["COORDINADOR"]
-            .fillna("")
-            .tolist()
-            if str(x).strip() != ""
-        ]
+        list(
+            set(
+                df["COORDINADOR"]
+                .astype(str)
+                .tolist()
+            )
+        )
     )
 
     c1, c2 = st.columns(2)
@@ -325,33 +299,29 @@ def mostrar_asistencia(
 
         filtro_supervisor = st.selectbox(
             "🔍 Supervisor",
-            ["TODOS"] + list(set(supervisores))
+            ["TODOS"] + supervisores
         )
 
     with c2:
 
         filtro_coord = st.selectbox(
             "🔍 Coordinador",
-            ["TODOS"] + list(set(coordinadores))
+            ["TODOS"] + coordinadores
         )
 
     if filtro_supervisor != "TODOS":
 
         df = df[
-            df["SUPERVISOR"] ==
-            filtro_supervisor
+            df["SUPERVISOR"]
+            == filtro_supervisor
         ]
 
     if filtro_coord != "TODOS":
 
         df = df[
-            df["COORDINADOR"] ==
-            filtro_coord
+            df["COORDINADOR"]
+            == filtro_coord
         ]
-
-    # ====================================
-    # DIAS EDITABLES
-    # ====================================
 
     dias_editables = obtener_semana_actual()
 
@@ -401,29 +371,17 @@ def mostrar_asistencia(
     gb.configure_default_column(
         editable=False,
         resizable=True,
-        filter=True,
-        sortable=True
+        filter=False,
+        sortable=False
     )
 
-    columnas_fijas = [
-        "SUPERVISOR",
-        "COORDINADOR",
-        "DEPARTAMENTO",
-        "PROVINCIA",
-        "DNI",
-        "NOMBRE",
-        "ESTADO"
-    ]
-
-    for col in columnas_fijas:
+    for col in columnas_base:
 
         gb.configure_column(
             col,
             pinned="left",
             editable=False,
-            minWidth=170,
-            maxWidth=250,
-            resizable=True
+            width=180
         )
 
     for dia in range(1, 32):
@@ -435,8 +393,8 @@ def mostrar_asistencia(
         gb.configure_column(
             col,
             editable=editable,
-            width=75,
-            minWidth=70,
+            width=80,
+            minWidth=80,
             maxWidth=80,
             cellEditor="agSelectCellEditor",
             cellEditorParams={
@@ -447,24 +405,26 @@ def mostrar_asistencia(
 
     gridOptions = gb.build()
 
-    gridOptions["domLayout"] = "normal"
+    gridOptions["alwaysShowHorizontalScroll"] = True
+
+    gridOptions["alwaysShowVerticalScroll"] = True
 
     gridOptions["suppressHorizontalScroll"] = False
 
     # ====================================
-    # GRID RESPONSE
+    # GRID
     # ====================================
 
     grid_response = AgGrid(
         df,
         gridOptions=gridOptions,
-        update_mode=GridUpdateMode.VALUE_CHANGED,
+        update_mode=GridUpdateMode.MANUAL,
         allow_unsafe_jscode=True,
         fit_columns_on_grid_load=False,
         reload_data=False,
         theme="streamlit",
-        height=500,
-        key=f"grid_{st.session_state.grid_key}"
+        height=550,
+        enable_enterprise_modules=False
     )
 
     # ====================================
@@ -482,7 +442,7 @@ def mostrar_asistencia(
         nuevo_df = nuevo_df.fillna("")
 
         # ====================================
-        # RECUPERAR HISTORICO
+        # HISTORICO
         # ====================================
 
         df_historico = df_total[
@@ -491,16 +451,16 @@ def mostrar_asistencia(
         ].copy()
 
         # ====================================
-        # RECUPERAR DATA ORIGINAL MES
+        # MES ACTUAL
         # ====================================
 
-        df_mes_original = df_total[
+        df_mes = df_total[
             df_total["PERIODO"]
             == periodo_actual
         ].copy()
 
         # ====================================
-        # ACTUALIZAR SOLO LO EDITADO
+        # ACTUALIZAR
         # ====================================
 
         for _, row in nuevo_df.iterrows():
@@ -513,22 +473,23 @@ def mostrar_asistencia(
 
                 valor = row.get(col, "")
 
-                df_mes_original.loc[
-                    df_mes_original["DNI"].astype(str) == dni,
+                df_mes.loc[
+                    df_mes["DNI"].astype(str)
+                    == dni,
                     col
                 ] = valor
 
         # ====================================
-        # UNIR TODO
+        # FINAL
         # ====================================
 
         df_final = pd.concat(
-            [df_historico, df_mes_original],
+            [df_historico, df_mes],
             ignore_index=True
         )
 
         # ====================================
-        # GUARDAR
+        # GUARDAR GOOGLE SHEETS
         # ====================================
 
         hoja_asistencia.clear()
@@ -537,12 +498,6 @@ def mostrar_asistencia(
             [df_final.columns.values.tolist()] +
             df_final.astype(str).values.tolist()
         )
-
-        # ====================================
-        # REFRESH GRID
-        # ====================================
-
-        st.session_state.grid_key += 1
 
         st.success(
             "✅ Asistencia guardada correctamente"
