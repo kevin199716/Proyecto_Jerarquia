@@ -62,6 +62,10 @@ def generar_asistencia_mes(
 
     data = valores[1:]
 
+    # ====================================
+    # DATAFRAME EXISTENTE
+    # ====================================
+
     if data:
 
         df_existente = pd.DataFrame(
@@ -76,7 +80,7 @@ def generar_asistencia_mes(
         )
 
     # ====================================
-    # VALIDAR PERIODO
+    # VALIDAR SI YA EXISTE EL MES
     # ====================================
 
     if not df_existente.empty:
@@ -97,6 +101,7 @@ def generar_asistencia_mes(
 
     registros = []
 
+    # SOLO ACTIVOS
     df_activos = df_colab[
         df_colab["ESTADO"]
         .astype(str)
@@ -195,18 +200,6 @@ def mostrar_asistencia(
     hoja_colaboradores
 ):
 
-    st.markdown("""
-
-    <style>
-
-    button[data-testid="baseButton-secondary"] {
-        display:none;
-    }
-
-    </style>
-
-    """, unsafe_allow_html=True)
-
     st.markdown("## 🗓️ Control de Asistencia")
 
     # ====================================
@@ -253,6 +246,21 @@ def mostrar_asistencia(
         data,
         columns=headers
     )
+
+    # ====================================
+    # VALIDAR
+    # ====================================
+
+    if "PERIODO" not in df_total.columns:
+
+        st.error(
+            "La hoja Asistencia tiene estructura incorrecta"
+        )
+        return
+
+    # ====================================
+    # MES ACTUAL
+    # ====================================
 
     periodo_actual = datetime.now().strftime("%Y-%m")
 
@@ -323,6 +331,10 @@ def mostrar_asistencia(
             == filtro_coord
         ]
 
+    # ====================================
+    # SEMANA EDITABLE
+    # ====================================
+
     dias_editables = obtener_semana_actual()
 
     st.info(
@@ -370,9 +382,7 @@ def mostrar_asistencia(
 
     gb.configure_default_column(
         editable=False,
-        resizable=True,
-        filter=False,
-        sortable=False
+        resizable=True
     )
 
     for col in columnas_base:
@@ -381,7 +391,7 @@ def mostrar_asistencia(
             col,
             pinned="left",
             editable=False,
-            width=180
+            width=160
         )
 
     for dia in range(1, 32):
@@ -393,9 +403,7 @@ def mostrar_asistencia(
         gb.configure_column(
             col,
             editable=editable,
-            width=80,
-            minWidth=80,
-            maxWidth=80,
+            width=70,
             cellEditor="agSelectCellEditor",
             cellEditorParams={
                 "values": ["", "A", "F"]
@@ -405,12 +413,6 @@ def mostrar_asistencia(
 
     gridOptions = gb.build()
 
-    gridOptions["alwaysShowHorizontalScroll"] = True
-
-    gridOptions["alwaysShowVerticalScroll"] = True
-
-    gridOptions["suppressHorizontalScroll"] = False
-
     # ====================================
     # GRID
     # ====================================
@@ -418,13 +420,12 @@ def mostrar_asistencia(
     grid_response = AgGrid(
         df,
         gridOptions=gridOptions,
-        update_mode=GridUpdateMode.MANUAL,
+        update_mode=GridUpdateMode.NO_UPDATE,
         allow_unsafe_jscode=True,
         fit_columns_on_grid_load=False,
         reload_data=False,
         theme="streamlit",
-        height=550,
-        enable_enterprise_modules=False
+        height=500
     )
 
     # ====================================
@@ -460,7 +461,7 @@ def mostrar_asistencia(
         ].copy()
 
         # ====================================
-        # ACTUALIZAR
+        # ACTUALIZAR SOLO EDITADO
         # ====================================
 
         for _, row in nuevo_df.iterrows():
