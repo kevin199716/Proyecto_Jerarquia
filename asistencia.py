@@ -75,7 +75,7 @@ def generar_asistencia_mes(
         )
 
     # =================================================
-    # VALIDAR MES
+    # VALIDAR SI EXISTE MES
     # =================================================
 
     if not df_existente.empty:
@@ -340,7 +340,7 @@ def mostrar_asistencia(
         ]
 
     # =================================================
-    # DIAS EDITABLES
+    # SEMANA EDITABLE
     # =================================================
 
     dias_editables = obtener_semana_actual()
@@ -352,10 +352,10 @@ def mostrar_asistencia(
     )
 
     # =================================================
-    # COLUMNAS
+    # COLUMNAS VISIBLES
     # =================================================
 
-    columnas_base = [
+    columnas_visibles = [
 
         "SUPERVISOR",
         "COORDINADOR",
@@ -366,47 +366,61 @@ def mostrar_asistencia(
         "ESTADO"
     ]
 
-    columnas_dias = [
+    for dia in dias_editables:
 
-        f"DIA_{dia}"
-        for dia in range(1, 32)
-    ]
-
-    columnas_finales = (
-        columnas_base +
-        columnas_dias
-    )
-
-    columnas_existentes = [
-
-        c for c in columnas_finales
-        if c in df.columns
-    ]
-
-    df = df[columnas_existentes]
+        columnas_visibles.append(
+            f"DIA_{dia}"
+        )
 
     # =================================================
-    # FORM SIMPLE
+    # DATAFRAME VISIBLE
     # =================================================
 
-    editable_cols = [
-        f"DIA_{dia}"
-        for dia in dias_editables
-    ]
+    df_visible = df[
+        columnas_visibles
+    ].copy()
+
+    # =================================================
+    # CONFIG COLUMNAS
+    # =================================================
+
+    column_config = {}
+
+    for col in columnas_visibles:
+
+        if "DIA_" in col:
+
+            column_config[col] = st.column_config.SelectboxColumn(
+                col,
+                options=["", "A", "F"],
+                width="small"
+            )
+
+        else:
+
+            column_config[col] = st.column_config.Column(
+                col,
+                disabled=True
+            )
+
+    # =================================================
+    # EDITOR
+    # =================================================
 
     edited_df = st.data_editor(
-        df,
+        df_visible,
         use_container_width=True,
         hide_index=True,
-        disabled=[
-            col for col in df.columns
-            if col not in editable_cols
-        ]
+        num_rows="fixed",
+        key="editor_asistencia",
+        column_config=column_config
     )
 
     # =================================================
     # BOTON GUARDAR
     # =================================================
+
+    st.markdown("###")
 
     guardar = st.button(
         "💾 Guardar Asistencia"
@@ -425,6 +439,16 @@ def mostrar_asistencia(
             nuevo_df = nuevo_df.fillna("")
 
             # =========================================
+            # RECUPERAR COLUMNAS OCULTAS
+            # =========================================
+
+            for col in df.columns:
+
+                if col not in nuevo_df.columns:
+
+                    nuevo_df[col] = df[col].values
+
+            # =========================================
             # HISTORICO
             # =========================================
 
@@ -434,21 +458,23 @@ def mostrar_asistencia(
             ].copy()
 
             # =========================================
-            # MES ACTUAL
+            # PERIODO
             # =========================================
 
             nuevo_df["PERIODO"] = periodo_actual
 
-            columnas_finales_guardado = headers
+            # =========================================
+            # ORDEN COLUMNAS
+            # =========================================
 
-            for col in columnas_finales_guardado:
+            for col in headers:
 
                 if col not in nuevo_df.columns:
 
                     nuevo_df[col] = ""
 
             nuevo_df = nuevo_df[
-                columnas_finales_guardado
+                headers
             ]
 
             # =========================================
@@ -461,7 +487,7 @@ def mostrar_asistencia(
             )
 
             # =========================================
-            # GUARDAR DRIVE
+            # GUARDAR GOOGLE SHEETS
             # =========================================
 
             hoja_asistencia.clear()
