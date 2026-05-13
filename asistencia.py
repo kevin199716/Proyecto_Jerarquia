@@ -380,7 +380,11 @@ def mostrar_asistencia(
         "ESTADO"
     ]
 
-    for dia in dias_editables:
+    # ================================================
+    # MOSTRAR TODO EL MES
+    # ================================================
+
+    for dia in range(1, 32):
 
         columnas_visibles.append(
             f"DIA_{dia}"
@@ -408,9 +412,19 @@ def mostrar_asistencia(
 
         if "DIA_" in col:
 
-            column_config[col] = st.column_config.TextColumn(
+            numero_dia = int(
+                col.replace("DIA_", "")
+            )
+
+            editable = (
+                numero_dia in dias_editables
+            )
+
+            column_config[col] = st.column_config.SelectboxColumn(
                 col,
-                width="small"
+                options=["", "A", "F"],
+                width="small",
+                disabled=not editable
             )
 
         # =============================================
