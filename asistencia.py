@@ -1,8 +1,8 @@
+# asistencia.py
+
 import streamlit as st
 import pandas as pd
-import calendar
-from datetime import datetime, timedelta
-
+from datetime import datetime
 from st_aggrid import (
     AgGrid,
     GridOptionsBuilder,
@@ -11,230 +11,198 @@ from st_aggrid import (
     JsCode
 )
 
+# =========================================================
+# CACHE
+# =========================================================
 
-def obtener_columnas_dias():
-    hoy = datetime.now()
-    dias_mes = calendar.monthrange(hoy.year, hoy.month)[1]
-    return [f"DIA_{i}" for i in range(1, dias_mes + 1)]
+@st.cache_data(ttl=60)
+def cargar_data_asistencia():
+    return st.session_state["hoja_asistencia"].get_all_records()
 
+# =========================================================
+# GENERAR BASE
+# =========================================================
 
-def obtener_semana_actual():
-    hoy = datetime.now()
-    inicio_semana = hoy - timedelta(days=hoy.weekday())
+def generar_base(df_colab, data_asistencia):
 
-    dias = []
-    for i in range(7):
-        fecha = inicio_semana + timedelta(days=i)
-        if fecha.month == hoy.month:
-            dias.append(fecha.day)
+    df_asistencia = pd.DataFrame(data_asistencia)
 
-    return dias
+    if df_asistencia.empty:
+        columnas = [
+            "SUPERVISOR",
+            "COORDINADOR",
+            "DEPARTAMENTO",
+            "PROVINCIA",
+            "DNI",
+            "NOMBRE",
+            "ESTADO"
+        ]
 
+        for i in range(1, 32):
+            columnas.append(f"DIA_{i}")
 
-def col_num_to_letter(n):
-    letra = ""
-    while n > 0:
-        n, r = divmod(n - 1, 26)
-        letra = chr(65 + r) + letra
-    return letra
+        columnas.extend(["MES", "PERIODO"])
 
+        df_asistencia = pd.DataFrame(columns=columnas)
 
-def leer_sheet(hoja):
-    valores = hoja.get_all_values()
+    # ============================================
+    # ASEGURAR COLUMNAS
+    # ============================================
 
-    if not valores:
-        return [], pd.DataFrame()
+    columnas_base = [
+        "SUPERVISOR",
+        "COORDINADOR",
+        "DEPARTAMENTO",
+        "PROVINCIA",
+        "DNI",
+        "NOMBRE",
+        "ESTADO"
+    ]
 
-    headers = [str(x).strip() for x in valores[0]]
-    rows = valores[1:]
+    for c in columnas_base:
+        if c not in df_asistencia.columns:
+            df_asistencia[c] = ""
 
-    ancho = len(headers)
-    rows_fix = []
+    for i in range(1, 32):
+        col = f"DIA_{i}"
+        if col not in df_asistencia.columns:
+            df_asistencia[col] = ""
 
-    for r in rows:
-        r = r + [""] * (ancho - len(r))
-        rows_fix.append(r[:ancho])
+    if "MES" not in df_asistencia.columns:
+        df_asistencia["MES"] = datetime.now().strftime("%m")
 
-    df = pd.DataFrame(rows_fix, columns=headers)
-    return headers, df
+    if "PERIODO" not in df_asistencia.columns:
+        df_asistencia["PERIODO"] = datetime.now().strftime("%Y-%m")
 
+    # ============================================
+    # NO REDUCIR FILAS
+    # ============================================
 
-def crear_fila_asistencia(row):
-    hoy = datetime.now()
+    if len(df_asistencia) < len(df_colab):
 
-    nombre = (
-        str(row.get("NOMBRES", "")).strip()
-        + " "
-        + str(row.get("APELLIDO PATERNO", "")).strip()
-    ).strip()
+        faltantes = len(df_colab) - len(df_asistencia)
 
-    fila = {
-        "MES": hoy.strftime("%B").upper(),
-        "PERIODO": hoy.strftime("%Y-%m"),
-        "SUPERVISOR": str(row.get("SUPERVISOR A CARGO", "")).strip(),
-        "COORDINADOR": str(row.get("COORDINADOR", "")).strip(),
-        "DEPARTAMENTO": str(row.get("DEPARTAMENTO", "")).strip(),
-        "PROVINCIA": str(row.get("PROVINCIA", "")).strip(),
-        "DNI": str(row.get("DNI", "")).strip(),
-        "NOMBRE": nombre,
-        "ESTADO": str(row.get("ESTADO", "")).strip(),
+        nuevas = pd.DataFrame(index=range(faltantes))
+
+        for c in df_asistencia.columns:
+            nuevas[c] = ""
+
+        nuevas["ESTADO"] = "ACTIVO"
+
+        df_asistencia = pd.concat(
+            [df_asistencia, nuevas],
+            ignore_index=True
+        )
+
+    # ============================================
+    # COMPLETAR DATA
+    # ============================================
+
+    columnas_map = {
+        "SUPERVISOR": "SUPERVISOR A CARGO",
+        "COORDINADOR": "COORDINADOR",
+        "DEPARTAMENTO": "DEPARTAMENTO",
+        "PROVINCIA": "PROVINCIA",
+        "DNI": "DNI",
+        "NOMBRE": "NOMBRES",
+        "ESTADO": "ESTADO"
     }
 
-    for d in obtener_columnas_dias():
-        fila[d] = ""
+    for col_destino, col_origen in columnas_map.items():
 
-    return fila
+        if col_origen in df_colab.columns:
 
+            df_asistencia[col_destino] = (
+                df_colab[col_origen]
+                .fillna("")
+                .astype(str)
+                .reset_index(drop=True)
+            )
 
-def asegurar_base_asistencia(hoja_asistencia, df_colab):
-    columnas_base = [
-        "MES",
-        "PERIODO",
+    # ============================================
+    # ORDEN FINAL
+    # ============================================
+
+    columnas_finales = [
         "SUPERVISOR",
         "COORDINADOR",
         "DEPARTAMENTO",
         "PROVINCIA",
         "DNI",
         "NOMBRE",
-        "ESTADO",
+        "ESTADO"
     ]
 
-    columnas_dias = obtener_columnas_dias()
-    columnas_finales = columnas_base + columnas_dias
+    for i in range(1, 32):
+        columnas_finales.append(f"DIA_{i}")
 
-    headers, df_sheet = leer_sheet(hoja_asistencia)
+    columnas_finales.extend(["MES", "PERIODO"])
 
-    if not headers:
-        headers = columnas_finales
-        registros = []
+    df_asistencia = df_asistencia[columnas_finales]
 
-        for _, row in df_colab.iterrows():
-            registros.append(crear_fila_asistencia(row))
+    return df_asistencia.fillna("")
 
-        df_nuevo = pd.DataFrame(registros)
 
-        for c in headers:
-            if c not in df_nuevo.columns:
-                df_nuevo[c] = ""
-
-        df_nuevo = df_nuevo[headers]
-
-        hoja_asistencia.update(
-            "A1",
-            [headers] + df_nuevo.astype(str).values.tolist(),
-            value_input_option="USER_ENTERED",
-        )
-
-        headers, df_sheet = leer_sheet(hoja_asistencia)
-        return headers, df_sheet
-
-    faltantes = []
-
-    for c in columnas_finales:
-        if c not in headers:
-            faltantes.append(c)
-
-    if faltantes:
-        headers = headers + faltantes
-        hoja_asistencia.update(
-            "A1",
-            [headers],
-            value_input_option="USER_ENTERED",
-        )
-
-        for c in faltantes:
-            df_sheet[c] = ""
-
-    for c in headers:
-        if c not in df_sheet.columns:
-            df_sheet[c] = ""
-
-    cantidad_sheet = len(df_sheet)
-    cantidad_colab = len(df_colab)
-
-    if cantidad_sheet < cantidad_colab:
-        registros_faltantes = []
-
-        for idx in range(cantidad_sheet, cantidad_colab):
-            row = df_colab.iloc[idx]
-            registros_faltantes.append(crear_fila_asistencia(row))
-
-        df_faltantes = pd.DataFrame(registros_faltantes)
-
-        for c in headers:
-            if c not in df_faltantes.columns:
-                df_faltantes[c] = ""
-
-        df_faltantes = df_faltantes[headers]
-
-        hoja_asistencia.append_rows(
-            df_faltantes.astype(str).values.tolist(),
-            value_input_option="USER_ENTERED",
-        )
-
-        headers, df_sheet = leer_sheet(hoja_asistencia)
-
-    return headers, df_sheet
-
+# =========================================================
+# MOSTRAR ASISTENCIA
+# =========================================================
 
 def mostrar_asistencia(hoja_asistencia, hoja_colaboradores):
-    st.markdown("# 🗓️ Control de Asistencia")
 
-    data_colab = hoja_colaboradores.get_all_records()
-    df_colab = pd.DataFrame(data_colab)
+    st.markdown("## 🗓️ Control de Asistencia")
 
-    if df_colab.empty:
-        st.warning("No hay registros en colaboradores.")
-        return
+    # =====================================================
+    # DATA
+    # =====================================================
 
-    df_colab.columns = df_colab.columns.str.strip().str.upper()
+    df_colab = pd.DataFrame(
+        hoja_colaboradores.get_all_records()
+    ).fillna("")
 
-    headers, df = asegurar_base_asistencia(
-        hoja_asistencia,
+    data_asistencia = cargar_data_asistencia()
+
+    df = generar_base(
         df_colab,
+        data_asistencia
     )
 
-    if df.empty:
-        st.warning("No hay registros de asistencia.")
-        return
+    # =====================================================
+    # FILTROS
+    # =====================================================
 
-    df = df.fillna("").astype(str)
-    df["_FILA_SHEET"] = df.index + 2
+    col1, col2 = st.columns(2)
 
-    columnas_base = [
-        "MES",
-        "PERIODO",
-        "SUPERVISOR",
-        "COORDINADOR",
-        "DEPARTAMENTO",
-        "PROVINCIA",
-        "DNI",
-        "NOMBRE",
-        "ESTADO",
-    ]
+    with col1:
 
-    columnas_dias = obtener_columnas_dias()
-    columnas_finales = columnas_base + columnas_dias
+        supervisores = ["TODOS"] + sorted(
+            df["SUPERVISOR"]
+            .astype(str)
+            .unique()
+            .tolist()
+        )
 
-    for c in columnas_finales:
-        if c not in df.columns:
-            df[c] = ""
-
-    df = df[["_FILA_SHEET"] + columnas_finales]
-
-    c1, c2 = st.columns(2)
-
-    with c1:
         supervisor = st.selectbox(
             "🔍 Supervisor",
-            ["TODOS"] + sorted([x for x in df["SUPERVISOR"].unique().tolist() if x]),
+            supervisores
         )
 
-    with c2:
+    with col2:
+
+        coordinadores = ["TODOS"] + sorted(
+            df["COORDINADOR"]
+            .astype(str)
+            .unique()
+            .tolist()
+        )
+
         coordinador = st.selectbox(
             "🔍 Coordinador",
-            ["TODOS"] + sorted([x for x in df["COORDINADOR"].unique().tolist() if x]),
+            coordinadores
         )
+
+    # =====================================================
+    # FILTRAR
+    # =====================================================
 
     if supervisor != "TODOS":
         df = df[df["SUPERVISOR"] == supervisor]
@@ -242,68 +210,103 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores):
     if coordinador != "TODOS":
         df = df[df["COORDINADOR"] == coordinador]
 
-    st.info("Solo editable semana actual | A = Asistencia | F = Falta")
+    df = df.reset_index(drop=True)
 
-    color_js = JsCode("""
+    # =====================================================
+    # GRID
+    # =====================================================
+
+    gb = GridOptionsBuilder.from_dataframe(df)
+
+    columnas_fijas = [
+        "SUPERVISOR",
+        "COORDINADOR",
+        "DEPARTAMENTO",
+        "PROVINCIA",
+        "DNI",
+        "NOMBRE",
+        "ESTADO",
+        "MES",
+        "PERIODO"
+    ]
+
+    # ==========================================
+    # SOLO EDITAR SEMANA ACTUAL
+    # ==========================================
+
+    hoy = datetime.now().day
+
+    dias_editables = []
+
+    for i in range(max(1, hoy - 6), hoy + 1):
+        dias_editables.append(f"DIA_{i}")
+
+    # ==========================================
+    # COLUMNAS
+    # ==========================================
+
+    for col in df.columns:
+
+        editable = col in dias_editables
+
+        if col in columnas_fijas:
+
+            gb.configure_column(
+                col,
+                editable=False,
+                width=150
+            )
+
+        elif col.startswith("DIA_"):
+
+            gb.configure_column(
+                col,
+                editable=editable,
+                singleClickEdit=True,
+                cellEditor="agSelectCellEditor",
+                cellEditorParams={
+                    "values": ["", "A", "F"]
+                },
+                width=90
+            )
+
+    # ==========================================
+    # COLOR
+    # ==========================================
+
+    estilo = JsCode("""
     function(params) {
-        if(params.value == 'A') {
+
+        if(params.value == 'A'){
             return {
-                'backgroundColor': '#B7E4C7',
-                'color': '#1B4332',
+                'backgroundColor': '#b7e4c7',
+                'color': '#1b4332',
                 'fontWeight': 'bold',
                 'textAlign': 'center'
             }
         }
 
-        if(params.value == 'F') {
+        if(params.value == 'F'){
             return {
-                'backgroundColor': '#F4ACB7',
-                'color': '#9D0208',
+                'backgroundColor': '#f4b6c2',
+                'color': '#9d0208',
                 'fontWeight': 'bold',
                 'textAlign': 'center'
             }
-        }
-
-        return {
-            'textAlign': 'center'
         }
     }
     """)
 
-    gb = GridOptionsBuilder.from_dataframe(df)
-
-    gb.configure_column("_FILA_SHEET", hide=True)
-
-    for c in columnas_base:
-        gb.configure_column(
-            c,
-            editable=False,
-            sortable=True,
-            filter=True,
-            width=180,
-            minWidth=150,
-            resizable=True,
-        )
-
-    semana_actual = obtener_semana_actual()
-
-    for dia in columnas_dias:
-        numero = int(dia.replace("DIA_", ""))
-        editable = numero in semana_actual
+    for i in range(1, 32):
 
         gb.configure_column(
-            dia,
-            editable=editable,
-            sortable=False,
-            filter=False,
-            width=110,
-            minWidth=100,
-            resizable=False,
-            singleClickEdit=True,
-            cellEditor="agSelectCellEditor",
-            cellEditorParams={"values": ["", "A", "F"]},
-            cellStyle=color_js,
+            f"DIA_{i}",
+            cellStyle=estilo
         )
+
+    # ==========================================
+    # GRID OPTIONS
+    # ==========================================
 
     gb.configure_grid_options(
         animateRows=False,
@@ -312,67 +315,81 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores):
         suppressMovableColumns=True,
         rowBuffer=5,
         domLayout="normal",
+        alwaysShowHorizontalScroll=True,
+        alwaysShowVerticalScroll=True
     )
 
     grid_options = gb.build()
+
+    # =====================================================
+    # AGGRID
+    # =====================================================
 
     response = AgGrid(
         df,
         gridOptions=grid_options,
         allow_unsafe_jscode=True,
-        update_mode=GridUpdateMode.MANUAL,
-        data_return_mode=DataReturnMode.AS_INPUT,
+        update_mode=GridUpdateMode.VALUE_CHANGED,
+        data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
         fit_columns_on_grid_load=False,
         reload_data=False,
         enable_enterprise_modules=False,
-        theme="streamlit",
         height=560,
-        key="grid_asistencia_final",
+        theme="streamlit",
+        key="grid_asistencia_final"
     )
 
-    st.markdown("A = Asistencia 🟩 | F = Falta 🟥")
+    # =====================================================
+    # DATA COMPLETA
+    # =====================================================
 
-    guardar = st.button("💾 Guardar Asistencia")
+    df_editado = pd.DataFrame(response["data"])
 
-    if guardar:
+    for c in df.columns:
+
+        if c not in df_editado.columns:
+            df_editado[c] = df[c]
+
+    df_editado = df_editado[df.columns]
+
+    df_editado = df_editado.fillna("").astype(str)
+
+    # =====================================================
+    # LEYENDA
+    # =====================================================
+
+    st.markdown(
+        "A = Asistencia 🟩 | F = Falta 🟥"
+    )
+
+    # =====================================================
+    # GUARDAR
+    # =====================================================
+
+    if st.button(
+        "💾 Guardar Asistencia",
+        use_container_width=False
+    ):
+
         try:
-            df_editado = pd.DataFrame(response["data"]).fillna("").astype(str)
 
-            updates = []
+            hoja_asistencia.clear()
 
-            for _, row in df_editado.iterrows():
-                fila_sheet = int(row["_FILA_SHEET"])
+            hoja_asistencia.update(
+                [
+                    df_editado.columns.values.tolist()
+                ] +
+                df_editado.values.tolist()
+            )
 
-                original = df[df["_FILA_SHEET"].astype(int) == fila_sheet]
+            cargar_data_asistencia.clear()
 
-                if original.empty:
-                    continue
-
-                for dia in columnas_dias:
-                    nuevo = str(row.get(dia, "")).strip().upper()
-
-                    if nuevo not in ["", "A", "F"]:
-                        nuevo = ""
-
-                    actual = str(original.iloc[0].get(dia, "")).strip().upper()
-
-                    if nuevo != actual:
-                        col_sheet = headers.index(dia) + 1
-                        letra = col_num_to_letter(col_sheet)
-                        rango = f"{letra}{fila_sheet}"
-
-                        updates.append({
-                            "range": rango,
-                            "values": [[nuevo]],
-                        })
-
-            if updates:
-                hoja_asistencia.batch_update(
-                    updates,
-                    value_input_option="USER_ENTERED",
-                )
-
-            st.success("✅ Asistencia guardada correctamente")
+            st.success(
+                "✅ Asistencia guardada correctamente"
+            )
 
         except Exception as e:
-            st.error(f"❌ Error al guardar asistencia: {e}")
+
+            st.error(
+                f"❌ Error al guardar: {str(e)}"
+            )
