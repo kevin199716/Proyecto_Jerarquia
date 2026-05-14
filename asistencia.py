@@ -1,10 +1,14 @@
 # =========================================================
 # asistencia.py
-# VERSION FINAL ESTABLE - SIN FREEZE
+# VERSION FINAL ESTABLE
+# NO FREEZE
+# GUARDA EN DRIVE
+# SIN RECARGAS
 # =========================================================
 
 import streamlit as st
 import pandas as pd
+
 from st_aggrid import (
     AgGrid,
     GridOptionsBuilder,
@@ -14,6 +18,7 @@ from st_aggrid import (
 
 from datetime import datetime
 import calendar
+
 
 # =========================================================
 # COLUMNAS DIAS
@@ -59,9 +64,9 @@ def asegurar_columnas_asistencia(
 
     data = hoja_asistencia.get_all_values()
 
-    # =========================================
-    # SI NO EXISTE NADA
-    # =========================================
+    # =====================================================
+    # SI NO EXISTE DATA
+    # =====================================================
 
     if len(data) == 0:
 
@@ -76,10 +81,6 @@ def asegurar_columnas_asistencia(
         for x in data[0]
     ]
 
-    # =========================================
-    # AGREGAR DIAS FALTANTES
-    # =========================================
-
     faltantes = []
 
     for col in columnas:
@@ -88,7 +89,11 @@ def asegurar_columnas_asistencia(
 
             faltantes.append(col)
 
-    if faltantes:
+    # =====================================================
+    # AGREGAR COLUMNAS FALTANTES
+    # =====================================================
+
+    if len(faltantes) > 0:
 
         headers.extend(faltantes)
 
@@ -109,23 +114,23 @@ def generar_base_asistencia(
     df_colab
 ):
 
-    headers = asegurar_columnas_asistencia(
+    asegurar_columnas_asistencia(
         hoja_asistencia
     )
 
     data = hoja_asistencia.get_all_records()
 
-    # =========================================
-    # SI YA EXISTE DATA
-    # =========================================
+    # =====================================================
+    # SI YA EXISTE
+    # =====================================================
 
     if len(data) > 0:
 
         return pd.DataFrame(data)
 
-    # =========================================
+    # =====================================================
     # CREAR BASE NUEVA
-    # =========================================
+    # =====================================================
 
     registros = []
 
@@ -187,7 +192,9 @@ def generar_base_asistencia(
 
         registros.append(fila)
 
-    df_final = pd.DataFrame(registros)
+    df_final = pd.DataFrame(
+        registros
+    )
 
     hoja_asistencia.clear()
 
@@ -214,7 +221,7 @@ def mostrar_asistencia(
     )
 
     # =====================================================
-    # CARGAR DATA
+    # CARGAR COLABORADORES
     # =====================================================
 
     data_colab = (
@@ -381,9 +388,9 @@ def mostrar_asistencia(
         .from_dataframe(df_asistencia)
     )
 
-    # =========================================
+    # =====================================================
     # COLUMNAS FIJAS
-    # =========================================
+    # =====================================================
 
     for col in columnas_fijas:
 
@@ -393,9 +400,9 @@ def mostrar_asistencia(
             width=150
         )
 
-    # =========================================
+    # =====================================================
     # COLUMNAS DIAS
-    # =========================================
+    # =====================================================
 
     for dia in columnas_dias:
 
@@ -416,7 +423,12 @@ def mostrar_asistencia(
             cellStyle=color_js,
 
             width=90
+
         )
+
+    # =====================================================
+    # OPCIONES GRID
+    # =====================================================
 
     gb.configure_grid_options(
         domLayout='normal'
@@ -436,7 +448,7 @@ def mostrar_asistencia(
 
         allow_unsafe_jscode=True,
 
-        update_mode=GridUpdateMode.VALUE_CHANGED,
+        update_mode=GridUpdateMode.MANUAL,
 
         fit_columns_on_grid_load=False,
 
@@ -446,12 +458,14 @@ def mostrar_asistencia(
 
         theme="streamlit",
 
+        enable_enterprise_modules=False,
+
         key="tabla_asistencia"
 
     )
 
     # =====================================================
-    # DF EDITADO
+    # DATA EDITADA
     # =====================================================
 
     df_editado = pd.DataFrame(
@@ -469,7 +483,7 @@ def mostrar_asistencia(
     )
 
     # =====================================================
-    # GUARDAR
+    # BOTON GUARDAR
     # =====================================================
 
     if st.button(
@@ -479,7 +493,7 @@ def mostrar_asistencia(
         try:
 
             # =============================================
-            # NO VOLVER A LEER DRIVE
+            # COMPARAR MEMORIA
             # =============================================
 
             df_drive = (
@@ -518,7 +532,7 @@ def mostrar_asistencia(
                         })
 
             # =============================================
-            # BATCH UPDATE
+            # UPDATE MASIVO
             # =============================================
 
             batch_data = []
@@ -552,11 +566,19 @@ def mostrar_asistencia(
                     ]
                 })
 
+            # =============================================
+            # GUARDAR DRIVE
+            # =============================================
+
             if len(batch_data) > 0:
 
                 hoja_asistencia.batch_update(
                     batch_data
                 )
+
+            # =============================================
+            # MENSAJE
+            # =============================================
 
             st.success(
                 "✅ Asistencia guardada correctamente"
@@ -565,5 +587,5 @@ def mostrar_asistencia(
         except Exception as e:
 
             st.error(
-                f"❌ Error: {e}"
+                f"❌ Error guardando: {e}"
             )
