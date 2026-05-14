@@ -1,13 +1,10 @@
-# asistencia.py
-
 import streamlit as st
 import pandas as pd
 from datetime import datetime
 
-
-# =========================================================
-# CONFIG
-# =========================================================
+# =====================================================
+# COLUMNAS
+# =====================================================
 
 COLUMNAS_DIAS = [f"DIA_{i}" for i in range(1, 32)]
 
@@ -23,22 +20,21 @@ COLUMNAS_BASE = [
     "PERIODO"
 ]
 
-COLUMNAS_FINAL = COLUMNAS_BASE + COLUMNAS_DIAS
+COLUMNAS_FINALES = COLUMNAS_BASE + COLUMNAS_DIAS
 
-
-# =========================================================
-# LEER DRIVE
-# =========================================================
+# =====================================================
+# CACHE
+# =====================================================
 
 @st.cache_data(ttl=60)
-def leer_drive_data(data):
+def cargar_datos_drive(registros):
 
-    df = pd.DataFrame(data)
+    df = pd.DataFrame(registros)
 
     if df.empty:
-        return pd.DataFrame(columns=COLUMNAS_FINAL)
 
-    # NORMALIZAR
+        return pd.DataFrame(columns=COLUMNAS_FINALES)
+
     df.columns = (
         df.columns
         .astype(str)
@@ -46,108 +42,52 @@ def leer_drive_data(data):
         .str.upper()
     )
 
-    # ASEGURAR COLUMNAS
-    for col in COLUMNAS_FINAL:
+    for col in COLUMNAS_FINALES:
 
         if col not in df.columns:
+
             df[col] = ""
 
-    # SOLO COLUMNAS NECESARIAS
-    df = df[COLUMNAS_FINAL]
+    df = df[COLUMNAS_FINALES]
 
-    # LIMPIAR NONE
     df = df.fillna("")
-
-    for col in COLUMNAS_DIAS:
-
-        df[col] = (
-            df[col]
-            .astype(str)
-            .replace("None", "")
-            .replace("nan", "")
-        )
 
     return df
 
+# =====================================================
+# MAIN
+# =====================================================
 
-# =========================================================
-# PREPARAR DATA
-# =========================================================
-
-def preparar_data(
+def mostrar_asistencia(
     hoja_asistencia,
     hoja_colaboradores
 ):
 
-    # =========================================
-    # DRIVE
-    # =========================================
+    st.subheader("🗓️ Control de Asistencia")
 
-    registros_drive = hoja_asistencia.get_all_records()
+    # =================================================
+    # CARGA DRIVE
+    # =================================================
 
-    df_drive = leer_drive_data(registros_drive)
+    registros_asistencia = hoja_asistencia.get_all_records()
 
-    # =========================================
-    # COLABORADORES
-    # =========================================
-
-    colaboradores = hoja_colaboradores.get_all_records()
-
-    df_colab = pd.DataFrame(colaboradores)
-
-    if df_colab.empty:
-        return df_drive
-
-    df_colab.columns = (
-        df_colab.columns
-        .astype(str)
-        .str.strip()
-        .str.upper()
+    df_drive = cargar_datos_drive(
+        registros_asistencia
     )
 
-    # =========================================
-    # COLUMNAS
-    # =========================================
-
-    columnas_necesarias = [
-        "SUPERVISOR A CARGO",
-        "COORDINADOR",
-        "DEPARTAMENTO",
-        "PROVINCIA",
-        "DNI",
-        "NOMBRES",
-        "ESTADO"
-    ]
-
-    for col in columnas_necesarias:
-
-        if col not in df_colab.columns:
-            df_colab[col] = ""
-
-    # =========================================
-    # RENOMBRE
-    # =========================================
-
-    df_colab = df_colab.rename(columns={
-
-        "SUPERVISOR A CARGO": "SUPERVISOR",
-        "NOMBRES": "NOMBRE"
-
-    })
-
-    # =========================================
-    # MES
-    # =========================================
+    # =================================================
+    # MES ACTUAL
+    # =================================================
 
     hoy = datetime.now()
 
-    mes_actual = hoy.month
-
     periodo_actual = hoy.strftime("%Y-%m")
 
-    # =========================================
+    mes_actual = hoy.month
+
+    # =================================================
     # FILTRO MES
-    # =========================================
+    # =================================================
 
     if not df_drive.empty:
 
@@ -160,96 +100,94 @@ def preparar_data(
 
         df_mes = pd.DataFrame()
 
-    # =========================================
+    # =================================================
     # SI NO EXISTE MES
-    # =========================================
+    # =================================================
 
     if df_mes.empty:
 
+        registros_colab = hoja_colaboradores.get_all_records()
+
+        df_colab = pd.DataFrame(registros_colab)
+
+        df_colab.columns = (
+            df_colab.columns
+            .astype(str)
+            .str.strip()
+            .str.upper()
+        )
+
         df_mes = pd.DataFrame()
 
-        df_mes["SUPERVISOR"] = df_colab["SUPERVISOR"]
-        df_mes["COORDINADOR"] = df_colab["COORDINADOR"]
-        df_mes["DEPARTAMENTO"] = df_colab["DEPARTAMENTO"]
-        df_mes["PROVINCIA"] = df_colab["PROVINCIA"]
+        df_mes["SUPERVISOR"] = df_colab.get(
+            "SUPERVISOR A CARGO",
+            ""
+        )
+
+        df_mes["COORDINADOR"] = df_colab.get(
+            "COORDINADOR",
+            ""
+        )
+
+        df_mes["DEPARTAMENTO"] = df_colab.get(
+            "DEPARTAMENTO",
+            ""
+        )
+
+        df_mes["PROVINCIA"] = df_colab.get(
+            "PROVINCIA",
+            ""
+        )
 
         df_mes["DNI"] = (
-            df_colab["DNI"]
+            df_colab.get("DNI", "")
             .astype(str)
         )
 
-        df_mes["NOMBRE"] = df_colab["NOMBRE"]
-        df_mes["ESTADO"] = df_colab["ESTADO"]
+        df_mes["NOMBRE"] = df_colab.get(
+            "NOMBRES",
+            ""
+        )
+
+        df_mes["ESTADO"] = df_colab.get(
+            "ESTADO",
+            ""
+        )
 
         df_mes["MES"] = mes_actual
+
         df_mes["PERIODO"] = periodo_actual
 
         for col in COLUMNAS_DIAS:
+
             df_mes[col] = ""
 
-        df_mes = df_mes.fillna("")
-
-        return df_mes
-
-    # =========================================
-    # SI EXISTE MES
-    # =========================================
+    # =================================================
+    # LIMPIAR
+    # =================================================
 
     df_mes = df_mes.fillna("")
 
-    return df_mes
-
-
-# =========================================================
-# MOSTRAR
-# =========================================================
-
-def mostrar_asistencia(
-    hoja_asistencia,
-    hoja_colaboradores
-):
-
-    st.subheader("🗓️ Control de Asistencia")
-
-    # =====================================================
-    # CARGA UNICA
-    # =====================================================
-
-    if "df_asistencia" not in st.session_state:
-
-        st.session_state.df_asistencia = preparar_data(
-            hoja_asistencia,
-            hoja_colaboradores
-        )
-
-    df = st.session_state.df_asistencia.copy()
-
-    # =====================================================
-    # LIMPIAR NONE
-    # =====================================================
-
-    df = df.fillna("")
-
     for col in COLUMNAS_DIAS:
 
-        df[col] = (
-            df[col]
+        df_mes[col] = (
+            df_mes[col]
             .astype(str)
             .replace("None", "")
             .replace("nan", "")
         )
 
-    # =====================================================
+    # =================================================
     # FILTROS
-    # =====================================================
+    # =================================================
 
     col1, col2 = st.columns(2)
 
     with col1:
 
-        supervisores = ["TODOS"] + sorted([
+        lista_sup = ["TODOS"] + sorted([
             x for x in
-            df["SUPERVISOR"]
+            df_mes["SUPERVISOR"]
             .astype(str)
             .unique()
             .tolist()
@@ -258,14 +196,14 @@ def mostrar_asistencia(
 
         filtro_sup = st.selectbox(
             "🔎 Supervisor",
-            supervisores
+            lista_sup
         )
 
     with col2:
 
-        coordinadores = ["TODOS"] + sorted([
+        lista_coord = ["TODOS"] + sorted([
             x for x in
-            df["COORDINADOR"]
+            df_mes["COORDINADOR"]
             .astype(str)
             .unique()
             .tolist()
@@ -274,47 +212,49 @@ def mostrar_asistencia(
 
         filtro_coord = st.selectbox(
             "🔎 Coordinador",
-            coordinadores
+            lista_coord
         )
 
-    # =====================================================
-    # FILTRO
-    # =====================================================
+    # =================================================
+    # FILTRAR
+    # =================================================
 
     if filtro_sup != "TODOS":
 
-        df = df[
-            df["SUPERVISOR"] == filtro_sup
+        df_mes = df_mes[
+            df_mes["SUPERVISOR"] == filtro_sup
         ]
 
     if filtro_coord != "TODOS":
 
-        df = df[
-            df["COORDINADOR"] == filtro_coord
+        df_mes = df_mes[
+            df_mes["COORDINADOR"] == filtro_coord
         ]
 
-    # =====================================================
+    # =================================================
     # COLUMNAS
-    # =====================================================
+    # =================================================
 
     columnas_visibles = [
+
         "PROVINCIA",
         "DNI",
         "NOMBRE",
         "ESTADO"
+
     ] + COLUMNAS_DIAS
 
-    # =====================================================
+    # =================================================
     # DIA EDITABLE
-    # =====================================================
+    # =================================================
 
     dia_actual = datetime.now().day
 
     columna_editable = f"DIA_{dia_actual}"
 
-    # =====================================================
+    # =================================================
     # CONFIG
-    # =====================================================
+    # =================================================
 
     config = {}
 
@@ -328,8 +268,6 @@ def mostrar_asistencia(
 
                 options=["", "A", "F"],
 
-                default="",
-
                 width="small",
 
                 required=False,
@@ -340,7 +278,7 @@ def mostrar_asistencia(
 
         else:
 
-            config[col] = st.column_config.Column(
+            config[col] = st.column_config.TextColumn(
 
                 col,
 
@@ -350,15 +288,13 @@ def mostrar_asistencia(
 
             )
 
-    # =====================================================
+    # =================================================
     # EDITOR
-    # =====================================================
+    # =================================================
 
     edited_df = st.data_editor(
 
-        df[columnas_visibles],
-
-        key="EDITOR_ASISTENCIA",
+        df_mes[columnas_visibles],
 
         use_container_width=True,
 
@@ -370,15 +306,12 @@ def mostrar_asistencia(
 
         column_config=config,
 
-        disabled=[
-            c for c in columnas_visibles
-            if not c.startswith("DIA_")
-        ]
+        key="editor_asistencia"
     )
 
-    # =====================================================
+    # =================================================
     # GUARDAR
-    # =====================================================
+    # =================================================
 
     if st.button("💾 Guardar Asistencia"):
 
@@ -388,43 +321,42 @@ def mostrar_asistencia(
             # RECUPERAR COLUMNAS
             # =========================================
 
-            for col in df.columns:
+            for col in COLUMNAS_BASE:
 
-                if col not in edited_df.columns:
+                edited_df[col] = df_mes[col].values
 
-                    edited_df[col] = df[col].values
+            edited_df["MES"] = mes_actual
+            edited_df["PERIODO"] = periodo_actual
 
-            # =========================================
-            # LIMPIAR
-            # =========================================
-
-            edited_df = edited_df.fillna("")
+            edited_df = edited_df[COLUMNAS_FINALES]
 
             # =========================================
-            # ORDEN
+            # HISTORICO
             # =========================================
 
-            edited_df = edited_df[COLUMNAS_FINAL]
+            df_historico = df_drive[
+                df_drive["PERIODO"].astype(str)
+                != periodo_actual
+            ].copy()
+
+            df_final = pd.concat([
+                df_historico,
+                edited_df
+            ])
+
+            df_final = df_final.fillna("")
 
             # =========================================
-            # GUARDAR DRIVE
+            # DRIVE
             # =========================================
 
             hoja_asistencia.clear()
 
             hoja_asistencia.update(
-
-                [edited_df.columns.tolist()]
+                [df_final.columns.tolist()]
                 +
-                edited_df.values.tolist()
-
+                df_final.values.tolist()
             )
-
-            # =========================================
-            # SESSION
-            # =========================================
-
-            st.session_state.df_asistencia = edited_df
 
             st.success(
                 "✅ Asistencia guardada correctamente"
