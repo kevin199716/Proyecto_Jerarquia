@@ -8,9 +8,6 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
-# =========================
-# IMPORTS DEL PROYECTO
-# =========================
 import registro_mod as registro
 
 from auth import cargar_usuarios, login
@@ -21,7 +18,7 @@ from asistencia import mostrar_asistencia
 
 
 # =========================
-# CONFIG STREAMLIT
+# CONFIG
 # =========================
 st.set_page_config(
     page_title="Sistema",
@@ -30,18 +27,68 @@ st.set_page_config(
 
 
 # =========================
-# CACHE DE CONEXIONES
+# ESTILOS / CABECERA
 # =========================
-@st.cache_resource(show_spinner=False)
-def get_worksheet(nombre_archivo: str, nombre_worksheet: str):
-    return conectar_google_sheets(
-        nombre_archivo,
-        nombre_worksheet
+def pintar_estilos_base():
+    st.markdown(
+        """
+        <style>
+            .bloque-usuario {
+                background: linear-gradient(90deg, #0B5ED7, #0D6EFD);
+                color: white;
+                padding: 12px 16px;
+                border-radius: 12px;
+                margin-bottom: 12px;
+                font-weight: 600;
+            }
+            .bloque-usuario span {
+                display: inline-block;
+                margin-right: 22px;
+            }
+            div[data-testid="stRadio"] > div {
+                background: #F3F7FF;
+                padding: 10px;
+                border-radius: 12px;
+                border: 1px solid #D6E6FF;
+            }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
+
+
+def mostrar_barra_usuario(rol, razon):
+    usuario = (
+        st.session_state.get("usuario")
+        or st.session_state.get("username")
+        or st.session_state.get("user")
+        or "Usuario"
+    )
+
+    razon_txt = razon if razon else "ALL"
+
+    st.markdown(
+        f"""
+        <div class="bloque-usuario">
+            <span>👤 Usuario: {usuario}</span>
+            <span>🔐 Rol: {rol}</span>
+            <span>🏢 Razón: {razon_txt}</span>
+        </div>
+        """,
+        unsafe_allow_html=True
     )
 
 
 # =========================
-# USUARIOS / LOGIN
+# CACHE GOOGLE SHEETS
+# =========================
+@st.cache_resource(show_spinner=False)
+def get_worksheet(nombre_archivo, nombre_worksheet):
+    return conectar_google_sheets(nombre_archivo, nombre_worksheet)
+
+
+# =========================
+# LOGIN
 # =========================
 USUARIOS = cargar_usuarios()
 
@@ -55,47 +102,31 @@ if not st.session_state["autenticado"]:
 
 
 # =========================
-# VARIABLES DE SESION
+# VARIABLES
 # =========================
 rol = st.session_state.get("rol", "")
 razon = st.session_state.get("razon", "")
 
 
 # =========================
-# GOOGLE SHEETS
+# UI GENERAL
 # =========================
-hoja_colaboradores = get_worksheet(
-    "maestra_vendedores",
-    "colaboradores"
-)
+pintar_estilos_base()
 
-hoja_ubicaciones = get_worksheet(
-    "maestra_vendedores",
-    "ubicaciones"
-)
-
-hoja_asistencia = get_worksheet(
-    "maestra_vendedores",
-    "Asistencia"
-)
-
-
-# =========================
-# UI PRINCIPAL
-# =========================
 st.title("📊 Sistema de Vendedores")
+mostrar_barra_usuario(rol, razon)
 
 
-# IMPORTANTE:
-# No usamos st.tabs para evitar que Streamlit ejecute Registro, Bajas y Asistencia al mismo tiempo.
-# Con radio solo se ejecuta el modulo seleccionado, reduciendo congelamientos en Render.
-def menu_paginas(opciones, key_menu):
+# =====================================================
+# MENU
+# =====================================================
+def menu_paginas(opciones):
     return st.radio(
         "Módulo",
         opciones,
         horizontal=True,
         label_visibility="collapsed",
-        key=key_menu
+        key=f"menu_principal_{rol}"
     )
 
 
@@ -103,19 +134,24 @@ def menu_paginas(opciones, key_menu):
 # BACKOFFICE
 # =====================================================
 if rol == "backoffice":
-
-    pagina = menu_paginas(
-        ["Registro", "Bajas", "Asistencia"],
-        "menu_backoffice"
-    )
+    pagina = menu_paginas([
+        "Registro",
+        "Bajas",
+        "Asistencia"
+    ])
 
     if pagina == "Registro":
+        hoja_colaboradores = get_worksheet("maestra_vendedores", "colaboradores")
+        hoja_ubicaciones = get_worksheet("maestra_vendedores", "ubicaciones")
+
         mostrar_formulario(
             hoja_colaboradores,
             hoja_ubicaciones
         )
 
     elif pagina == "Bajas":
+        hoja_colaboradores = get_worksheet("maestra_vendedores", "colaboradores")
+
         df = registro.mostrar_tabla(
             hoja_colaboradores,
             razon
@@ -129,11 +165,14 @@ if rol == "backoffice":
             )
 
     elif pagina == "Asistencia":
+        hoja_asistencia = get_worksheet("maestra_vendedores", "Asistencia")
+        hoja_colaboradores = get_worksheet("maestra_vendedores", "colaboradores")
+
         mostrar_asistencia(
             hoja_asistencia,
             hoja_colaboradores,
-            razon_usuario=razon,
-            rol_usuario=rol
+            razon=razon,
+            rol=rol
         )
 
 
@@ -141,21 +180,26 @@ if rol == "backoffice":
 # DEALER
 # =====================================================
 elif rol == "dealer":
-
     st.subheader(f"📌 Socio: {razon}")
 
-    pagina = menu_paginas(
-        ["Registro", "Bajas", "Asistencia"],
-        "menu_dealer"
-    )
+    pagina = menu_paginas([
+        "Registro",
+        "Bajas",
+        "Asistencia"
+    ])
 
     if pagina == "Registro":
+        hoja_colaboradores = get_worksheet("maestra_vendedores", "colaboradores")
+        hoja_ubicaciones = get_worksheet("maestra_vendedores", "ubicaciones")
+
         mostrar_formulario(
             hoja_colaboradores,
             hoja_ubicaciones
         )
 
     elif pagina == "Bajas":
+        hoja_colaboradores = get_worksheet("maestra_vendedores", "colaboradores")
+
         df = registro.mostrar_tabla(
             hoja_colaboradores,
             razon
@@ -169,11 +213,14 @@ elif rol == "dealer":
             )
 
     elif pagina == "Asistencia":
+        hoja_asistencia = get_worksheet("maestra_vendedores", "Asistencia")
+        hoja_colaboradores = get_worksheet("maestra_vendedores", "colaboradores")
+
         mostrar_asistencia(
             hoja_asistencia,
             hoja_colaboradores,
-            razon_usuario=razon,
-            rol_usuario=rol
+            razon=razon,
+            rol=rol
         )
 
 
@@ -181,15 +228,17 @@ elif rol == "dealer":
 # EDITOR
 # =====================================================
 elif rol == "editor":
-
     st.subheader("✏️ Modo edición")
 
-    pagina = menu_paginas(
-        ["Edición", "Asistencia"],
-        "menu_editor"
-    )
+    pagina = menu_paginas([
+        "Edición",
+        "Asistencia"
+    ])
 
     if pagina == "Edición":
+        hoja_colaboradores = get_worksheet("maestra_vendedores", "colaboradores")
+        hoja_ubicaciones = get_worksheet("maestra_vendedores", "ubicaciones")
+
         df = registro.mostrar_tabla(
             hoja_colaboradores
         )
@@ -202,11 +251,14 @@ elif rol == "editor":
             )
 
     elif pagina == "Asistencia":
+        hoja_asistencia = get_worksheet("maestra_vendedores", "Asistencia")
+        hoja_colaboradores = get_worksheet("maestra_vendedores", "colaboradores")
+
         mostrar_asistencia(
             hoja_asistencia,
             hoja_colaboradores,
-            razon_usuario=razon,
-            rol_usuario=rol
+            razon=razon,
+            rol=rol
         )
 
 
