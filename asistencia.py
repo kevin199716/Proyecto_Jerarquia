@@ -1,3 +1,7 @@
+# =========================
+# asistencia.py
+# =========================
+
 import streamlit as st
 import pandas as pd
 from datetime import datetime
@@ -27,9 +31,9 @@ COLUMNAS_FINALES = COLUMNAS_BASE + COLUMNAS_DIAS
 # =====================================================
 
 @st.cache_data(ttl=60)
-def cargar_datos_drive(registros):
+def leer_asistencia(data):
 
-    df = pd.DataFrame(registros)
+    df = pd.DataFrame(data)
 
     if df.empty:
 
@@ -52,6 +56,15 @@ def cargar_datos_drive(registros):
 
     df = df.fillna("")
 
+    for col in COLUMNAS_DIAS:
+
+        df[col] = (
+            df[col]
+            .astype(str)
+            .replace("None", "")
+            .replace("nan", "")
+        )
+
     return df
 
 # =====================================================
@@ -66,17 +79,17 @@ def mostrar_asistencia(
     st.subheader("🗓️ Control de Asistencia")
 
     # =================================================
-    # CARGA DRIVE
+    # DRIVE
     # =================================================
 
-    registros_asistencia = hoja_asistencia.get_all_records()
+    registros_drive = hoja_asistencia.get_all_records()
 
-    df_drive = cargar_datos_drive(
-        registros_asistencia
+    df_drive = leer_asistencia(
+        registros_drive
     )
 
     # =================================================
-    # MES ACTUAL
+    # FECHA
     # =================================================
 
     hoy = datetime.now()
@@ -155,7 +168,6 @@ def mostrar_asistencia(
         )
 
         df_mes["MES"] = mes_actual
-
         df_mes["PERIODO"] = periodo_actual
 
         for col in COLUMNAS_DIAS:
@@ -185,7 +197,7 @@ def mostrar_asistencia(
 
     with col1:
 
-        lista_sup = ["TODOS"] + sorted([
+        supervisores = ["TODOS"] + sorted([
             x for x in
             df_mes["SUPERVISOR"]
             .astype(str)
@@ -196,12 +208,12 @@ def mostrar_asistencia(
 
         filtro_sup = st.selectbox(
             "🔎 Supervisor",
-            lista_sup
+            supervisores
         )
 
     with col2:
 
-        lista_coord = ["TODOS"] + sorted([
+        coordinadores = ["TODOS"] + sorted([
             x for x in
             df_mes["COORDINADOR"]
             .astype(str)
@@ -212,11 +224,11 @@ def mostrar_asistencia(
 
         filtro_coord = st.selectbox(
             "🔎 Coordinador",
-            lista_coord
+            coordinadores
         )
 
     # =================================================
-    # FILTRAR
+    # FILTRO
     # =================================================
 
     if filtro_sup != "TODOS":
@@ -236,16 +248,14 @@ def mostrar_asistencia(
     # =================================================
 
     columnas_visibles = [
-
         "PROVINCIA",
         "DNI",
         "NOMBRE",
         "ESTADO"
-
     ] + COLUMNAS_DIAS
 
     # =================================================
-    # DIA EDITABLE
+    # DIA ACTUAL
     # =================================================
 
     dia_actual = datetime.now().day
@@ -296,6 +306,8 @@ def mostrar_asistencia(
 
         df_mes[columnas_visibles],
 
+        key="editor_asistencia",
+
         use_container_width=True,
 
         hide_index=True,
@@ -304,9 +316,7 @@ def mostrar_asistencia(
 
         height=700,
 
-        column_config=config,
-
-        key="editor_asistencia"
+        column_config=config
     )
 
     # =================================================
@@ -316,10 +326,6 @@ def mostrar_asistencia(
     if st.button("💾 Guardar Asistencia"):
 
         try:
-
-            # =========================================
-            # RECUPERAR COLUMNAS
-            # =========================================
 
             for col in COLUMNAS_BASE:
 
@@ -334,20 +340,26 @@ def mostrar_asistencia(
             # HISTORICO
             # =========================================
 
-            df_historico = df_drive[
-                df_drive["PERIODO"].astype(str)
-                != periodo_actual
-            ].copy()
+            if not df_drive.empty:
 
-            df_final = pd.concat([
-                df_historico,
-                edited_df
-            ])
+                df_historico = df_drive[
+                    df_drive["PERIODO"].astype(str)
+                    != periodo_actual
+                ].copy()
+
+                df_final = pd.concat([
+                    df_historico,
+                    edited_df
+                ])
+
+            else:
+
+                df_final = edited_df.copy()
 
             df_final = df_final.fillna("")
 
             # =========================================
-            # DRIVE
+            # GOOGLE SHEETS
             # =========================================
 
             hoja_asistencia.clear()
@@ -361,6 +373,8 @@ def mostrar_asistencia(
             st.success(
                 "✅ Asistencia guardada correctamente"
             )
+
+            st.cache_data.clear()
 
         except Exception as e:
 

@@ -1,4 +1,10 @@
+# =========================
+# app_maestra_vendedores.py
+# =========================
+
 import streamlit as st
+import traceback
+
 from sheets import conectar_google_sheets
 from asistencia import mostrar_asistencia
 
@@ -18,7 +24,14 @@ st.set_page_config(
 st.title("📊 Sistema de Vendedores")
 
 # =====================================================
-# CONEXION
+# SESSION
+# =====================================================
+
+if "logeado" not in st.session_state:
+    st.session_state.logeado = True
+
+# =====================================================
+# GOOGLE SHEETS
 # =====================================================
 
 try:
@@ -33,9 +46,10 @@ try:
         "Asistencia"
     )
 
-except Exception as e:
+except Exception:
 
-    st.error(f"Error conexión Google Sheets: {e}")
+    st.error("❌ Error conexión Google Sheets")
+    st.code(traceback.format_exc())
     st.stop()
 
 # =====================================================
@@ -54,7 +68,7 @@ tab1, tab2, tab3 = st.tabs([
 
 with tab1:
 
-    st.info("Registro OK")
+    st.success("✅ Registro OK")
 
 # =====================================================
 # BAJAS
@@ -62,7 +76,7 @@ with tab1:
 
 with tab2:
 
-    st.info("Bajas OK")
+    st.success("✅ Bajas OK")
 
 # =====================================================
 # ASISTENCIA
