@@ -1,3 +1,7 @@
+# =====================================================
+# ASISTENCIA.PY
+# =====================================================
+
 import streamlit as st
 import pandas as pd
 
@@ -220,7 +224,7 @@ def generar_base(
     return df_periodo[columnas_finales]
 
 # =====================================================
-# MOSTRAR
+# MAIN
 # =====================================================
 
 def mostrar_asistencia(
@@ -240,7 +244,7 @@ def mostrar_asistencia(
     )
 
     # =====================================================
-    # ORDENAR
+    # ORDEN
     # =====================================================
 
     df = df.sort_values(
@@ -285,7 +289,7 @@ def mostrar_asistencia(
         )
 
     # =====================================================
-    # FILTRAR
+    # FILTROS
     # =====================================================
 
     if filtro_supervisor != "TODOS":
@@ -303,7 +307,7 @@ def mostrar_asistencia(
         ]
 
     # =====================================================
-    # SOLO SEMANA ACTUAL
+    # INFO
     # =====================================================
 
     st.info(
@@ -342,7 +346,7 @@ def mostrar_asistencia(
             gb.configure_column(
                 col,
                 editable=False,
-                width=170
+                width=140
             )
 
         elif col.startswith("DIA_"):
@@ -350,7 +354,7 @@ def mostrar_asistencia(
             gb.configure_column(
                 col,
                 editable=col in dias_editables,
-                width=90,
+                width=85,
                 cellEditor="agSelectCellEditor",
                 cellEditorParams={
                     "values": ["", "A", "F"]
@@ -396,8 +400,8 @@ def mostrar_asistencia(
     gb.configure_grid_options(
         suppressRowTransform=True,
         suppressAnimationFrame=True,
-        rowBuffer=10,
-        domLayout='normal'
+        rowBuffer=2,
+        domLayout='autoHeight'
     )
 
     grid_options = gb.build()
@@ -409,15 +413,38 @@ def mostrar_asistencia(
     response = AgGrid(
         df,
         gridOptions=grid_options,
-        update_mode=GridUpdateMode.VALUE_CHANGED,
-        data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
+
+        update_mode=GridUpdateMode.MANUAL,
+
+        data_return_mode=DataReturnMode.AS_INPUT,
+
         allow_unsafe_jscode=True,
-        fit_columns_on_grid_load=False,
+
+        fit_columns_on_grid_load=True,
+
         enable_enterprise_modules=False,
+
         theme="streamlit",
-        height=650,
+
+        height=720,
+
         reload_data=False,
-        key="GRID_ASISTENCIA"
+
+        key="GRID_ASISTENCIA",
+
+        custom_css={
+            ".ag-root-wrapper": {
+                "font-size": "13px"
+            },
+            ".ag-header-cell-label": {
+                "font-size": "12px",
+                "font-weight": "bold"
+            },
+            ".ag-cell": {
+                "padding-left": "6px",
+                "padding-right": "6px"
+            }
+        }
     )
 
     df_editado = pd.DataFrame(
