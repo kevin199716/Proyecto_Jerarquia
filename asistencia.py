@@ -1,5 +1,6 @@
 # =====================================================
 # asistencia.py
+# VERSION ESTABLE - SIN FREEZE
 # =====================================================
 
 import streamlit as st
@@ -7,7 +8,7 @@ import pandas as pd
 from datetime import datetime
 
 # =====================================================
-# CONFIG
+# COLUMNAS
 # =====================================================
 
 COLUMNAS_DIAS = [
@@ -32,13 +33,13 @@ COLUMNAS_FINAL = (
 )
 
 # =====================================================
-# LEER DRIVE
+# CACHE LECTURA
 # =====================================================
 
 @st.cache_data(ttl=60)
-def leer_drive(worksheet):
+def leer_asistencia(_worksheet):
 
-    valores = worksheet.get_all_values()
+    valores = _worksheet.get_all_values()
 
     if not valores:
 
@@ -68,6 +69,10 @@ def leer_drive(worksheet):
         filas_ok,
         columns=headers
     )
+
+    # =================================================
+    # CREAR COLUMNAS FALTANTES
+    # =================================================
 
     for col in COLUMNAS_FINAL:
 
@@ -166,7 +171,7 @@ def preparar_data(
     # DRIVE
     # =================================================
 
-    df_drive = leer_drive(
+    df_drive = leer_asistencia(
         hoja_asistencia
     )
 
@@ -196,7 +201,7 @@ def preparar_data(
     ].copy()
 
     # =================================================
-    # SI NO EXISTE
+    # SI NO EXISTE DATA DEL MES
     # =================================================
 
     if df_mes.empty:
@@ -215,17 +220,14 @@ def preparar_data(
 
     else:
 
-        claves = set(
+        # =============================================
+        # SOLO DNI
+        # =============================================
 
-            (
-                df_mes["DNI"]
-                + "|"
-                + df_mes["SUPERVISOR"]
-                + "|"
-                + df_mes["COORDINADOR"]
-                + "|"
-                + df_mes["PROVINCIA"]
-            ).tolist()
+        claves = set(
+            df_mes["DNI"]
+            .astype(str)
+            .tolist()
         )
 
         nuevos = []
@@ -236,36 +238,14 @@ def preparar_data(
                 row.get("DNI", "")
             ).strip()
 
-            supervisor = str(
-                row.get(
-                    "SUPERVISOR A CARGO",
-                    ""
-                )
-            ).strip()
+            if dni == "":
+                continue
 
-            coordinador = str(
-                row.get(
-                    "COORDINADOR",
-                    ""
-                )
-            ).strip()
+            # =========================================
+            # SOLO DNI
+            # =========================================
 
-            provincia = str(
-                row.get(
-                    "PROVINCIA",
-                    ""
-                )
-            ).strip()
-
-            clave = (
-                dni
-                + "|"
-                + supervisor
-                + "|"
-                + coordinador
-                + "|"
-                + provincia
-            )
+            clave = dni
 
             if clave not in claves:
 
@@ -274,6 +254,10 @@ def preparar_data(
                 )
 
                 claves.add(clave)
+
+        # =============================================
+        # AGREGAR NUEVOS
+        # =============================================
 
         if nuevos:
 
@@ -284,6 +268,17 @@ def preparar_data(
                 ],
                 ignore_index=True
             )
+
+    # =================================================
+    # LIMPIAR DUPLICADOS
+    # =================================================
+
+    df_mes = df_mes.drop_duplicates(
+        subset=["PERIODO", "DNI"],
+        keep="first"
+    )
+
+    df_mes = df_mes.fillna("")
 
     return (
         df_drive.fillna(""),
@@ -304,12 +299,10 @@ def mostrar_asistencia(
     )
 
     # =================================================
-    # CACHE SESSION
+    # SESSION
     # =================================================
 
-    if (
-        "df_asistencia" not in st.session_state
-    ):
+    if "df_asistencia" not in st.session_state:
 
         df_drive, df_mes = preparar_data(
             hoja_asistencia,
@@ -323,6 +316,10 @@ def mostrar_asistencia(
         st.session_state[
             "df_asistencia"
         ] = df_mes
+
+    # =================================================
+    # DATA
+    # =================================================
 
     df_drive = st.session_state[
         "df_asistencia_drive"
@@ -395,19 +392,65 @@ def mostrar_asistencia(
         ]
 
     # =================================================
-    # TABLA STREAMLIT
+    # COLUMNAS VISIBLES
     # =================================================
 
-    columnas = [
+    columnas_visibles = [
+
         "PROVINCIA",
         "DNI",
         "NOMBRE",
         "ESTADO"
+
     ] + COLUMNAS_DIAS
 
-    st.data_editor(
+    # =================================================
+    # SOLO SEMANA ACTUAL
+    # =================================================
 
-        df[columnas],
+    dia_actual = datetime.now().day
+
+    columnas_editables = [
+        f"DIA_{dia_actual}"
+    ]
+
+    # =================================================
+    # CONFIG
+    # =================================================
+
+    config = {}
+
+    for col in columnas_visibles:
+
+        if col.startswith("DIA_"):
+
+            editable = (
+                col in columnas_editables
+            )
+
+            config[col] = st.column_config.SelectboxColumn(
+                col,
+                options=["", "A", "F"],
+                required=False,
+                width="small",
+                disabled=not editable
+            )
+
+        else:
+
+            config[col] = st.column_config.TextColumn(
+                col,
+                width="medium",
+                disabled=True
+            )
+
+    # =================================================
+    # DATA EDITOR
+    # =================================================
+
+    edited_df = st.data_editor(
+
+        df[columnas_visibles],
 
         use_container_width=True,
 
@@ -415,7 +458,11 @@ def mostrar_asistencia(
 
         num_rows="fixed",
 
-        key="EDITOR_ASISTENCIA"
+        key="ASISTENCIA_EDITOR",
+
+        column_config=config,
+
+        height=700
     )
 
     # =================================================
@@ -428,21 +475,19 @@ def mostrar_asistencia(
 
         try:
 
-            df_editado = st.session_state[
-                "EDITOR_ASISTENCIA"
-            ]
-
-            df_editado = pd.DataFrame(
-                df_editado
-            ).fillna("")
+            # =========================================
+            # RECUPERAR COLUMNAS BASE
+            # =========================================
 
             for col in COLUMNAS_BASE:
 
-                if col not in df_editado.columns:
+                edited_df[col] = (
+                    df[col].values
+                )
 
-                    df_editado[col] = (
-                        df[col].values
-                    )
+            # =========================================
+            # HISTORICO
+            # =========================================
 
             periodo_actual = (
                 datetime.now()
@@ -454,10 +499,14 @@ def mostrar_asistencia(
                 != periodo_actual
             ].copy()
 
+            # =========================================
+            # FINAL
+            # =========================================
+
             df_final = pd.concat(
                 [
                     historico,
-                    df_editado
+                    edited_df
                 ],
                 ignore_index=True
             )
@@ -466,15 +515,36 @@ def mostrar_asistencia(
                 COLUMNAS_FINAL
             ]
 
+            # =========================================
+            # ELIMINAR DUPLICADOS
+            # =========================================
+
+            df_final = df_final.drop_duplicates(
+                subset=["PERIODO", "DNI"],
+                keep="first"
+            )
+
+            df_final = df_final.fillna("")
+
+            # =========================================
+            # LIMPIAR DRIVE
+            # =========================================
+
             hoja_asistencia.clear()
 
             hoja_asistencia.update(
+
                 [
                     df_final.columns.tolist()
                 ]
                 +
                 df_final.values.tolist()
+
             )
+
+            # =========================================
+            # LIMPIAR CACHE
+            # =========================================
 
             st.cache_data.clear()
 
