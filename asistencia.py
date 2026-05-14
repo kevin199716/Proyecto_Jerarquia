@@ -1,6 +1,10 @@
 # =========================================================
 # asistencia.py
-# VERSION FINAL ANTIFREEZE + GUARDA DRIVE
+# VERSION FINAL ESTABLE
+# NO FREEZE
+# SOLO SEMANA ACTUAL
+# GUARDA REAL DRIVE
+# ORDENA COLUMNAS
 # =========================================================
 
 import streamlit as st
@@ -8,7 +12,6 @@ import pandas as pd
 import calendar
 
 from datetime import datetime
-
 from st_aggrid import (
     AgGrid,
     GridOptionsBuilder,
@@ -20,14 +23,14 @@ from st_aggrid import (
 # CACHE
 # =========================================================
 
-@st.cache_data(ttl=60)
-def cargar_asistencia_cache(
+@st.cache_data(ttl=120)
+def cargar_data_asistencia(
     hoja_asistencia
 ):
     return hoja_asistencia.get_all_records()
 
 # =========================================================
-# COLUMNAS
+# COLUMNAS DIAS
 # =========================================================
 
 def obtener_columnas_dias():
@@ -45,10 +48,23 @@ def obtener_columnas_dias():
     ]
 
 # =========================================================
+# SEMANA ACTUAL
+# =========================================================
+
+def obtener_semana_actual():
+
+    hoy = datetime.now().day
+
+    inicio = ((hoy - 1) // 7) * 7 + 1
+    fin = min(inicio + 6, 31)
+
+    return list(range(inicio, fin + 1))
+
+# =========================================================
 # ASEGURAR COLUMNAS
 # =========================================================
 
-def asegurar_columnas_asistencia(
+def asegurar_columnas(
     hoja_asistencia
 ):
 
@@ -67,13 +83,9 @@ def asegurar_columnas_asistencia(
         obtener_columnas_dias()
     )
 
-    valores = hoja_asistencia.get_all_values()
+    data = hoja_asistencia.get_all_values()
 
-    # =====================================================
-    # VACIO
-    # =====================================================
-
-    if len(valores) == 0:
+    if len(data) == 0:
 
         hoja_asistencia.append_row(
             columnas
@@ -83,7 +95,7 @@ def asegurar_columnas_asistencia(
 
     headers = [
         str(x).strip()
-        for x in valores[0]
+        for x in data[0]
     ]
 
     faltantes = []
@@ -92,10 +104,6 @@ def asegurar_columnas_asistencia(
 
         if c not in headers:
             faltantes.append(c)
-
-    # =====================================================
-    # AGREGAR SOLO FALTANTES
-    # =====================================================
 
     if len(faltantes) > 0:
 
@@ -112,16 +120,16 @@ def asegurar_columnas_asistencia(
 # GENERAR BASE
 # =========================================================
 
-def generar_base_asistencia(
+def generar_base(
     hoja_asistencia,
     df_colab
 ):
 
-    asegurar_columnas_asistencia(
+    asegurar_columnas(
         hoja_asistencia
     )
 
-    data = cargar_asistencia_cache(
+    data = cargar_data_asistencia(
         hoja_asistencia
     )
 
@@ -134,14 +142,99 @@ def generar_base_asistencia(
         df = pd.DataFrame(data)
 
         # =============================================
-        # ASEGURAR COLUMNAS DIAS
+        # NUEVOS REGISTROS
         # =============================================
 
-        for dia in obtener_columnas_dias():
+        dnis_existentes = (
+            df["DNI"]
+            .astype(str)
+            .tolist()
+        )
 
-            if dia not in df.columns:
+        nuevos = df_colab[
+            ~df_colab["DNI"]
+            .astype(str)
+            .isin(dnis_existentes)
+        ]
 
-                df[dia] = ""
+        if len(nuevos) > 0:
+
+            nuevos_registros = []
+
+            for _, row in nuevos.iterrows():
+
+                fila = {}
+
+                fila["SUPERVISOR"] = str(
+                    row.get(
+                        "SUPERVISOR A CARGO",
+                        ""
+                    )
+                )
+
+                fila["COORDINADOR"] = str(
+                    row.get(
+                        "COORDINADOR",
+                        ""
+                    )
+                )
+
+                fila["DEPARTAMENTO"] = str(
+                    row.get(
+                        "DEPARTAMENTO",
+                        ""
+                    )
+                )
+
+                fila["PROVINCIA"] = str(
+                    row.get(
+                        "PROVINCIA",
+                        ""
+                    )
+                )
+
+                fila["DNI"] = str(
+                    row.get(
+                        "DNI",
+                        ""
+                    )
+                )
+
+                fila["NOMBRE"] = (
+                    str(row.get("NOMBRES", ""))
+                    + " " +
+                    str(row.get("APELLIDO PATERNO", ""))
+                ).strip()
+
+                fila["ESTADO"] = str(
+                    row.get(
+                        "ESTADO",
+                        ""
+                    )
+                )
+
+                for dia in obtener_columnas_dias():
+
+                    fila[dia] = ""
+
+                nuevos_registros.append(fila)
+
+            df_nuevo = pd.DataFrame(
+                nuevos_registros
+            )
+
+            df = pd.concat(
+                [df, df_nuevo],
+                ignore_index=True
+            )
+
+            hoja_asistencia.clear()
+
+            hoja_asistencia.update(
+                "A1",
+                [df.columns.tolist()] +
+                df.values.tolist()
+            )
 
         return df
 
@@ -235,7 +328,7 @@ def mostrar_asistencia(
     )
 
     # =====================================================
-    # CARGAR COLABORADORES
+    # COLAB
     # =====================================================
 
     colaboradores = (
@@ -254,10 +347,10 @@ def mostrar_asistencia(
     )
 
     # =====================================================
-    # ASISTENCIA
+    # BASE
     # =====================================================
 
-    df = generar_base_asistencia(
+    df = generar_base(
         hoja_asistencia,
         df_colab
     )
@@ -285,10 +378,6 @@ def mostrar_asistencia(
         columnas_dias
     )
 
-    # =====================================================
-    # ASEGURAR COLUMNAS
-    # =====================================================
-
     for c in columnas:
 
         if c not in df.columns:
@@ -298,10 +387,16 @@ def mostrar_asistencia(
     df = df[columnas]
 
     # =====================================================
-    # LIMPIAR NONE
+    # ORDENAR
     # =====================================================
 
-    df = df.fillna("")
+    df = df.sort_values(
+        by=[
+            "NOMBRE",
+            "PROVINCIA"
+        ],
+        ascending=True
+    ).reset_index(drop=True)
 
     # =====================================================
     # FILTROS
@@ -334,10 +429,6 @@ def mostrar_asistencia(
                 .tolist()
             )
         )
-
-    # =====================================================
-    # FILTROS
-    # =====================================================
 
     if supervisor != "TODOS":
 
@@ -409,6 +500,8 @@ def mostrar_asistencia(
         df
     )
 
+    semana_actual = obtener_semana_actual()
+
     # =====================================================
     # FIJAS
     # =====================================================
@@ -418,7 +511,9 @@ def mostrar_asistencia(
         gb.configure_column(
             c,
             editable=False,
-            width=160
+            sortable=True,
+            filter=True,
+            width=150
         )
 
     # =====================================================
@@ -427,11 +522,26 @@ def mostrar_asistencia(
 
     for dia in columnas_dias:
 
+        numero = int(
+            dia.replace(
+                "DIA_",
+                ""
+            )
+        )
+
+        editable = numero in semana_actual
+
         gb.configure_column(
 
             dia,
 
-            editable=True,
+            editable=editable,
+
+            sortable=False,
+
+            filter=False,
+
+            width=90,
 
             singleClickEdit=True,
 
@@ -441,23 +551,25 @@ def mostrar_asistencia(
                 'values': ['', 'A', 'F']
             },
 
-            cellStyle=color_js,
-
-            width=90
+            cellStyle=color_js
 
         )
 
     # =====================================================
-    # OPCIONES
+    # GRID OPTIONS
     # =====================================================
 
     gb.configure_grid_options(
 
-        suppressRowClickSelection=True,
+        animateRows=False,
 
-        suppressColumnVirtualisation=True,
+        suppressRowTransform=True,
 
-        suppressRowVirtualisation=True,
+        suppressColumnVirtualisation=False,
+
+        suppressRowVirtualisation=False,
+
+        rowBuffer=0,
 
         domLayout='normal'
 
@@ -485,9 +597,9 @@ def mostrar_asistencia(
 
         reload_data=False,
 
-        height=520,
-
         theme="streamlit",
+
+        height=520,
 
         key="asistencia_grid"
 
@@ -526,87 +638,41 @@ def mostrar_asistencia(
 
         try:
 
-            cambios = []
+            # =============================================
+            # REEMPLAZAR VACIOS
+            # =============================================
 
-            for fila in range(len(df_editado)):
+            df_editado = (
+                df_editado
+                .fillna("")
+            )
 
-                for dia in columnas_dias:
+            # =============================================
+            # ACTUALIZAR COMPLETO
+            # =============================================
 
-                    nuevo = str(
-                        df_editado
-                        .iloc[fila][dia]
-                    ).strip()
+            hoja_asistencia.clear()
 
-                    actual = str(
-                        df
-                        .iloc[fila][dia]
-                    ).strip()
+            hoja_asistencia.update(
 
-                    if nuevo != actual:
+                "A1",
 
-                        fila_real = fila + 2
+                [
+                    df_editado.columns.tolist()
+                ] +
+                df_editado.values.tolist()
 
-                        col_real = (
-                            list(df.columns)
-                            .index(dia)
-                        ) + 1
+            )
 
-                        cambios.append({
-                            "fila": fila_real,
-                            "col": col_real,
-                            "valor": nuevo
-                        })
-
-            # =================================================
-            # SOLO ACTUALIZA CAMBIOS
-            # =================================================
-
-            if len(cambios) > 0:
-
-                requests = []
-
-                for c in cambios:
-
-                    col = c["col"]
-
-                    letra = ""
-
-                    while col > 0:
-
-                        col, resto = divmod(
-                            col - 1,
-                            26
-                        )
-
-                        letra = (
-                            chr(65 + resto)
-                            + letra
-                        )
-
-                    rango = (
-                        f"{letra}{c['fila']}"
-                    )
-
-                    requests.append({
-                        "range": rango,
-                        "values": [
-                            [c["valor"]]
-                        ]
-                    })
-
-                hoja_asistencia.batch_update(
-                    requests
-                )
-
-            # =================================================
+            # =============================================
             # LIMPIAR CACHE
-            # =================================================
+            # =============================================
 
             st.cache_data.clear()
 
-            # =================================================
+            # =============================================
             # MENSAJE
-            # =================================================
+            # =============================================
 
             st.success(
                 "✅ Asistencia guardada correctamente"
@@ -615,5 +681,5 @@ def mostrar_asistencia(
         except Exception as e:
 
             st.error(
-                f"❌ Error: {e}"
+                f"❌ Error al guardar: {e}"
             )
