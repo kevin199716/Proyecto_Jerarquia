@@ -1,6 +1,6 @@
 # =========================================================
 # asistencia.py
-# VERSION FINAL ESTABLE
+# VERSION FINAL ESTABLE - SIN FREEZE
 # =========================================================
 
 import streamlit as st
@@ -11,85 +11,82 @@ from st_aggrid import (
     GridUpdateMode,
     JsCode
 )
+
 from datetime import datetime
 import calendar
 
 # =========================================================
-# OBTENER MES ACTUAL
-# =========================================================
-
-def obtener_mes_actual():
-
-    hoy = datetime.now()
-
-    return hoy.month, hoy.year
-
-
-# =========================================================
-# GENERAR COLUMNAS DIAS
+# COLUMNAS DIAS
 # =========================================================
 
 def obtener_columnas_dias():
 
-    mes, anio = obtener_mes_actual()
+    hoy = datetime.now()
 
-    cantidad_dias = calendar.monthrange(
-        anio,
-        mes
+    dias_mes = calendar.monthrange(
+        hoy.year,
+        hoy.month
     )[1]
 
-    columnas = []
-
-    for i in range(1, cantidad_dias + 1):
-
-        columnas.append(f"DIA_{i}")
-
-    return columnas
+    return [
+        f"DIA_{i}"
+        for i in range(1, dias_mes + 1)
+    ]
 
 
 # =========================================================
-# ASEGURAR COLUMNAS EN GOOGLE SHEETS
+# ASEGURAR COLUMNAS
 # =========================================================
 
 def asegurar_columnas_asistencia(
     hoja_asistencia
 ):
 
+    columnas_fijas = [
+        "SUPERVISOR",
+        "COORDINADOR",
+        "DEPARTAMENTO",
+        "PROVINCIA",
+        "DNI",
+        "NOMBRE",
+        "ESTADO"
+    ]
+
+    columnas = (
+        columnas_fijas +
+        obtener_columnas_dias()
+    )
+
     data = hoja_asistencia.get_all_values()
 
-    if not data:
+    # =========================================
+    # SI NO EXISTE NADA
+    # =========================================
 
-        headers = [
-            "SUPERVISOR",
-            "COORDINADOR",
-            "DEPARTAMENTO",
-            "PROVINCIA",
-            "DNI",
-            "NOMBRE",
-            "ESTADO"
-        ]
+    if len(data) == 0:
 
-        headers.extend(
-            obtener_columnas_dias()
+        hoja_asistencia.append_row(
+            columnas
         )
 
-        hoja_asistencia.append_row(headers)
+        return columnas
 
-        return headers
+    headers = [
+        str(x).strip()
+        for x in data[0]
+    ]
 
-    headers = data[0]
-
-    headers = [x.strip() for x in headers]
-
-    dias_actuales = obtener_columnas_dias()
+    # =========================================
+    # AGREGAR DIAS FALTANTES
+    # =========================================
 
     faltantes = []
 
-    for dia in dias_actuales:
+    for col in columnas:
 
-        if dia not in headers:
+        if col not in headers:
 
-            faltantes.append(dia)
+            faltantes.append(col)
 
     if faltantes:
 
@@ -104,7 +101,7 @@ def asegurar_columnas_asistencia(
 
 
 # =========================================================
-# GENERAR BASE ASISTENCIA
+# GENERAR BASE
 # =========================================================
 
 def generar_base_asistencia(
@@ -118,71 +115,66 @@ def generar_base_asistencia(
 
     data = hoja_asistencia.get_all_records()
 
+    # =========================================
+    # SI YA EXISTE DATA
+    # =========================================
+
     if len(data) > 0:
 
         return pd.DataFrame(data)
 
-    columnas_base = [
-        "SUPERVISOR",
-        "COORDINADOR",
-        "DEPARTAMENTO",
-        "PROVINCIA",
-        "DNI",
-        "NOMBRE",
-        "ESTADO"
-    ]
-
-    columnas_finales = columnas_base + obtener_columnas_dias()
+    # =========================================
+    # CREAR BASE NUEVA
+    # =========================================
 
     registros = []
 
     for _, row in df_colab.iterrows():
 
-        registro = {}
+        fila = {}
 
-        registro["SUPERVISOR"] = str(
+        fila["SUPERVISOR"] = str(
             row.get(
                 "SUPERVISOR A CARGO",
                 ""
             )
         )
 
-        registro["COORDINADOR"] = str(
+        fila["COORDINADOR"] = str(
             row.get(
                 "COORDINADOR",
                 ""
             )
         )
 
-        registro["DEPARTAMENTO"] = str(
+        fila["DEPARTAMENTO"] = str(
             row.get(
                 "DEPARTAMENTO",
                 ""
             )
         )
 
-        registro["PROVINCIA"] = str(
+        fila["PROVINCIA"] = str(
             row.get(
                 "PROVINCIA",
                 ""
             )
         )
 
-        registro["DNI"] = str(
+        fila["DNI"] = str(
             row.get(
                 "DNI",
                 ""
             )
         )
 
-        nombre = (
-            str(row.get("NOMBRES", "")) + " " +
+        fila["NOMBRE"] = (
+            str(row.get("NOMBRES", ""))
+            + " " +
             str(row.get("APELLIDO PATERNO", ""))
-        )
+        ).strip()
 
-        registro["NOMBRE"] = nombre.strip()
-
-        registro["ESTADO"] = str(
+        fila["ESTADO"] = str(
             row.get(
                 "ESTADO",
                 ""
@@ -191,9 +183,9 @@ def generar_base_asistencia(
 
         for dia in obtener_columnas_dias():
 
-            registro[dia] = ""
+            fila[dia] = ""
 
-        registros.append(registro)
+        registros.append(fila)
 
     df_final = pd.DataFrame(registros)
 
@@ -209,7 +201,7 @@ def generar_base_asistencia(
 
 
 # =========================================================
-# MOSTRAR ASISTENCIA
+# MAIN
 # =========================================================
 
 def mostrar_asistencia(
@@ -225,15 +217,24 @@ def mostrar_asistencia(
     # CARGAR DATA
     # =====================================================
 
-    data_colab = hoja_colaboradores.get_all_records()
+    data_colab = (
+        hoja_colaboradores
+        .get_all_records()
+    )
 
-    df_colab = pd.DataFrame(data_colab)
+    df_colab = pd.DataFrame(
+        data_colab
+    )
 
     df_colab.columns = (
         df_colab.columns
         .str.strip()
         .str.upper()
     )
+
+    # =====================================================
+    # BASE ASISTENCIA
+    # =====================================================
 
     df_asistencia = generar_base_asistencia(
         hoja_asistencia,
@@ -285,13 +286,15 @@ def mostrar_asistencia(
     if supervisor != "TODOS":
 
         df_asistencia = df_asistencia[
-            df_asistencia["SUPERVISOR"] == supervisor
+            df_asistencia["SUPERVISOR"]
+            == supervisor
         ]
 
     if coordinador != "TODOS":
 
         df_asistencia = df_asistencia[
-            df_asistencia["COORDINADOR"] == coordinador
+            df_asistencia["COORDINADOR"]
+            == coordinador
         ]
 
     # =====================================================
@@ -308,14 +311,21 @@ def mostrar_asistencia(
         "ESTADO"
     ]
 
-    columnas_dias = obtener_columnas_dias()
+    columnas_dias = (
+        obtener_columnas_dias()
+    )
 
-    columnas = columnas_fijas + columnas_dias
+    columnas = (
+        columnas_fijas +
+        columnas_dias
+    )
 
-    df_asistencia = df_asistencia[columnas]
+    df_asistencia = (
+        df_asistencia[columnas]
+    )
 
     # =====================================================
-    # MENSAJE
+    # INFO
     # =====================================================
 
     st.info(
@@ -325,20 +335,8 @@ def mostrar_asistencia(
     )
 
     # =====================================================
-    # GRID
+    # COLORES
     # =====================================================
-
-    gb = GridOptionsBuilder.from_dataframe(
-        df_asistencia
-    )
-
-    for col in columnas_fijas:
-
-        gb.configure_column(
-            col,
-            editable=False,
-            width=140
-        )
 
     color_js = JsCode("""
 
@@ -374,23 +372,54 @@ def mostrar_asistencia(
 
     """)
 
+    # =====================================================
+    # GRID
+    # =====================================================
+
+    gb = (
+        GridOptionsBuilder
+        .from_dataframe(df_asistencia)
+    )
+
+    # =========================================
+    # COLUMNAS FIJAS
+    # =========================================
+
+    for col in columnas_fijas:
+
+        gb.configure_column(
+            col,
+            editable=False,
+            width=150
+        )
+
+    # =========================================
+    # COLUMNAS DIAS
+    # =========================================
+
     for dia in columnas_dias:
 
         gb.configure_column(
+
             dia,
+
             editable=True,
+
             singleClickEdit=True,
-            cellEditor="agSelectCellEditor",
+
+            cellEditor='agSelectCellEditor',
+
             cellEditorParams={
-                "values": ["", "A", "F"]
+                'values': ['', 'A', 'F']
             },
+
             cellStyle=color_js,
+
             width=90
         )
 
     gb.configure_grid_options(
-        domLayout='normal',
-        suppressRowClickSelection=True
+        domLayout='normal'
     )
 
     gridOptions = gb.build()
@@ -405,15 +434,15 @@ def mostrar_asistencia(
 
         gridOptions=gridOptions,
 
-        update_mode=GridUpdateMode.VALUE_CHANGED,
-
         allow_unsafe_jscode=True,
+
+        update_mode=GridUpdateMode.VALUE_CHANGED,
 
         fit_columns_on_grid_load=False,
 
-        height=500,
-
         reload_data=False,
+
+        height=500,
 
         theme="streamlit",
 
@@ -421,8 +450,22 @@ def mostrar_asistencia(
 
     )
 
+    # =====================================================
+    # DF EDITADO
+    # =====================================================
+
     df_editado = pd.DataFrame(
         response["data"]
+    )
+
+    # =====================================================
+    # LEYENDA
+    # =====================================================
+
+    st.markdown(
+        """
+        A = Asistencia 🟩 | F = Falta 🟥
+        """
     )
 
     # =====================================================
@@ -435,9 +478,13 @@ def mostrar_asistencia(
 
         try:
 
-            data_drive = hoja_asistencia.get_all_records()
+            # =============================================
+            # NO VOLVER A LEER DRIVE
+            # =============================================
 
-            df_drive = pd.DataFrame(data_drive)
+            df_drive = (
+                df_asistencia.copy()
+            )
 
             cambios = []
 
@@ -445,40 +492,42 @@ def mostrar_asistencia(
 
                 for dia in columnas_dias:
 
-                    valor_nuevo = str(
-                        df_editado.iloc[i][dia]
+                    nuevo = str(
+                        df_editado
+                        .iloc[i][dia]
                     ).strip()
 
-                    valor_drive = str(
-                        df_drive.iloc[i][dia]
+                    actual = str(
+                        df_drive
+                        .iloc[i][dia]
                     ).strip()
 
-                    if valor_nuevo != valor_drive:
+                    if nuevo != actual:
 
                         fila_real = i + 2
 
-                        columna_real = (
+                        col_real = (
                             list(df_drive.columns)
                             .index(dia)
                         ) + 1
 
                         cambios.append({
                             "fila": fila_real,
-                            "columna": columna_real,
-                            "valor": valor_nuevo
+                            "col": col_real,
+                            "valor": nuevo
                         })
 
             # =============================================
-            # UPDATE MASIVO
+            # BATCH UPDATE
             # =============================================
 
             batch_data = []
 
             for c in cambios:
 
-                letra = ""
+                col = c["col"]
 
-                col = c["columna"]
+                letra = ""
 
                 while col > 0:
 
@@ -498,10 +547,12 @@ def mostrar_asistencia(
 
                 batch_data.append({
                     "range": rango,
-                    "values": [[c["valor"]]]
+                    "values": [
+                        [c["valor"]]
+                    ]
                 })
 
-            if batch_data:
+            if len(batch_data) > 0:
 
                 hoja_asistencia.batch_update(
                     batch_data
@@ -514,5 +565,5 @@ def mostrar_asistencia(
         except Exception as e:
 
             st.error(
-                f"❌ Error guardando: {e}"
+                f"❌ Error: {e}"
             )
