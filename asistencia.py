@@ -21,7 +21,7 @@ def cargar_data_asistencia(_hoja_asistencia):
     return _hoja_asistencia.get_all_records()
 
 # =========================================================
-# DIAS MES
+# DIAS DEL MES
 # =========================================================
 
 def obtener_columnas_dias():
@@ -67,6 +67,9 @@ def asegurar_columnas(
 
     columnas_fijas = [
 
+        "MES",
+        "PERIODO",
+
         "SUPERVISOR",
         "COORDINADOR",
         "DEPARTAMENTO",
@@ -83,6 +86,10 @@ def asegurar_columnas(
     )
 
     data = hoja_asistencia.get_all_values()
+
+    # =====================================================
+    # HOJA VACIA
+    # =====================================================
 
     if len(data) == 0:
 
@@ -148,6 +155,9 @@ def generar_base(
 
     columnas_fijas = [
 
+        "MES",
+        "PERIODO",
+
         "SUPERVISOR",
         "COORDINADOR",
         "DEPARTAMENTO",
@@ -169,7 +179,7 @@ def generar_base(
             df[c] = ""
 
     # =====================================================
-    # NUEVOS DNI
+    # DNI EXISTENTES
     # =====================================================
 
     if "DNI" in df.columns:
@@ -191,7 +201,7 @@ def generar_base(
     ]
 
     # =====================================================
-    # AGREGAR NUEVOS
+    # NUEVOS REGISTROS
     # =====================================================
 
     if len(nuevos) > 0:
@@ -201,6 +211,11 @@ def generar_base(
         for _, row in nuevos.iterrows():
 
             fila = {}
+
+            hoy = datetime.now()
+
+            fila["MES"] = hoy.strftime("%B").upper()
+            fila["PERIODO"] = hoy.strftime("%Y-%m")
 
             fila["SUPERVISOR"] = str(
                 row.get(
@@ -287,7 +302,7 @@ def mostrar_asistencia(
     )
 
     # =====================================================
-    # COLABORADORES
+    # DATA COLABORADORES
     # =====================================================
 
     colaboradores = (
@@ -429,6 +444,9 @@ def mostrar_asistencia(
 
     columnas_fijas = [
 
+        "MES",
+        "PERIODO",
+
         "SUPERVISOR",
         "COORDINADOR",
         "DEPARTAMENTO",
@@ -444,7 +462,7 @@ def mostrar_asistencia(
     semana_actual = obtener_semana_actual()
 
     # =====================================================
-    # FIJAS
+    # COLUMNAS FIJAS
     # =====================================================
 
     for c in columnas_fijas:
@@ -459,12 +477,12 @@ def mostrar_asistencia(
 
             filter=True,
 
-            width=150
+            width=180
 
         )
 
     # =====================================================
-    # DIAS
+    # COLUMNAS DIAS
     # =====================================================
 
     for dia in columnas_dias:
@@ -484,7 +502,7 @@ def mostrar_asistencia(
 
             editable=editable,
 
-            width=90,
+            width=110,
 
             singleClickEdit=True,
 
@@ -499,19 +517,30 @@ def mostrar_asistencia(
         )
 
     # =====================================================
-    # GRID
+    # GRID OPTIONS
     # =====================================================
 
     gb.configure_grid_options(
 
         suppressAnimationFrame=True,
+
         suppressRowTransform=True,
+
         animateRows=False,
-        rowBuffer=5
+
+        rowBuffer=3,
+
+        pagination=False,
+
+        domLayout='normal'
 
     )
 
     gridOptions = gb.build()
+
+    # =====================================================
+    # AGGRID
+    # =====================================================
 
     response = AgGrid(
 
@@ -521,7 +550,7 @@ def mostrar_asistencia(
 
         allow_unsafe_jscode=True,
 
-        update_mode=GridUpdateMode.VALUE_CHANGED,
+        update_mode=GridUpdateMode.MANUAL,
 
         fit_columns_on_grid_load=False,
 
@@ -533,7 +562,11 @@ def mostrar_asistencia(
 
         height=520,
 
-        key="grid_asistencia"
+        key="grid_asistencia",
+
+        data_return_mode="AS_INPUT",
+
+        columns_auto_size_mode=None
 
     )
 
@@ -541,9 +574,17 @@ def mostrar_asistencia(
         response["data"]
     )
 
+    # =====================================================
+    # LEYENDA
+    # =====================================================
+
     st.markdown(
         "A = Asistencia 🟩 | F = Falta 🟥"
     )
+
+    # =====================================================
+    # BOTON GUARDAR
+    # =====================================================
 
     guardar = st.button(
         "💾 Guardar Asistencia"
@@ -579,24 +620,18 @@ def mostrar_asistencia(
                 )
 
                 # =================================================
-                # GUARDAR REAL
+                # GUARDAR
                 # =================================================
-
-                hoja_asistencia.clear()
 
                 hoja_asistencia.update(
 
                     "A1",
 
-                    [headers] + values
+                    [headers] + values,
+
+                    value_input_option="USER_ENTERED"
 
                 )
-
-                # =================================================
-                # LIMPIAR CACHE
-                # =================================================
-
-                st.cache_data.clear()
 
             st.success(
                 "✅ Asistencia guardada correctamente"
