@@ -11,10 +11,9 @@ from st_aggrid import (
 )
 
 # =====================================================
-# CACHE
+# SIN CACHE
 # =====================================================
 
-@st.cache_data(ttl=60)
 def cargar_colaboradores_cache(data):
     return pd.DataFrame(data)
 
@@ -34,7 +33,7 @@ def generar_asistencia_mes(
     valores = hoja_asistencia.get_all_values()
 
     # =================================================
-    # CREAR CABECERA SI NO EXISTE
+    # CREAR CABECERA
     # =================================================
 
     if not valores:
@@ -66,7 +65,7 @@ def generar_asistencia_mes(
     data = valores[1:]
 
     # =================================================
-    # DATAFRAME EXISTENTE
+    # DF EXISTENTE
     # =================================================
 
     if data:
@@ -83,7 +82,7 @@ def generar_asistencia_mes(
         )
 
     # =================================================
-    # VALIDAR SI YA EXISTE EL MES
+    # VALIDAR MES
     # =================================================
 
     if not df_existente.empty:
@@ -148,10 +147,6 @@ def generar_asistencia_mes(
             )
         }
 
-        # =============================================
-        # DIAS
-        # =============================================
-
         for dia in range(1, 32):
 
             fila[f"DIA_{dia}"] = ""
@@ -159,7 +154,7 @@ def generar_asistencia_mes(
         registros.append(fila)
 
     # =================================================
-    # GUARDAR NUEVO MES
+    # INSERTAR NUEVAS FILAS
     # =================================================
 
     if registros:
@@ -236,7 +231,7 @@ def mostrar_asistencia(
     )
 
     # =================================================
-    # GENERAR MES AUTOMATICO
+    # GENERAR MES
     # =================================================
 
     generar_asistencia_mes(
@@ -245,7 +240,7 @@ def mostrar_asistencia(
     )
 
     # =================================================
-    # LEER DATA ASISTENCIA
+    # LEER DATA
     # =================================================
 
     valores = (
@@ -336,7 +331,7 @@ def mostrar_asistencia(
         )
 
     # =================================================
-    # FILTRAR
+    # FILTROS
     # =================================================
 
     if filtro_supervisor != "TODOS":
@@ -377,7 +372,7 @@ def mostrar_asistencia(
     )
 
     # =================================================
-    # CONFIG COLUMNAS
+    # COLUMNAS
     # =================================================
 
     for col in df.columns:
@@ -402,7 +397,7 @@ def mostrar_asistencia(
 
                 editable=editable,
 
-                width=90,
+                width=95,
 
                 singleClickEdit=True,
 
@@ -455,7 +450,7 @@ def mostrar_asistencia(
             gb.configure_column(
                 col,
                 editable=False,
-                width=160
+                width=170
             )
 
     # =================================================
@@ -478,7 +473,7 @@ def mostrar_asistencia(
 
         theme="streamlit",
 
-        height=500,
+        height=520,
 
         fit_columns_on_grid_load=False,
 
@@ -494,7 +489,7 @@ def mostrar_asistencia(
     )
 
     # =================================================
-    # BOTON
+    # BOTON GUARDAR
     # =================================================
 
     guardar = st.button(
@@ -537,51 +532,62 @@ def mostrar_asistencia(
                     )
 
             # =========================================
-            # HISTORICO
+            # GUARDAR SOLO CAMBIOS
             # =========================================
 
-            df_historico = df_total[
-                df_total["PERIODO"]
-                != periodo_actual
-            ].copy()
-
-            # =========================================
-            # PERIODO
-            # =========================================
-
-            nuevo_df["PERIODO"] = periodo_actual
-
-            # =========================================
-            # ORDEN COLUMNAS
-            # =========================================
-
-            nuevo_df = nuevo_df[
-                headers
-            ]
-
-            # =========================================
-            # FINAL
-            # =========================================
-
-            df_final = pd.concat(
-                [df_historico, nuevo_df],
-                ignore_index=True
+            valores_actuales = (
+                hoja_asistencia.get_all_values()
             )
 
+            cambios = []
+
+            for fila_idx in range(len(nuevo_df)):
+
+                fila_sheet = fila_idx + 2
+
+                for col_idx, col in enumerate(headers):
+
+                    valor_nuevo = str(
+                        nuevo_df.iloc[fila_idx][col]
+                    )
+
+                    try:
+
+                        valor_actual = (
+                            valores_actuales[
+                                fila_sheet - 1
+                            ][col_idx]
+                        )
+
+                    except:
+
+                        valor_actual = ""
+
+                    if valor_nuevo != valor_actual:
+
+                        cambios.append({
+                            "row": fila_sheet,
+                            "col": col_idx + 1,
+                            "value": valor_nuevo
+                        })
+
             # =========================================
-            # GUARDAR GOOGLE SHEETS
+            # ACTUALIZAR SOLO CAMBIOS
             # =========================================
 
-            hoja_asistencia.clear()
+            for cambio in cambios:
 
-            hoja_asistencia.update(
-                [df_final.columns.values.tolist()] +
-                df_final.astype(str).values.tolist()
-            )
+                hoja_asistencia.update_cell(
+                    cambio["row"],
+                    cambio["col"],
+                    cambio["value"]
+                )
 
             st.success(
                 "✅ Asistencia guardada correctamente"
             )
+
+            st.rerun()
 
         except Exception as e:
 
