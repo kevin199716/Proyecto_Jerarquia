@@ -7,7 +7,8 @@ from st_aggrid import (
     AgGrid,
     GridOptionsBuilder,
     GridUpdateMode,
-    JsCode
+    JsCode,
+    DataReturnMode
 )
 
 # =====================================================
@@ -18,7 +19,7 @@ def cargar_colaboradores_cache(data):
     return pd.DataFrame(data)
 
 # =====================================================
-# GENERAR MES AUTOMATICO
+# GENERAR MES
 # =====================================================
 
 def generar_asistencia_mes(
@@ -26,9 +27,7 @@ def generar_asistencia_mes(
     df_colab
 ):
 
-    hoy = datetime.now()
-
-    periodo_actual = hoy.strftime("%Y-%m")
+    periodo_actual = datetime.now().strftime("%Y-%m")
 
     valores = hoja_asistencia.get_all_values()
 
@@ -65,7 +64,7 @@ def generar_asistencia_mes(
     data = valores[1:]
 
     # =================================================
-    # DF EXISTENTE
+    # DATAFRAME
     # =================================================
 
     if data:
@@ -82,7 +81,7 @@ def generar_asistencia_mes(
         )
 
     # =================================================
-    # VALIDAR MES
+    # VALIDAR PERIODO
     # =================================================
 
     if not df_existente.empty:
@@ -154,7 +153,7 @@ def generar_asistencia_mes(
         registros.append(fila)
 
     # =================================================
-    # INSERTAR NUEVAS FILAS
+    # INSERTAR NUEVO MES
     # =================================================
 
     if registros:
@@ -212,7 +211,7 @@ def mostrar_asistencia(
     )
 
     # =================================================
-    # CARGAR COLABORADORES
+    # LEER COLABORADORES
     # =================================================
 
     data_colab = (
@@ -240,7 +239,7 @@ def mostrar_asistencia(
     )
 
     # =================================================
-    # LEER DATA
+    # LEER ASISTENCIA
     # =================================================
 
     valores = (
@@ -266,13 +265,13 @@ def mostrar_asistencia(
     )
 
     # =================================================
-    # VALIDAR PERIODO
+    # VALIDAR
     # =================================================
 
     if "PERIODO" not in df_total.columns:
 
         st.error(
-            "La hoja asistencia no tiene columna PERIODO"
+            "No existe columna PERIODO"
         )
 
         return
@@ -290,7 +289,7 @@ def mostrar_asistencia(
     ].copy()
 
     # =================================================
-    # LIMPIAR NONE
+    # LIMPIAR
     # =================================================
 
     df = df.replace("None", "")
@@ -331,7 +330,7 @@ def mostrar_asistencia(
         )
 
     # =================================================
-    # FILTROS
+    # FILTRAR
     # =================================================
 
     if filtro_supervisor != "TODOS":
@@ -349,7 +348,7 @@ def mostrar_asistencia(
         ]
 
     # =================================================
-    # SEMANA ACTUAL
+    # SEMANA
     # =================================================
 
     dias_editables = obtener_semana_actual()
@@ -376,10 +375,6 @@ def mostrar_asistencia(
     # =================================================
 
     for col in df.columns:
-
-        # =============================================
-        # COLUMNAS DIA
-        # =============================================
 
         if "DIA_" in col:
 
@@ -441,10 +436,6 @@ def mostrar_asistencia(
                 """)
             )
 
-        # =============================================
-        # OTRAS COLUMNAS
-        # =============================================
-
         else:
 
             gb.configure_column(
@@ -477,7 +468,11 @@ def mostrar_asistencia(
 
         fit_columns_on_grid_load=False,
 
-        update_mode=GridUpdateMode.VALUE_CHANGED
+        update_mode=GridUpdateMode.MANUAL,
+
+        data_return_mode=DataReturnMode.AS_INPUT,
+
+        reload_data=False
     )
 
     # =================================================
@@ -489,10 +484,10 @@ def mostrar_asistencia(
     )
 
     # =================================================
-    # BOTON GUARDAR
+    # BOTON
     # =================================================
 
-    guardar = st.button(
+    guardar_btn = st.button(
         "💾 Guardar Asistencia"
     )
 
@@ -500,7 +495,7 @@ def mostrar_asistencia(
     # GUARDAR
     # =================================================
 
-    if guardar:
+    if guardar_btn:
 
         try:
 
@@ -511,7 +506,7 @@ def mostrar_asistencia(
             nuevo_df = nuevo_df.fillna("")
 
             # =========================================
-            # VALIDAR A/F
+            # LIMPIAR DATOS
             # =========================================
 
             for col in nuevo_df.columns:
@@ -532,7 +527,7 @@ def mostrar_asistencia(
                     )
 
             # =========================================
-            # GUARDAR SOLO CAMBIOS
+            # LEER SHEET ACTUAL
             # =========================================
 
             valores_actuales = (
