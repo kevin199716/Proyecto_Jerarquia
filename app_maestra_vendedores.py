@@ -1,186 +1,257 @@
-# =====================================================
-# app_maestra_vendedores.py
-# =====================================================
+def mostrar_asistencia(
+    hoja_asistencia,
+    hoja_colaboradores
+):
 
-import streamlit as st
-import sys
-import os
+    st.subheader("🗓️ Control de Asistencia")
 
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+    # =====================================================
+    # SOLO CARGA UNA VEZ
+    # =====================================================
 
-if BASE_DIR not in sys.path:
-    sys.path.insert(0, BASE_DIR)
+    if "df_asistencia" not in st.session_state:
 
-# =====================================================
-# IMPORTS
-# =====================================================
-
-import registro_mod as registro
-
-from auth import (
-    cargar_usuarios,
-    login
-)
-
-from ui_inicio import (
-    mostrar_bienvenida
-)
-
-from sheets import (
-    conectar_google_sheets
-)
-
-from formulario import (
-    mostrar_formulario
-)
-
-from asistencia import (
-    mostrar_asistencia
-)
-
-# =====================================================
-# CONFIG
-# =====================================================
-
-st.set_page_config(
-    page_title="Sistema",
-    layout="wide"
-)
-
-# =====================================================
-# USUARIOS
-# =====================================================
-
-USUARIOS = cargar_usuarios()
-
-# =====================================================
-# SESSION
-# =====================================================
-
-if "autenticado" not in st.session_state:
-
-    st.session_state["autenticado"] = False
-
-# =====================================================
-# LOGIN
-# =====================================================
-
-if not st.session_state["autenticado"]:
-
-    mostrar_bienvenida()
-
-    login(USUARIOS)
-
-    st.stop()
-
-# =====================================================
-# SHEETS
-# =====================================================
-
-hoja_colaboradores = conectar_google_sheets(
-    "maestra_vendedores",
-    "colaboradores"
-)
-
-hoja_ubicaciones = conectar_google_sheets(
-    "maestra_vendedores",
-    "ubicaciones"
-)
-
-hoja_asistencia = conectar_google_sheets(
-    "maestra_vendedores",
-    "Asistencia"
-)
-
-# =====================================================
-# VARIABLES
-# =====================================================
-
-rol = st.session_state.get("rol")
-
-razon = st.session_state.get("razon")
-
-# =====================================================
-# TITLE
-# =====================================================
-
-st.title("📊 Sistema de Vendedores")
-
-# =====================================================
-# MENU
-# =====================================================
-
-if rol == "editor":
-
-    menu = st.radio(
-        "Menú",
-        ["Edición", "Asistencia"],
-        horizontal=True
-    )
-
-else:
-
-    menu = st.radio(
-        "Menú",
-        ["Registro", "Bajas", "Asistencia"],
-        horizontal=True
-    )
-
-# =====================================================
-# REGISTRO
-# =====================================================
-
-if menu == "Registro":
-
-    mostrar_formulario(
-        hoja_colaboradores,
-        hoja_ubicaciones
-    )
-
-# =====================================================
-# BAJAS
-# =====================================================
-
-elif menu == "Bajas":
-
-    df = registro.mostrar_tabla(
-        hoja_colaboradores,
-        razon
-    )
-
-    if df is not None:
-
-        registro.dar_de_baja(
-            df,
-            hoja_colaboradores,
-            razon
+        df_drive, df_mes = preparar_data(
+            hoja_asistencia,
+            hoja_colaboradores
         )
 
-# =====================================================
-# EDICION
-# =====================================================
+        # LIMPIAR NONE
+        df_mes = df_mes.fillna("")
 
-elif menu == "Edición":
+        # LIMPIAR TEXTO NONE
+        df_mes = df_mes.replace("None", "")
+        df_mes = df_mes.replace("nan", "")
 
-    df = registro.mostrar_tabla(
-        hoja_colaboradores
-    )
+        st.session_state.df_asistencia = df_mes
 
-    if df is not None:
+    # =====================================================
+    # DATA
+    # =====================================================
 
-        registro.editar_registro(
-            df,
-            hoja_colaboradores,
-            hoja_ubicaciones
+    df = st.session_state.df_asistencia.copy()
+
+    # =====================================================
+    # FILTROS
+    # =====================================================
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+
+        supervisores = ["TODOS"]
+
+        if "SUPERVISOR" in df.columns:
+
+            supervisores += sorted([
+                x for x in
+                df["SUPERVISOR"].astype(str).unique().tolist()
+                if x != ""
+            ])
+
+        filtro_sup = st.selectbox(
+            "🔎 Supervisor",
+            supervisores
         )
 
-# =====================================================
-# ASISTENCIA
-# =====================================================
+    with col2:
 
-elif menu == "Asistencia":
+        coordinadores = ["TODOS"]
 
-    mostrar_asistencia(
-        hoja_asistencia,
-        hoja_colaboradores
+        if "COORDINADOR" in df.columns:
+
+            coordinadores += sorted([
+                x for x in
+                df["COORDINADOR"].astype(str).unique().tolist()
+                if x != ""
+            ])
+
+        filtro_coord = st.selectbox(
+            "🔎 Coordinador",
+            coordinadores
+        )
+
+    # =====================================================
+    # FILTRAR
+    # =====================================================
+
+    if filtro_sup != "TODOS":
+
+        df = df[
+            df["SUPERVISOR"] == filtro_sup
+        ]
+
+    if filtro_coord != "TODOS":
+
+        df = df[
+            df["COORDINADOR"] == filtro_coord
+        ]
+
+    # =====================================================
+    # COLUMNAS
+    # =====================================================
+
+    columnas_visibles = [
+
+        "PROVINCIA",
+        "DNI",
+        "NOMBRE",
+        "ESTADO"
+
+    ] + COLUMNAS_DIAS
+
+    # =====================================================
+    # ASEGURAR COLUMNAS
+    # =====================================================
+
+    for col in columnas_visibles:
+
+        if col not in df.columns:
+            df[col] = ""
+
+    # =====================================================
+    # LIMPIAR VALORES
+    # =====================================================
+
+    for col in COLUMNAS_DIAS:
+
+        df[col] = (
+            df[col]
+            .astype(str)
+            .replace("None", "")
+            .replace("nan", "")
+        )
+
+    # =====================================================
+    # SOLO DIA ACTUAL
+    # =====================================================
+
+    dia_actual = datetime.now().day
+
+    columna_editable = f"DIA_{dia_actual}"
+
+    # =====================================================
+    # CONFIG
+    # =====================================================
+
+    config = {}
+
+    for col in columnas_visibles:
+
+        # =============================================
+        # COLUMNAS DIA
+        # =============================================
+
+        if col.startswith("DIA_"):
+
+            config[col] = st.column_config.SelectboxColumn(
+
+                label=col,
+
+                options=["", "A", "F"],
+
+                width="small",
+
+                required=False,
+
+                disabled=(col != columna_editable)
+
+            )
+
+        # =============================================
+        # COLUMNAS TEXTO
+        # =============================================
+
+        else:
+
+            config[col] = st.column_config.TextColumn(
+
+                label=col,
+
+                width="medium",
+
+                disabled=True
+
+            )
+
+    # =====================================================
+    # EDITOR
+    # =====================================================
+
+    edited_df = st.data_editor(
+
+        df[columnas_visibles],
+
+        key="EDITOR_ASISTENCIA",
+
+        use_container_width=True,
+
+        hide_index=True,
+
+        num_rows="fixed",
+
+        height=700,
+
+        column_config=config
+
     )
+
+    # =====================================================
+    # GUARDAR
+    # =====================================================
+
+    if st.button("💾 Guardar Asistencia"):
+
+        try:
+
+            # =========================================
+            # RECUPERAR COLUMNAS OCULTAS
+            # =========================================
+
+            for col in df.columns:
+
+                if col not in edited_df.columns:
+
+                    edited_df[col] = df[col].values
+
+            # =========================================
+            # LIMPIAR
+            # =========================================
+
+            edited_df = edited_df.fillna("")
+            edited_df = edited_df.replace("None", "")
+            edited_df = edited_df.replace("nan", "")
+
+            # =========================================
+            # ORDEN FINAL
+            # =========================================
+
+            edited_df = edited_df[COLUMNAS_FINAL]
+
+            # =========================================
+            # GUARDAR DRIVE
+            # =========================================
+
+            hoja_asistencia.clear()
+
+            hoja_asistencia.update(
+                [
+                    edited_df.columns.tolist()
+                ]
+                +
+                edited_df.values.tolist()
+            )
+
+            # =========================================
+            # SESSION
+            # =========================================
+
+            st.session_state.df_asistencia = edited_df
+
+            st.success(
+                "✅ Asistencia guardada correctamente"
+            )
+
+        except Exception as e:
+
+            st.error(f"❌ Error: {e}")
