@@ -6,8 +6,6 @@ import streamlit as st
 # =====================================================
 # CONFIGURACIÓN GENERAL
 # =====================================================
-NOMBRE_HOJA_ASISTENCIA = "Asistencia"
-
 COLUMNAS_BASE = [
     "SUPERVISOR",
     "COORDINADOR",
@@ -34,6 +32,10 @@ COLUMNAS_VISIBLES_BASE = [
     "MES",
     "PERIODO"
 ]
+
+CACHE_KEY_DATA = "asis_df_total_cache"
+CACHE_KEY_PERIODO = "asis_periodo_cache"
+CACHE_KEY_CARGADO = "asis_cache_cargado"
 
 
 # =====================================================
@@ -104,9 +106,9 @@ def es_promotor(row: pd.Series) -> bool:
 
 
 # =====================================================
-# LECTURA DE GOOGLE SHEETS
+# LECTURA GOOGLE SHEETS
 # =====================================================
-def leer_asistencia(hoja_asistencia) -> pd.DataFrame:
+def leer_asistencia_desde_drive(hoja_asistencia) -> pd.DataFrame:
     valores = hoja_asistencia.get_all_values()
 
     if not valores:
@@ -174,7 +176,58 @@ def validar_o_crear_cabecera(hoja_asistencia) -> bool:
 
 
 # =====================================================
-# FILTRO DE PROMOTORES ACTIVOS
+# CACHE LOCAL PARA EVITAR FRIZEO
+# =====================================================
+def cargar_cache_asistencia(hoja_asistencia, forzar=False) -> pd.DataFrame:
+    periodo = periodo_actual()
+
+    if (
+        forzar
+        or CACHE_KEY_DATA not in st.session_state
+        or st.session_state.get(CACHE_KEY_PERIODO) != periodo
+        or not st.session_state.get(CACHE_KEY_CARGADO, False)
+    ):
+        df = leer_asistencia_desde_drive(hoja_asistencia)
+
+        for col in COLUMNAS_ASISTENCIA:
+            if col not in df.columns:
+                df[col] = ""
+
+        df = df[COLUMNAS_ASISTENCIA].copy()
+        df["ROW_SHEET"] = df.index + 2
+
+        st.session_state[CACHE_KEY_DATA] = df
+        st.session_state[CACHE_KEY_PERIODO] = periodo
+        st.session_state[CACHE_KEY_CARGADO] = True
+
+    return st.session_state[CACHE_KEY_DATA].copy()
+
+
+def actualizar_cache_luego_de_guardar(df_editado: pd.DataFrame, cols_editables: list[str]):
+    if CACHE_KEY_DATA not in st.session_state:
+        return
+
+    df_cache = st.session_state[CACHE_KEY_DATA].copy()
+
+    for _, row in df_editado.iterrows():
+        try:
+            row_sheet = int(row["ROW_SHEET"])
+        except Exception:
+            continue
+
+        mask = df_cache["ROW_SHEET"].eq(row_sheet)
+
+        if not mask.any():
+            continue
+
+        for col in cols_editables:
+            df_cache.loc[mask, col] = limpiar_marca(row.get(col, ""))
+
+    st.session_state[CACHE_KEY_DATA] = df_cache
+
+
+# =====================================================
+# FILTRO PROMOTORES ACTIVOS
 # =====================================================
 def obtener_promotores_activos(df_colab: pd.DataFrame) -> pd.DataFrame:
     if df_colab.empty:
@@ -196,12 +249,8 @@ def obtener_promotores_activos(df_colab: pd.DataFrame) -> pd.DataFrame:
     if df.empty:
         return df
 
-    df = df[
-        df.apply(es_promotor, axis=1)
-    ].copy()
-
+    df = df[df.apply(es_promotor, axis=1)].copy()
     df["DNI"] = df["DNI"].astype(str).str.strip()
-
     df = df[df["DNI"].ne("")].copy()
 
     return df
@@ -217,13 +266,9 @@ def obtener_dnis_promotores_activos(df_colab: pd.DataFrame) -> set[str]:
 
 
 # =====================================================
-# SINCRONIZACIÓN DEL MES
+# SINCRONIZACIÓN
 # =====================================================
-def construir_registros_nuevos(
-    df_colab: pd.DataFrame,
-    dnis_existentes_periodo: set[str]
-) -> list[list[str]]:
-
+def construir_registros_nuevos(df_colab: pd.DataFrame, dnis_existentes_periodo: set[str]) -> list[list[str]]:
     df_promotores = obtener_promotores_activos(df_colab)
 
     if df_promotores.empty:
@@ -231,7 +276,6 @@ def construir_registros_nuevos(
 
     periodo = periodo_actual()
     mes = mes_actual()
-
     registros = []
 
     for _, row in df_promotores.iterrows():
@@ -268,8 +312,7 @@ def sincronizar_mes(hoja_asistencia, hoja_colaboradores) -> int:
         return 0
 
     periodo = periodo_actual()
-
-    df_asistencia = leer_asistencia(hoja_asistencia)
+    df_asistencia = leer_asistencia_desde_drive(hoja_asistencia)
 
     dnis_existentes = set()
     if not df_asistencia.empty and "PERIODO" in df_asistencia.columns and "DNI" in df_asistencia.columns:
@@ -281,11 +324,7 @@ def sincronizar_mes(hoja_asistencia, hoja_colaboradores) -> int:
         )
 
     df_colab = leer_colaboradores(hoja_colaboradores)
-
-    nuevos = construir_registros_nuevos(
-        df_colab,
-        dnis_existentes
-    )
+    nuevos = construir_registros_nuevos(df_colab, dnis_existentes)
 
     if nuevos:
         hoja_asistencia.append_rows(
@@ -297,7 +336,7 @@ def sincronizar_mes(hoja_asistencia, hoja_colaboradores) -> int:
 
 
 # =====================================================
-# ESTILO COLORES
+# COLORES
 # =====================================================
 def estilo_asistencia(valor):
     valor = str(valor).strip().upper()
@@ -315,15 +354,8 @@ def mostrar_vista_colores(df: pd.DataFrame):
     if df.empty:
         return
 
-    columnas_dias_presentes = [
-        c for c in COLUMNAS_DIAS
-        if c in df.columns
-    ]
-
-    styler = df.style.applymap(
-        estilo_asistencia,
-        subset=columnas_dias_presentes
-    )
+    columnas_dias_presentes = [c for c in COLUMNAS_DIAS if c in df.columns]
+    styler = df.style.applymap(estilo_asistencia, subset=columnas_dias_presentes)
 
     st.dataframe(
         styler,
@@ -350,17 +382,10 @@ def lista_opciones(df: pd.DataFrame, columna: str) -> list[str]:
     )
 
     valores = sorted(valores)
-
     return ["TODOS"] + valores
 
 
-def aplicar_filtros(
-    df: pd.DataFrame,
-    filtro_supervisor: str,
-    filtro_coord: str,
-    filtro_dep: str
-) -> pd.DataFrame:
-
+def aplicar_filtros(df: pd.DataFrame, filtro_supervisor: str, filtro_coord: str, filtro_dep: str) -> pd.DataFrame:
     resultado = df.copy()
 
     if filtro_supervisor != "TODOS":
@@ -384,13 +409,7 @@ def aplicar_filtros(
 # =====================================================
 # GUARDADO
 # =====================================================
-def preparar_updates(
-    df_editado: pd.DataFrame,
-    df_total: pd.DataFrame,
-    headers: list[str],
-    cols_editables: list[str]
-) -> list[dict]:
-
+def preparar_updates(df_editado: pd.DataFrame, df_total: pd.DataFrame, headers: list[str], cols_editables: list[str]) -> list[dict]:
     mapa_col = {
         str(col).strip().upper(): idx + 1
         for idx, col in enumerate(headers)
@@ -404,9 +423,7 @@ def preparar_updates(
         except Exception:
             continue
 
-        original = df_total[
-            df_total["ROW_SHEET"].eq(row_sheet)
-        ]
+        original = df_total[df_total["ROW_SHEET"].eq(row_sheet)]
 
         if original.empty:
             continue
@@ -433,39 +450,35 @@ def preparar_updates(
 # =====================================================
 # MAIN
 # =====================================================
-def mostrar_asistencia(
-    hoja_asistencia,
-    hoja_colaboradores,
-    registro_mod=None,
-    razon=None
-):
-
+def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, razon=None):
     st.subheader("🗓️ Control de Asistencia")
 
     if not validar_o_crear_cabecera(hoja_asistencia):
         return
 
     periodo = periodo_actual()
-
     dias_editables_num = dias_semana_actual()
     cols_editables = [f"DIA_{d}" for d in dias_editables_num]
 
     # =================================================
-    # SINCRONIZAR
+    # BOTONES SUPERIORES
     # =================================================
-    c_sync, c_info = st.columns([1, 5])
+    c_sync, c_refresh, c_info = st.columns([1, 1, 4])
 
     with c_sync:
         if st.button("🔄 Sincronizar mes", key="btn_sync_asistencia"):
             try:
-                creados = sincronizar_mes(
-                    hoja_asistencia,
-                    hoja_colaboradores
-                )
+                creados = sincronizar_mes(hoja_asistencia, hoja_colaboradores)
+                cargar_cache_asistencia(hoja_asistencia, forzar=True)
                 st.success(f"Sincronización correcta. Registros nuevos: {creados}")
             except Exception as e:
                 st.error(f"Error sincronizando asistencia: {e}")
                 return
+
+    with c_refresh:
+        if st.button("♻️ Recargar Drive", key="btn_refresh_asistencia"):
+            cargar_cache_asistencia(hoja_asistencia, forzar=True)
+            st.success("Datos recargados desde Drive.")
 
     with c_info:
         st.info(
@@ -475,32 +488,26 @@ def mostrar_asistencia(
         )
 
     # =================================================
-    # LEER DATA
+    # CARGA LOCAL OPTIMIZADA
     # =================================================
     df_colab = leer_colaboradores(hoja_colaboradores)
     dnis_promotores = obtener_dnis_promotores_activos(df_colab)
 
-    df_total = leer_asistencia(hoja_asistencia)
+    df_total = cargar_cache_asistencia(hoja_asistencia, forzar=False)
 
     for col in COLUMNAS_ASISTENCIA:
         if col not in df_total.columns:
             df_total[col] = ""
 
-    df_total = df_total[COLUMNAS_ASISTENCIA].copy()
-    df_total["ROW_SHEET"] = df_total.index + 2
+    df_total = df_total[COLUMNAS_ASISTENCIA + ["ROW_SHEET"]].copy()
 
     df_mes = df_total[
-        df_total["PERIODO"]
-        .astype(str)
-        .eq(periodo)
+        df_total["PERIODO"].astype(str).eq(periodo)
     ].copy()
 
     if dnis_promotores:
         df_mes = df_mes[
-            df_mes["DNI"]
-            .astype(str)
-            .str.strip()
-            .isin(dnis_promotores)
+            df_mes["DNI"].astype(str).str.strip().isin(dnis_promotores)
         ].copy()
 
     if df_mes.empty:
@@ -511,7 +518,7 @@ def mostrar_asistencia(
         return
 
     # =================================================
-    # FILTROS
+    # FILTROS EN CASCADA
     # =================================================
     f1, f2, f3 = st.columns(3)
 
@@ -522,12 +529,7 @@ def mostrar_asistencia(
             key="asis_filtro_supervisor"
         )
 
-    df_temp = aplicar_filtros(
-        df_mes,
-        filtro_supervisor,
-        "TODOS",
-        "TODOS"
-    )
+    df_temp = aplicar_filtros(df_mes, filtro_supervisor, "TODOS", "TODOS")
 
     with f2:
         filtro_coord = st.selectbox(
@@ -536,12 +538,7 @@ def mostrar_asistencia(
             key="asis_filtro_coordinador"
         )
 
-    df_temp = aplicar_filtros(
-        df_temp,
-        "TODOS",
-        filtro_coord,
-        "TODOS"
-    )
+    df_temp = aplicar_filtros(df_temp, "TODOS", filtro_coord, "TODOS")
 
     with f3:
         filtro_dep = st.selectbox(
@@ -550,12 +547,7 @@ def mostrar_asistencia(
             key="asis_filtro_departamento"
         )
 
-    df_filtrado = aplicar_filtros(
-        df_mes,
-        filtro_supervisor,
-        filtro_coord,
-        filtro_dep
-    )
+    df_filtrado = aplicar_filtros(df_mes, filtro_supervisor, filtro_coord, filtro_dep)
 
     if df_filtrado.empty:
         st.warning("No hay registros con los filtros seleccionados.")
@@ -563,9 +555,6 @@ def mostrar_asistencia(
 
     total_filtrado = len(df_filtrado)
 
-    # =================================================
-    # LIMITE DE FILAS SIN ERROR RANGE
-    # =================================================
     if total_filtrado <= 300:
         cantidad_mostrar = total_filtrado
         st.caption(f"Registros visibles: {cantidad_mostrar} de {total_filtrado}")
@@ -583,19 +572,15 @@ def mostrar_asistencia(
     df_filtrado = df_filtrado.head(cantidad_mostrar).copy()
 
     # =================================================
-    # EDITOR
+    # EDITOR SIN FORMULARIO PARA CAPTURAR EL CAMBIO AL MOMENTO
     # =================================================
     columnas_editor = COLUMNAS_VISIBLES_BASE + COLUMNAS_DIAS + ["ROW_SHEET"]
-
     df_editor = df_filtrado[columnas_editor].copy()
 
     for col in COLUMNAS_DIAS:
         df_editor[col] = df_editor[col].apply(limpiar_marca)
 
-    disabled_cols = [
-        col for col in df_editor.columns
-        if col not in cols_editables
-    ]
+    disabled_cols = [col for col in df_editor.columns if col not in cols_editables]
 
     column_config = {}
     for col in COLUMNAS_DIAS:
@@ -605,26 +590,23 @@ def mostrar_asistencia(
             width="small"
         )
 
-    st.caption(
-        "Columnas editables esta semana: "
-        + ", ".join(cols_editables)
+    st.caption("Columnas editables esta semana: " + ", ".join(cols_editables))
+
+    editado = st.data_editor(
+        df_editor,
+        use_container_width=True,
+        height=530,
+        hide_index=True,
+        disabled=disabled_cols,
+        column_config=column_config,
+        num_rows="fixed",
+        key="editor_asistencia_directo"
     )
 
-    with st.form("form_guardar_asistencia", clear_on_submit=False):
-        editado = st.data_editor(
-            df_editor,
-            use_container_width=True,
-            height=530,
-            hide_index=True,
-            disabled=disabled_cols,
-            column_config=column_config,
-            num_rows="fixed",
-            key="editor_asistencia"
-        )
-
-        guardar = st.form_submit_button("💾 Guardar Asistencia")
-
-    if guardar:
+    # =================================================
+    # GUARDAR
+    # =================================================
+    if st.button("💾 Guardar Asistencia", key="btn_guardar_asistencia"):
         try:
             df_editado = pd.DataFrame(editado).fillna("")
 
@@ -634,10 +616,7 @@ def mostrar_asistencia(
                 st.error("La hoja Asistencia está vacía. Sincroniza nuevamente.")
                 return
 
-            headers = [
-                str(x).strip().upper()
-                for x in valores_actuales[0]
-            ]
+            headers = [str(x).strip().upper() for x in valores_actuales[0]]
 
             updates = preparar_updates(
                 df_editado,
@@ -647,19 +626,16 @@ def mostrar_asistencia(
             )
 
             if not updates:
-                st.info(
-                    "No se detectaron cambios para guardar. "
-                    "Si acabas de seleccionar A/F, haz click fuera de la celda y vuelve a presionar Guardar."
-                )
+                st.info("No se detectaron cambios para guardar.")
             else:
                 hoja_asistencia.batch_update(
                     updates,
                     value_input_option="USER_ENTERED"
                 )
 
-                st.success(
-                    f"✅ Asistencia guardada correctamente. Cambios aplicados: {len(updates)}"
-                )
+                actualizar_cache_luego_de_guardar(df_editado, cols_editables)
+
+                st.success(f"✅ Asistencia guardada correctamente. Cambios aplicados: {len(updates)}")
 
         except Exception as e:
             st.error(f"❌ Error guardando asistencia: {e}")
@@ -668,22 +644,25 @@ def mostrar_asistencia(
     # VISTA CON COLORES
     # =================================================
     st.markdown("### Vista de asistencia con colores")
-    mostrar_vista_colores(
-        df_filtrado[COLUMNAS_VISIBLES_BASE + COLUMNAS_DIAS].copy()
-    )
+    mostrar_vista_colores(df_filtrado[COLUMNAS_VISIBLES_BASE + COLUMNAS_DIAS].copy())
 
     # =================================================
     # MATRIZ INFERIOR
     # =================================================
-    if registro_mod is not None:
-        st.divider()
-        st.subheader("📋 Matriz de jerarquía")
+    st.divider()
+    st.subheader("📋 Matriz de jerarquía")
+
+    if registro_mod is None:
         try:
-            registro_mod.mostrar_tabla(
-                hoja_colaboradores,
-                razon
-            )
+            import registro_mod as registro_mod_local
+            registro_mod = registro_mod_local
+        except Exception:
+            registro_mod = None
+
+    if registro_mod is not None:
+        try:
+            registro_mod.mostrar_tabla(hoja_colaboradores, razon)
         except Exception as e:
-            st.warning(
-                f"No se pudo cargar la matriz inferior de jerarquía: {e}"
-            )
+            st.warning(f"No se pudo cargar la matriz inferior de jerarquía: {e}")
+    else:
+        st.info("No se pudo cargar el módulo de matriz inferior.")
