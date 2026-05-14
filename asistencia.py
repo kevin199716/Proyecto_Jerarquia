@@ -1,6 +1,6 @@
 # =====================================================
 # asistencia.py
-# VERSION ESTABLE - SIN FREEZE
+# VERSION FINAL ESTABLE
 # =====================================================
 
 import streamlit as st
@@ -33,11 +33,11 @@ COLUMNAS_FINAL = (
 )
 
 # =====================================================
-# CACHE LECTURA
+# CACHE DRIVE
 # =====================================================
 
 @st.cache_data(ttl=60)
-def leer_asistencia(_worksheet):
+def leer_drive(_worksheet):
 
     valores = _worksheet.get_all_values()
 
@@ -71,7 +71,7 @@ def leer_asistencia(_worksheet):
     )
 
     # =================================================
-    # CREAR COLUMNAS FALTANTES
+    # COLUMNAS FALTANTES
     # =================================================
 
     for col in COLUMNAS_FINAL:
@@ -171,7 +171,7 @@ def preparar_data(
     # DRIVE
     # =================================================
 
-    df_drive = leer_asistencia(
+    df_drive = leer_drive(
         hoja_asistencia
     )
 
@@ -192,7 +192,7 @@ def preparar_data(
         )
 
     # =================================================
-    # MES ACTUAL
+    # SOLO MES ACTUAL
     # =================================================
 
     df_mes = df_drive[
@@ -201,7 +201,7 @@ def preparar_data(
     ].copy()
 
     # =================================================
-    # SI NO EXISTE DATA DEL MES
+    # SI NO EXISTE
     # =================================================
 
     if df_mes.empty:
@@ -256,7 +256,7 @@ def preparar_data(
                 claves.add(clave)
 
         # =============================================
-        # AGREGAR NUEVOS
+        # NUEVOS
         # =============================================
 
         if nuevos:
@@ -270,7 +270,7 @@ def preparar_data(
             )
 
     # =================================================
-    # LIMPIAR DUPLICADOS
+    # ELIMINAR DUPLICADOS
     # =================================================
 
     df_mes = df_mes.drop_duplicates(
@@ -372,7 +372,7 @@ def mostrar_asistencia(
         )
 
     # =================================================
-    # FILTRAR
+    # FILTRO
     # =================================================
 
     df = df_mes.copy()
@@ -392,7 +392,7 @@ def mostrar_asistencia(
         ]
 
     # =================================================
-    # COLUMNAS VISIBLES
+    # COLUMNAS
     # =================================================
 
     columnas_visibles = [
@@ -405,7 +405,7 @@ def mostrar_asistencia(
     ] + COLUMNAS_DIAS
 
     # =================================================
-    # SOLO SEMANA ACTUAL
+    # SOLO DIA ACTUAL
     # =================================================
 
     dia_actual = datetime.now().day
@@ -429,23 +429,31 @@ def mostrar_asistencia(
             )
 
             config[col] = st.column_config.SelectboxColumn(
+
                 col,
+
                 options=["", "A", "F"],
+
                 required=False,
+
                 width="small",
+
                 disabled=not editable
             )
 
         else:
 
             config[col] = st.column_config.TextColumn(
+
                 col,
+
                 width="medium",
+
                 disabled=True
             )
 
     # =================================================
-    # DATA EDITOR
+    # TABLA
     # =================================================
 
     edited_df = st.data_editor(
@@ -466,7 +474,7 @@ def mostrar_asistencia(
     )
 
     # =================================================
-    # GUARDAR
+    # BOTON
     # =================================================
 
     if st.button(
@@ -511,23 +519,29 @@ def mostrar_asistencia(
                 ignore_index=True
             )
 
-            df_final = df_final[
-                COLUMNAS_FINAL
-            ]
-
             # =========================================
             # ELIMINAR DUPLICADOS
             # =========================================
 
             df_final = df_final.drop_duplicates(
+
                 subset=["PERIODO", "DNI"],
+
                 keep="first"
             )
 
             df_final = df_final.fillna("")
 
             # =========================================
-            # LIMPIAR DRIVE
+            # ORDEN
+            # =========================================
+
+            df_final = df_final[
+                COLUMNAS_FINAL
+            ]
+
+            # =========================================
+            # DRIVE
             # =========================================
 
             hoja_asistencia.clear()
