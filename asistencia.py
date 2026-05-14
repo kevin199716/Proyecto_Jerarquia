@@ -1,9 +1,6 @@
-# =========================================================
-# asistencia.py
-# =========================================================
-
 import streamlit as st
 import pandas as pd
+
 from datetime import datetime
 
 from st_aggrid import (
@@ -14,42 +11,59 @@ from st_aggrid import (
     JsCode
 )
 
-# =========================================================
+# =====================================================
 # CACHE
-# =========================================================
+# =====================================================
 
-@st.cache_data(ttl=30)
-def cargar_data_asistencia(_hoja_asistencia):
+@st.cache_data(ttl=60)
+def cache_dataframe(data):
 
-    try:
-        data = _hoja_asistencia.get_all_records()
-        return data
-    except:
-        return []
+    return pd.DataFrame(data)
 
-
-# =========================================================
+# =====================================================
 # GENERAR BASE
-# =========================================================
+# =====================================================
 
-def generar_base(df_colab, hoja_asistencia):
+def generar_base(
+    hoja_asistencia,
+    hoja_colaboradores
+):
 
     hoy = datetime.now()
 
     periodo_actual = hoy.strftime("%Y-%m")
+
     mes_actual = hoy.strftime("%m")
 
-    data = cargar_data_asistencia(
-        hoja_asistencia
-    )
+    # =====================================================
+    # COLABORADORES
+    # =====================================================
 
-    df_bd = pd.DataFrame(data)
+    data_colab = hoja_colaboradores.get_all_records()
+
+    df_colab = pd.DataFrame(data_colab)
+
+    df_colab = df_colab.fillna("")
+
+    # =====================================================
+    # DRIVE
+    # =====================================================
+
+    data_drive = hoja_asistencia.get_all_records()
+
+    if data_drive:
+
+        df_drive = cache_dataframe(data_drive)
+
+    else:
+
+        df_drive = pd.DataFrame()
 
     # =====================================================
     # COLUMNAS
     # =====================================================
 
-    columnas_base = [
+    columnas_fijas = [
         "SUPERVISOR",
         "COORDINADOR",
         "DEPARTAMENTO",
@@ -64,7 +78,7 @@ def generar_base(df_colab, hoja_asistencia):
     ]
 
     columnas_finales = (
-        columnas_base
+        columnas_fijas
         + columnas_dias
         + ["MES", "PERIODO"]
     )
@@ -73,7 +87,7 @@ def generar_base(df_colab, hoja_asistencia):
     # SI NO EXISTE DATA
     # =====================================================
 
-    if df_bd.empty:
+    if df_drive.empty:
 
         filas = []
 
@@ -92,58 +106,7 @@ def generar_base(df_colab, hoja_asistencia):
             }
 
             for d in columnas_dias:
-                fila[d] = ""
 
-            filas.append(fila)
-
-        df_final = pd.DataFrame(filas)
-
-        return df_final
-
-    # =====================================================
-    # ASEGURAR COLUMNAS
-    # =====================================================
-
-    for c in columnas_finales:
-
-        if c not in df_bd.columns:
-            df_bd[c] = ""
-
-    # =====================================================
-    # FILTRAR MES ACTUAL
-    # =====================================================
-
-    if "PERIODO" not in df_bd.columns:
-        df_bd["PERIODO"] = periodo_actual
-
-    df_mes = df_bd[
-        df_bd["PERIODO"].astype(str)
-        == periodo_actual
-    ].copy()
-
-    # =====================================================
-    # SI NO EXISTE MES
-    # =====================================================
-
-    if df_mes.empty:
-
-        filas = []
-
-        for _, row in df_colab.iterrows():
-
-            fila = {
-                "SUPERVISOR": str(row.get("SUPERVISOR A CARGO", "")),
-                "COORDINADOR": str(row.get("COORDINADOR", "")),
-                "DEPARTAMENTO": str(row.get("DEPARTAMENTO", "")),
-                "PROVINCIA": str(row.get("PROVINCIA", "")),
-                "DNI": str(row.get("DNI", "")),
-                "NOMBRE": str(row.get("NOMBRES", "")),
-                "ESTADO": str(row.get("ESTADO", "")),
-                "MES": mes_actual,
-                "PERIODO": periodo_actual
-            }
-
-            for d in columnas_dias:
                 fila[d] = ""
 
             filas.append(fila)
@@ -151,11 +114,60 @@ def generar_base(df_colab, hoja_asistencia):
         return pd.DataFrame(filas)
 
     # =====================================================
-    # COMPLETAR NUEVOS
+    # ASEGURAR COLUMNAS
+    # =====================================================
+
+    for c in columnas_finales:
+
+        if c not in df_drive.columns:
+
+            df_drive[c] = ""
+
+    # =====================================================
+    # FILTRAR PERIODO
+    # =====================================================
+
+    df_periodo = df_drive[
+        df_drive["PERIODO"].astype(str)
+        == periodo_actual
+    ].copy()
+
+    # =====================================================
+    # NUEVO MES
+    # =====================================================
+
+    if df_periodo.empty:
+
+        filas = []
+
+        for _, row in df_colab.iterrows():
+
+            fila = {
+                "SUPERVISOR": str(row.get("SUPERVISOR A CARGO", "")),
+                "COORDINADOR": str(row.get("COORDINADOR", "")),
+                "DEPARTAMENTO": str(row.get("DEPARTAMENTO", "")),
+                "PROVINCIA": str(row.get("PROVINCIA", "")),
+                "DNI": str(row.get("DNI", "")),
+                "NOMBRE": str(row.get("NOMBRES", "")),
+                "ESTADO": str(row.get("ESTADO", "")),
+                "MES": mes_actual,
+                "PERIODO": periodo_actual
+            }
+
+            for d in columnas_dias:
+
+                fila[d] = ""
+
+            filas.append(fila)
+
+        return pd.DataFrame(filas)
+
+    # =====================================================
+    # AGREGAR NUEVOS
     # =====================================================
 
     dni_existentes = (
-        df_mes["DNI"]
+        df_periodo["DNI"]
         .astype(str)
         .tolist()
     )
@@ -181,6 +193,7 @@ def generar_base(df_colab, hoja_asistencia):
             }
 
             for d in columnas_dias:
+
                 fila[d] = ""
 
             nuevos.append(fila)
@@ -189,8 +202,8 @@ def generar_base(df_colab, hoja_asistencia):
 
         df_nuevos = pd.DataFrame(nuevos)
 
-        df_mes = pd.concat(
-            [df_mes, df_nuevos],
+        df_periodo = pd.concat(
+            [df_periodo, df_nuevos],
             ignore_index=True
         )
 
@@ -198,14 +211,17 @@ def generar_base(df_colab, hoja_asistencia):
     # LIMPIAR
     # =====================================================
 
-    df_mes = df_mes.fillna("").astype(str)
+    df_periodo = (
+        df_periodo
+        .fillna("")
+        .astype(str)
+    )
 
-    return df_mes[columnas_finales]
+    return df_periodo[columnas_finales]
 
-
-# =========================================================
-# MOSTRAR ASISTENCIA
-# =========================================================
+# =====================================================
+# MOSTRAR
+# =====================================================
 
 def mostrar_asistencia(
     hoja_asistencia,
@@ -215,19 +231,24 @@ def mostrar_asistencia(
     st.markdown("# 🗓️ Control de Asistencia")
 
     # =====================================================
-    # DATA
+    # BASE
     # =====================================================
 
-    data_colab = (
-        hoja_colaboradores.get_all_records()
-    )
-
-    df_colab = pd.DataFrame(data_colab)
-
     df = generar_base(
-        df_colab,
-        hoja_asistencia
+        hoja_asistencia,
+        hoja_colaboradores
     )
+
+    # =====================================================
+    # ORDENAR
+    # =====================================================
+
+    df = df.sort_values(
+        by=["NOMBRE"],
+        ascending=True
+    )
+
+    df = df.reset_index(drop=True)
 
     # =====================================================
     # FILTROS
@@ -281,7 +302,13 @@ def mostrar_asistencia(
             == filtro_coord
         ]
 
-    df = df.reset_index(drop=True)
+    # =====================================================
+    # SOLO SEMANA ACTUAL
+    # =====================================================
+
+    st.info(
+        "Solo editable semana actual | A = Asistencia | F = Falta"
+    )
 
     # =====================================================
     # GRID
@@ -296,7 +323,7 @@ def mostrar_asistencia(
         for i in range(max(1, hoy - 6), hoy + 1)
     ]
 
-    columnas_fijas = [
+    columnas_bloqueadas = [
         "SUPERVISOR",
         "COORDINADOR",
         "DEPARTAMENTO",
@@ -310,12 +337,12 @@ def mostrar_asistencia(
 
     for col in df.columns:
 
-        if col in columnas_fijas:
+        if col in columnas_bloqueadas:
 
             gb.configure_column(
                 col,
                 editable=False,
-                width=140
+                width=170
             )
 
         elif col.startswith("DIA_"):
@@ -323,12 +350,11 @@ def mostrar_asistencia(
             gb.configure_column(
                 col,
                 editable=col in dias_editables,
+                width=90,
                 cellEditor="agSelectCellEditor",
                 cellEditorParams={
                     "values": ["", "A", "F"]
-                },
-                singleClickEdit=True,
-                width=85
+                }
             )
 
     # =====================================================
@@ -341,7 +367,6 @@ def mostrar_asistencia(
         if(params.value == 'A') {
             return {
                 'backgroundColor': '#b7e4c7',
-                'color': '#1b4332',
                 'fontWeight': 'bold',
                 'textAlign': 'center'
             }
@@ -350,7 +375,6 @@ def mostrar_asistencia(
         if(params.value == 'F') {
             return {
                 'backgroundColor': '#f4b6c2',
-                'color': '#9d0208',
                 'fontWeight': 'bold',
                 'textAlign': 'center'
             }
@@ -370,37 +394,35 @@ def mostrar_asistencia(
     # =====================================================
 
     gb.configure_grid_options(
-        alwaysShowHorizontalScroll=True,
-        alwaysShowVerticalScroll=True,
         suppressRowTransform=True,
         suppressAnimationFrame=True,
-        rowBuffer=20,
-        domLayout="normal"
+        rowBuffer=10,
+        domLayout='normal'
     )
 
     grid_options = gb.build()
 
     # =====================================================
-    # GRID FINAL
+    # GRID
     # =====================================================
 
     response = AgGrid(
         df,
         gridOptions=grid_options,
-        allow_unsafe_jscode=True,
         update_mode=GridUpdateMode.VALUE_CHANGED,
         data_return_mode=DataReturnMode.FILTERED_AND_SORTED,
+        allow_unsafe_jscode=True,
         fit_columns_on_grid_load=False,
-        reload_data=False,
         enable_enterprise_modules=False,
         theme="streamlit",
-        height=600,
-        key="grid_asistencia"
+        height=650,
+        reload_data=False,
+        key="GRID_ASISTENCIA"
     )
 
     df_editado = pd.DataFrame(
         response["data"]
-    ).fillna("").astype(str)
+    )
 
     # =====================================================
     # LEYENDA
@@ -418,25 +440,34 @@ def mostrar_asistencia(
 
         try:
 
-            data_total = (
-                hoja_asistencia.get_all_records()
-            )
-
-            df_total = pd.DataFrame(data_total)
-
             periodo_actual = (
                 datetime.now().strftime("%Y-%m")
             )
 
+            data_total = hoja_asistencia.get_all_records()
+
+            if data_total:
+
+                df_total = pd.DataFrame(data_total)
+
+            else:
+
+                df_total = pd.DataFrame()
+
+            # =====================================================
+            # ELIMINAR SOLO PERIODO ACTUAL
+            # =====================================================
+
             if not df_total.empty:
 
-                if "PERIODO" not in df_total.columns:
-                    df_total["PERIODO"] = periodo_actual
-
                 df_total = df_total[
-                    df_total["PERIODO"]
+                    df_total["PERIODO"].astype(str)
                     != periodo_actual
                 ]
+
+            # =====================================================
+            # CONCATENAR
+            # =====================================================
 
             df_final = pd.concat(
                 [df_total, df_editado],
@@ -449,6 +480,10 @@ def mostrar_asistencia(
                 .astype(str)
             )
 
+            # =====================================================
+            # DRIVE
+            # =====================================================
+
             hoja_asistencia.clear()
 
             hoja_asistencia.update(
@@ -459,7 +494,7 @@ def mostrar_asistencia(
                 df_final.values.tolist()
             )
 
-            cargar_data_asistencia.clear()
+            cache_dataframe.clear()
 
             st.success(
                 "✅ Asistencia guardada correctamente"
