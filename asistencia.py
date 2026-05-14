@@ -1,195 +1,3 @@
-# ============================================================
-# ARCHIVO 1: app_maestra_vendedores.py
-# Copia desde la siguiente línea hasta antes de ARCHIVO 2
-# ============================================================
-
-import os
-import sys
-import streamlit as st
-
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
-if BASE_DIR not in sys.path:
-    sys.path.insert(0, BASE_DIR)
-
-import registro_mod as registro
-
-from auth import (
-    cargar_usuarios,
-    login
-)
-
-from ui_inicio import (
-    mostrar_bienvenida
-)
-
-from sheets import (
-    conectar_google_sheets
-)
-
-from formulario import (
-    mostrar_formulario
-)
-
-from asistencia import (
-    mostrar_asistencia
-)
-
-# =========================
-# CONFIG
-# =========================
-st.set_page_config(
-    page_title="Sistema",
-    layout="wide"
-)
-
-# =========================
-# CACHE GOOGLE SHEETS
-# =========================
-@st.cache_resource(show_spinner=False)
-def get_worksheet(nombre_archivo, nombre_worksheet):
-    return conectar_google_sheets(nombre_archivo, nombre_worksheet)
-
-# =========================
-# LOGIN
-# =========================
-USUARIOS = cargar_usuarios()
-
-if "autenticado" not in st.session_state:
-    st.session_state["autenticado"] = False
-
-if not st.session_state["autenticado"]:
-    mostrar_bienvenida()
-    login(USUARIOS)
-    st.stop()
-
-# =========================
-# VARIABLES
-# =========================
-rol = st.session_state.get("rol", "")
-razon = st.session_state.get("razon", "")
-usuario = st.session_state.get("usuario", "")
-
-# =========================
-# CABECERA AZUL
-# =========================
-st.markdown(
-    f"""
-    <div style="background-color:#EAF3FF;border:1px solid #BBD7FF;border-radius:10px;padding:12px 16px;margin-bottom:12px;">
-        <b>Usuario:</b> {usuario} &nbsp;&nbsp; | &nbsp;&nbsp;
-        <b>Rol:</b> {rol} &nbsp;&nbsp; | &nbsp;&nbsp;
-        <b>Razón:</b> {razon}
-    </div>
-    """,
-    unsafe_allow_html=True
-)
-
-st.title("📊 Sistema de Vendedores")
-
-# =========================
-# MENU
-# =========================
-def menu_paginas(opciones):
-    return st.radio(
-        "Módulo",
-        opciones,
-        horizontal=True,
-        label_visibility="collapsed",
-        key=f"menu_{rol}"
-    )
-
-# =====================================================
-# BACKOFFICE
-# =====================================================
-if rol == "backoffice":
-    pagina = menu_paginas(["Registro", "Bajas", "Asistencia"])
-
-    if pagina == "Registro":
-        hoja_colaboradores = get_worksheet("maestra_vendedores", "colaboradores")
-        hoja_ubicaciones = get_worksheet("maestra_vendedores", "ubicaciones")
-
-        mostrar_formulario(hoja_colaboradores, hoja_ubicaciones)
-
-        st.divider()
-        registro.mostrar_tabla(hoja_colaboradores, razon)
-
-    elif pagina == "Bajas":
-        hoja_colaboradores = get_worksheet("maestra_vendedores", "colaboradores")
-
-        df = registro.mostrar_tabla(hoja_colaboradores, razon)
-
-        if df is not None:
-            registro.dar_de_baja(df, hoja_colaboradores, razon)
-
-    elif pagina == "Asistencia":
-        hoja_asistencia = get_worksheet("maestra_vendedores", "Asistencia")
-        hoja_colaboradores = get_worksheet("maestra_vendedores", "colaboradores")
-
-        mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro, razon)
-
-# =====================================================
-# DEALER
-# =====================================================
-elif rol == "dealer":
-    st.subheader(f"📌 Socio: {razon}")
-
-    pagina = menu_paginas(["Registro", "Bajas", "Asistencia"])
-
-    if pagina == "Registro":
-        hoja_colaboradores = get_worksheet("maestra_vendedores", "colaboradores")
-        hoja_ubicaciones = get_worksheet("maestra_vendedores", "ubicaciones")
-
-        mostrar_formulario(hoja_colaboradores, hoja_ubicaciones)
-
-        st.divider()
-        registro.mostrar_tabla(hoja_colaboradores, razon)
-
-    elif pagina == "Bajas":
-        hoja_colaboradores = get_worksheet("maestra_vendedores", "colaboradores")
-
-        df = registro.mostrar_tabla(hoja_colaboradores, razon)
-
-        if df is not None:
-            registro.dar_de_baja(df, hoja_colaboradores, razon)
-
-    elif pagina == "Asistencia":
-        hoja_asistencia = get_worksheet("maestra_vendedores", "Asistencia")
-        hoja_colaboradores = get_worksheet("maestra_vendedores", "colaboradores")
-
-        mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro, razon)
-
-# =====================================================
-# EDITOR
-# =====================================================
-elif rol == "editor":
-    st.subheader("✏️ Modo edición")
-
-    pagina = menu_paginas(["Edición", "Asistencia"])
-
-    if pagina == "Edición":
-        hoja_colaboradores = get_worksheet("maestra_vendedores", "colaboradores")
-        hoja_ubicaciones = get_worksheet("maestra_vendedores", "ubicaciones")
-
-        df = registro.mostrar_tabla(hoja_colaboradores)
-
-        if df is not None:
-            registro.editar_registro(df, hoja_colaboradores, hoja_ubicaciones)
-
-    elif pagina == "Asistencia":
-        hoja_asistencia = get_worksheet("maestra_vendedores", "Asistencia")
-        hoja_colaboradores = get_worksheet("maestra_vendedores", "colaboradores")
-
-        mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro, razon)
-
-else:
-    st.warning(f"Sin permisos para el rol: {rol}")
-
-
-# ============================================================
-# ARCHIVO 2: asistencia.py
-# Copia desde la siguiente línea en un archivo aparte llamado asistencia.py
-# ============================================================
-
 from datetime import datetime, timedelta
 
 import pandas as pd
@@ -383,7 +191,7 @@ def sincronizar_mes(hoja_asistencia, hoja_colaboradores):
 
 
 # =====================================================
-# FORMATO VISUAL HTML ESPEJO
+# VISTA CON COLORES
 # =====================================================
 def mostrar_espejo_colores(df):
     if df.empty:
@@ -399,7 +207,7 @@ def mostrar_espejo_colores(df):
             return "background-color:#FFC7CE;color:#9C0006;font-weight:bold;text-align:center;"
         return "text-align:center;"
 
-    styler = df_html.style.applymap(pintar, subset=COLUMNAS_DIAS)
+    styler = df_html.style.applymap(pintar, subset=[c for c in COLUMNAS_DIAS if c in df_html.columns])
     st.dataframe(styler, use_container_width=True, height=330)
 
 
@@ -467,18 +275,25 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
     if filtro_dep != "TODOS":
         df_filtrado = df_filtrado[df_filtrado["DEPARTAMENTO"].astype(str).eq(filtro_dep)]
 
+    if df_filtrado.empty:
+        st.warning("No hay registros con los filtros seleccionados.")
+        return
+
+    total_filtrado = len(df_filtrado)
+    valor_default = min(100, max(20, total_filtrado))
+
     max_registros = st.slider(
         "Cantidad de registros a mostrar",
         min_value=20,
-        max_value=300,
-        value=min(100, max(20, len(df_filtrado))),
+        max_value=max(20, min(300, total_filtrado)),
+        value=valor_default,
         step=20,
         key="asis_max_registros"
     )
 
     df_filtrado = df_filtrado.head(max_registros).copy()
 
-    st.caption(f"Registros visibles: {len(df_filtrado)} | Columnas editables: {', '.join(cols_editables)}")
+    st.caption(f"Registros visibles: {len(df_filtrado)} de {total_filtrado} | Columnas editables: {', '.join(cols_editables)}")
 
     columnas_editor = COLUMNAS_VISIBLES_BASE + COLUMNAS_DIAS + ["ROW_SHEET"]
     df_editor = df_filtrado[columnas_editor].copy()
@@ -514,6 +329,10 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
             df_editado = pd.DataFrame(editado).fillna("")
 
             valores = hoja_asistencia.get_all_values()
+            if not valores:
+                st.error("La hoja Asistencia está vacía. Sincroniza nuevamente.")
+                return
+
             headers = [str(x).strip().upper() for x in valores[0]]
             mapa_col = {c: i + 1 for i, c in enumerate(headers)}
 
@@ -529,6 +348,9 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                 original = original.iloc[0]
 
                 for col in cols_editables:
+                    if col not in mapa_col:
+                        continue
+
                     nuevo = limpiar_marca(row.get(col, ""))
                     anterior = limpiar_marca(original.get(col, ""))
 
