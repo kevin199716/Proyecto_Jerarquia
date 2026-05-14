@@ -17,45 +17,34 @@ from st_aggrid import (
 # =========================================================
 
 @st.cache_data(ttl=30)
-def cargar_asistencia_cache():
+def cargar_data_asistencia():
 
-    hoja = st.session_state["hoja_asistencia"]
+    # 👇 IMPORTANTE
+    hoja_asistencia = st.session_state.get("hoja_asistencia")
 
-    data = hoja.get_all_records()
+    if hoja_asistencia is None:
+        return []
 
-    return data
+    try:
+        return hoja_asistencia.get_all_records()
+    except:
+        return []
 
 
 # =========================================================
 # GENERAR BASE
 # =========================================================
 
-def generar_base_asistencia(df_colab):
+def generar_base(df_colab):
 
     hoy = datetime.now()
 
     periodo_actual = hoy.strftime("%Y-%m")
     mes_actual = hoy.strftime("%m")
 
-    data = cargar_asistencia_cache()
+    data = cargar_data_asistencia()
 
     df_bd = pd.DataFrame(data)
-
-    # =====================================================
-    # FILTRAR SOLO PERIODO ACTUAL
-    # =====================================================
-
-    if not df_bd.empty:
-
-        if "PERIODO" not in df_bd.columns:
-            df_bd["PERIODO"] = periodo_actual
-
-        if "MES" not in df_bd.columns:
-            df_bd["MES"] = mes_actual
-
-        df_bd = df_bd[
-            df_bd["PERIODO"].astype(str) == periodo_actual
-        ]
 
     # =====================================================
     # COLUMNAS
@@ -80,7 +69,7 @@ def generar_base_asistencia(df_colab):
     )
 
     # =====================================================
-    # SI NO EXISTE DATA DEL MES
+    # SI NO EXISTE DATA
     # =====================================================
 
     if df_bd.empty:
@@ -106,9 +95,7 @@ def generar_base_asistencia(df_colab):
 
             filas.append(fila)
 
-        df_final = pd.DataFrame(filas)
-
-        return df_final[columnas_finales]
+        return pd.DataFrame(filas)
 
     # =====================================================
     # ASEGURAR COLUMNAS
@@ -120,11 +107,54 @@ def generar_base_asistencia(df_colab):
             df_bd[c] = ""
 
     # =====================================================
+    # FILTRAR PERIODO ACTUAL
+    # =====================================================
+
+    if "PERIODO" in df_bd.columns:
+
+        df_mes = df_bd[
+            df_bd["PERIODO"].astype(str) == periodo_actual
+        ].copy()
+
+    else:
+
+        df_mes = df_bd.copy()
+
+    # =====================================================
+    # SI EL MES NO EXISTE
+    # =====================================================
+
+    if df_mes.empty:
+
+        filas = []
+
+        for _, row in df_colab.iterrows():
+
+            fila = {
+                "SUPERVISOR": str(row.get("SUPERVISOR A CARGO", "")),
+                "COORDINADOR": str(row.get("COORDINADOR", "")),
+                "DEPARTAMENTO": str(row.get("DEPARTAMENTO", "")),
+                "PROVINCIA": str(row.get("PROVINCIA", "")),
+                "DNI": str(row.get("DNI", "")),
+                "NOMBRE": str(row.get("NOMBRES", "")),
+                "ESTADO": str(row.get("ESTADO", "")),
+                "MES": mes_actual,
+                "PERIODO": periodo_actual
+            }
+
+            for d in columnas_dias:
+                fila[d] = ""
+
+            filas.append(fila)
+
+        return pd.DataFrame(filas)
+
+    # =====================================================
     # COMPLETAR REGISTROS FALTANTES
     # =====================================================
 
     dni_existentes = (
-        df_bd["DNI"]
+        df_mes["DNI"]
         .astype(str)
         .tolist()
     )
@@ -158,18 +188,20 @@ def generar_base_asistencia(df_colab):
 
         df_nuevos = pd.DataFrame(nuevos)
 
-        df_bd = pd.concat(
-            [df_bd, df_nuevos],
+        df_mes = pd.concat(
+            [df_mes, df_nuevos],
             ignore_index=True
         )
 
     # =====================================================
-    # LIMPIEZA
+    # LIMPIAR
     # =====================================================
 
-    df_bd = df_bd.fillna("").astype(str)
+    df_mes = df_mes[columnas_finales]
 
-    return df_bd[columnas_finales]
+    df_mes = df_mes.fillna("").astype(str)
+
+    return df_mes
 
 
 # =========================================================
@@ -178,21 +210,28 @@ def generar_base_asistencia(df_colab):
 
 def mostrar_asistencia():
 
-    hoja_asistencia = st.session_state["hoja_asistencia"]
+    hoja_asistencia = st.session_state.get("hoja_asistencia")
+    hoja_colab = st.session_state.get("hoja_colaboradores")
 
-    hoja_colab = st.session_state["hoja_colaboradores"]
+    if hoja_asistencia is None:
+        st.error("❌ No existe hoja_asistencia")
+        return
+
+    if hoja_colab is None:
+        st.error("❌ No existe hoja_colaboradores")
+        return
 
     st.markdown("# 🗓️ Control de Asistencia")
 
     # =====================================================
-    # CARGA RAPIDA
+    # DATA
     # =====================================================
 
     data_colab = hoja_colab.get_all_records()
 
     df_colab = pd.DataFrame(data_colab)
 
-    df = generar_base_asistencia(df_colab)
+    df = generar_base(df_colab)
 
     # =====================================================
     # FILTROS
@@ -259,7 +298,7 @@ def mostrar_asistencia():
         for i in range(max(1, hoy - 6), hoy + 1)
     ]
 
-    columnas_no_editables = [
+    columnas_fijas = [
         "SUPERVISOR",
         "COORDINADOR",
         "DEPARTAMENTO",
@@ -273,7 +312,7 @@ def mostrar_asistencia():
 
     for col in df.columns:
 
-        if col in columnas_no_editables:
+        if col in columnas_fijas:
 
             gb.configure_column(
                 col,
@@ -295,7 +334,7 @@ def mostrar_asistencia():
             )
 
     # =====================================================
-    # COLORES
+    # COLOR
     # =====================================================
 
     estilo = JsCode("""
@@ -329,7 +368,7 @@ def mostrar_asistencia():
         )
 
     # =====================================================
-    # OPCIONES GRID
+    # GRID OPTIONS
     # =====================================================
 
     gb.configure_grid_options(
@@ -386,7 +425,6 @@ def mostrar_asistencia():
 
             periodo_actual = datetime.now().strftime("%Y-%m")
 
-            # eliminar periodo actual
             if not df_total.empty:
 
                 if "PERIODO" not in df_total.columns:
@@ -396,7 +434,6 @@ def mostrar_asistencia():
                     df_total["PERIODO"] != periodo_actual
                 ]
 
-            # agregar nuevo periodo actual
             df_final = pd.concat(
                 [df_total, df_editado],
                 ignore_index=True
@@ -413,7 +450,7 @@ def mostrar_asistencia():
                 df_final.values.tolist()
             )
 
-            cargar_asistencia_cache.clear()
+            cargar_data_asistencia.clear()
 
             st.success(
                 "✅ Asistencia guardada correctamente"
@@ -422,5 +459,5 @@ def mostrar_asistencia():
         except Exception as e:
 
             st.error(
-                f"❌ Error: {str(e)}"
+                f"❌ Error al guardar: {str(e)}"
             )
