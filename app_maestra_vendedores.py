@@ -8,13 +8,31 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
+# =========================
+# IMPORTS ORIGINALES
+# =========================
 import registro_mod as registro
 
-from auth import cargar_usuarios, login
-from ui_inicio import mostrar_bienvenida
-from sheets import conectar_google_sheets
-from formulario import mostrar_formulario
-from asistencia import mostrar_asistencia
+from auth import (
+    cargar_usuarios,
+    login
+)
+
+from ui_inicio import (
+    mostrar_bienvenida
+)
+
+from sheets import (
+    conectar_google_sheets
+)
+
+from formulario import (
+    mostrar_formulario
+)
+
+from asistencia import (
+    mostrar_asistencia
+)
 
 
 # =========================
@@ -27,68 +45,18 @@ st.set_page_config(
 
 
 # =========================
-# ESTILOS / CABECERA
-# =========================
-def pintar_estilos_base():
-    st.markdown(
-        """
-        <style>
-            .bloque-usuario {
-                background: linear-gradient(90deg, #0B5ED7, #0D6EFD);
-                color: white;
-                padding: 12px 16px;
-                border-radius: 12px;
-                margin-bottom: 12px;
-                font-weight: 600;
-            }
-            .bloque-usuario span {
-                display: inline-block;
-                margin-right: 22px;
-            }
-            div[data-testid="stRadio"] > div {
-                background: #F3F7FF;
-                padding: 10px;
-                border-radius: 12px;
-                border: 1px solid #D6E6FF;
-            }
-        </style>
-        """,
-        unsafe_allow_html=True
-    )
-
-
-def mostrar_barra_usuario(rol, razon):
-    usuario = (
-        st.session_state.get("usuario")
-        or st.session_state.get("username")
-        or st.session_state.get("user")
-        or "Usuario"
-    )
-
-    razon_txt = razon if razon else "ALL"
-
-    st.markdown(
-        f"""
-        <div class="bloque-usuario">
-            <span>👤 Usuario: {usuario}</span>
-            <span>🔐 Rol: {rol}</span>
-            <span>🏢 Razón: {razon_txt}</span>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-
-
-# =========================
-# CACHE GOOGLE SHEETS
+# CACHE SOLO PARA CONEXION
 # =========================
 @st.cache_resource(show_spinner=False)
-def get_worksheet(nombre_archivo, nombre_worksheet):
-    return conectar_google_sheets(nombre_archivo, nombre_worksheet)
+def get_worksheet(nombre_hoja, nombre_worksheet):
+    return conectar_google_sheets(
+        nombre_hoja,
+        nombre_worksheet
+    )
 
 
 # =========================
-# LOGIN
+# USUARIOS / LOGIN
 # =========================
 USUARIOS = cargar_usuarios()
 
@@ -102,31 +70,102 @@ if not st.session_state["autenticado"]:
 
 
 # =========================
-# VARIABLES
+# VARIABLES DE SESION
 # =========================
 rol = st.session_state.get("rol", "")
 razon = st.session_state.get("razon", "")
+usuario = st.session_state.get("usuario", st.session_state.get("username", ""))
 
 
 # =========================
-# UI GENERAL
+# CONEXIONES GOOGLE SHEETS
 # =========================
-pintar_estilos_base()
+hoja_colaboradores = get_worksheet(
+    "maestra_vendedores",
+    "colaboradores"
+)
 
-st.title("📊 Sistema de Vendedores")
-mostrar_barra_usuario(rol, razon)
+hoja_ubicaciones = get_worksheet(
+    "maestra_vendedores",
+    "ubicaciones"
+)
+
+hoja_asistencia = get_worksheet(
+    "maestra_vendedores",
+    "Asistencia"
+)
+
+
+# =========================
+# ESTILO CABECERA AZUL
+# =========================
+st.markdown(
+    """
+    <style>
+        .cabecera-app {
+            background: linear-gradient(90deg, #0B5CAD, #1976D2);
+            padding: 14px 18px;
+            border-radius: 10px;
+            color: white;
+            margin-bottom: 14px;
+        }
+        .cabecera-app h2 {
+            margin: 0;
+            color: white;
+        }
+        .cabecera-app p {
+            margin: 4px 0 0 0;
+            color: white;
+            font-size: 14px;
+        }
+    </style>
+    """,
+    unsafe_allow_html=True
+)
+
+st.markdown(
+    f"""
+    <div class="cabecera-app">
+        <h2>📊 Sistema de Vendedores</h2>
+        <p><b>Usuario:</b> {usuario if usuario else '-'} &nbsp; | &nbsp; <b>Rol:</b> {rol if rol else '-'} &nbsp; | &nbsp; <b>Razón:</b> {razon if razon else '-'}</p>
+    </div>
+    """,
+    unsafe_allow_html=True
+)
 
 
 # =====================================================
-# MENU
+# FUNCIONES UI
 # =====================================================
-def menu_paginas(opciones):
+def mostrar_matriz_jerarquia(titulo="📋 Estado actual de la jerarquía"):
+    st.divider()
+    st.subheader(titulo)
+
+    try:
+        if rol == "editor":
+            return registro.mostrar_tabla(
+                hoja_colaboradores
+            )
+
+        return registro.mostrar_tabla(
+            hoja_colaboradores,
+            razon
+        )
+
+    except Exception as e:
+        st.error(
+            f"No se pudo cargar la matriz de jerarquía: {e}"
+        )
+        return None
+
+
+def menu_modulos(opciones):
     return st.radio(
         "Módulo",
         opciones,
         horizontal=True,
         label_visibility="collapsed",
-        key=f"menu_principal_{rol}"
+        key=f"menu_{rol}"
     )
 
 
@@ -134,30 +173,26 @@ def menu_paginas(opciones):
 # BACKOFFICE
 # =====================================================
 if rol == "backoffice":
-    pagina = menu_paginas([
+
+    pagina = menu_modulos([
         "Registro",
         "Bajas",
         "Asistencia"
     ])
 
     if pagina == "Registro":
-        hoja_colaboradores = get_worksheet("maestra_vendedores", "colaboradores")
-        hoja_ubicaciones = get_worksheet("maestra_vendedores", "ubicaciones")
-
         mostrar_formulario(
             hoja_colaboradores,
             hoja_ubicaciones
         )
 
-    elif pagina == "Bajas":
-        hoja_colaboradores = get_worksheet("maestra_vendedores", "colaboradores")
+        mostrar_matriz_jerarquia()
 
-        df = registro.mostrar_tabla(
-            hoja_colaboradores,
-            razon
-        )
+    elif pagina == "Bajas":
+        df = mostrar_matriz_jerarquia()
 
         if df is not None:
+            st.divider()
             registro.dar_de_baja(
                 df,
                 hoja_colaboradores,
@@ -165,47 +200,42 @@ if rol == "backoffice":
             )
 
     elif pagina == "Asistencia":
-        hoja_asistencia = get_worksheet("maestra_vendedores", "Asistencia")
-        hoja_colaboradores = get_worksheet("maestra_vendedores", "colaboradores")
-
         mostrar_asistencia(
             hoja_asistencia,
-            hoja_colaboradores,
-            razon=razon,
-            rol=rol
+            hoja_colaboradores
         )
+
+        mostrar_matriz_jerarquia()
 
 
 # =====================================================
 # DEALER
 # =====================================================
 elif rol == "dealer":
-    st.subheader(f"📌 Socio: {razon}")
 
-    pagina = menu_paginas([
+    st.subheader(
+        f"📌 Socio: {razon}"
+    )
+
+    pagina = menu_modulos([
         "Registro",
         "Bajas",
         "Asistencia"
     ])
 
     if pagina == "Registro":
-        hoja_colaboradores = get_worksheet("maestra_vendedores", "colaboradores")
-        hoja_ubicaciones = get_worksheet("maestra_vendedores", "ubicaciones")
-
         mostrar_formulario(
             hoja_colaboradores,
             hoja_ubicaciones
         )
 
-    elif pagina == "Bajas":
-        hoja_colaboradores = get_worksheet("maestra_vendedores", "colaboradores")
+        mostrar_matriz_jerarquia()
 
-        df = registro.mostrar_tabla(
-            hoja_colaboradores,
-            razon
-        )
+    elif pagina == "Bajas":
+        df = mostrar_matriz_jerarquia()
 
         if df is not None:
+            st.divider()
             registro.dar_de_baja(
                 df,
                 hoja_colaboradores,
@@ -213,37 +243,33 @@ elif rol == "dealer":
             )
 
     elif pagina == "Asistencia":
-        hoja_asistencia = get_worksheet("maestra_vendedores", "Asistencia")
-        hoja_colaboradores = get_worksheet("maestra_vendedores", "colaboradores")
-
         mostrar_asistencia(
             hoja_asistencia,
-            hoja_colaboradores,
-            razon=razon,
-            rol=rol
+            hoja_colaboradores
         )
+
+        mostrar_matriz_jerarquia()
 
 
 # =====================================================
 # EDITOR
 # =====================================================
 elif rol == "editor":
-    st.subheader("✏️ Modo edición")
 
-    pagina = menu_paginas([
+    st.subheader(
+        "✏️ Modo edición"
+    )
+
+    pagina = menu_modulos([
         "Edición",
         "Asistencia"
     ])
 
     if pagina == "Edición":
-        hoja_colaboradores = get_worksheet("maestra_vendedores", "colaboradores")
-        hoja_ubicaciones = get_worksheet("maestra_vendedores", "ubicaciones")
-
-        df = registro.mostrar_tabla(
-            hoja_colaboradores
-        )
+        df = mostrar_matriz_jerarquia()
 
         if df is not None:
+            st.divider()
             registro.editar_registro(
                 df,
                 hoja_colaboradores,
@@ -251,19 +277,18 @@ elif rol == "editor":
             )
 
     elif pagina == "Asistencia":
-        hoja_asistencia = get_worksheet("maestra_vendedores", "Asistencia")
-        hoja_colaboradores = get_worksheet("maestra_vendedores", "colaboradores")
-
         mostrar_asistencia(
             hoja_asistencia,
-            hoja_colaboradores,
-            razon=razon,
-            rol=rol
+            hoja_colaboradores
         )
+
+        mostrar_matriz_jerarquia()
 
 
 # =====================================================
 # SIN PERMISOS
 # =====================================================
 else:
-    st.warning(f"Sin permisos para el rol: {rol}")
+    st.warning(
+        f"Sin permisos para el rol: {rol}"
+    )
