@@ -7,6 +7,7 @@ Fixes aplicados:
   4. batch_update agrupado por filas (mucho más rápido)
   5. Indicadores de progreso para no congelar la UI
   6. Manejo robusto de errores con reintentos
+  7. Tras guardar: sin get_all_values extra si el caché ya tiene cabeceras válidas
 """
 
 import time
@@ -114,6 +115,27 @@ def validar_o_crear_cabecera(hoja_asistencia) -> bool:
         st.warning("Borra el contenido de la pestaña Asistencia y presiona 'Sincronizar mes'.")
         return False
     return True
+
+
+def _cabecera_ok_en_headers(headers: list[str]) -> bool:
+    """Evita get_all_values() si ya tenemos cabeceras coherentes en caché."""
+    if not headers:
+        return False
+    headers_up = [limpiar_texto(x).upper() for x in headers]
+    return all(c in headers_up for c in COLUMNAS_ASISTENCIA)
+
+
+def validar_cabecera_sin_red(hoja_asistencia) -> bool:
+    """
+    Si el caché local ya tiene cabeceras válidas, no vuelve a leer toda la hoja.
+    Reduce mucho el lag tras Guardar (cada rerun llamaba get_all_values).
+    Tras 'Recargar Drive' / 'Sincronizar mes' el caché se reconstruye y sigue siendo válido.
+    """
+    if st.session_state.get(KEY_LOADED) and _cabecera_ok_en_headers(
+        st.session_state.get(KEY_HEADERS) or []
+    ):
+        return True
+    return validar_o_crear_cabecera(hoja_asistencia)
 
 
 def leer_asistencia_drive(hoja_asistencia) -> tuple[pd.DataFrame, list[str]]:
@@ -294,7 +316,13 @@ def preparar_updates(
     Esto reduce dramáticamente el número de peticiones a la API de Sheets.
     """
     mapa_col = {limpiar_texto(col).upper(): idx + 1 for idx, col in enumerate(headers)}
-    updates = []
+    updates: list[dict] = []
+
+    # Índice O(1) por fila de hoja (evita df_original[mask] en cada iteración).
+    try:
+        orig_idx = df_original.set_index("ROW_SHEET", drop=False)
+    except Exception:
+        orig_idx = df_original.copy().set_index("ROW_SHEET", drop=False)
 
     for _, row in df_editado.iterrows():
         try:
@@ -302,17 +330,18 @@ def preparar_updates(
         except Exception:
             continue
 
-        original_match = df_original[df_original["ROW_SHEET"].eq(row_sheet)]
-        if original_match.empty:
+        if row_sheet not in orig_idx.index:
             continue
-        original = original_match.iloc[0]
+        original = orig_idx.loc[row_sheet]
+        if isinstance(original, pd.DataFrame):
+            original = original.iloc[0]
 
         # Recolectar todas las celdas cambiadas en esta fila
         cambios_fila: dict[int, str] = {}
         for col in cols_editables:
             if col not in mapa_col:
                 continue
-            nuevo   = limpiar_marca(row.get(col, ""))
+            nuevo = limpiar_marca(row.get(col, ""))
             anterior = limpiar_marca(original.get(col, ""))
             if nuevo != anterior:
                 cambios_fila[mapa_col[col]] = nuevo
@@ -346,15 +375,23 @@ def actualizar_cache_con_editado(df_editado: pd.DataFrame, cols_editables: list[
     if KEY_DF_TOTAL not in st.session_state:
         return
     df_total = st.session_state[KEY_DF_TOTAL].copy()
-    for _, row in df_editado.iterrows():
-        try:
-            row_sheet = int(row["ROW_SHEET"])
-        except Exception:
+    use_cols = ["ROW_SHEET"] + [c for c in cols_editables if c in df_editado.columns]
+    patch = df_editado[use_cols].copy()
+    patch["ROW_SHEET"] = pd.to_numeric(patch["ROW_SHEET"], errors="coerce")
+    patch = patch.dropna(subset=["ROW_SHEET"])
+    for c in cols_editables:
+        if c in patch.columns:
+            patch[c] = patch[c].map(limpiar_marca)
+    patch = patch.set_index("ROW_SHEET")
+    df_total["_rk"] = pd.to_numeric(df_total["ROW_SHEET"], errors="coerce")
+    for c in cols_editables:
+        if c not in patch.columns or c not in df_total.columns:
             continue
-        mask = df_total["ROW_SHEET"].eq(row_sheet)
-        for col in cols_editables:
-            if col in df_total.columns:
-                df_total.loc[mask, col] = limpiar_marca(row.get(col, ""))
+        mapped = df_total["_rk"].map(patch[c])
+        ok = mapped.notna()
+        if ok.any():
+            df_total.loc[ok, c] = mapped[ok].values
+    df_total = df_total.drop(columns=["_rk"])
     st.session_state[KEY_DF_TOTAL]    = df_total.copy()
     st.session_state[KEY_DF_ORIGINAL] = df_total.copy()
     st.session_state[KEY_LOAD_TS]     = time.time()   # resetear TTL
@@ -366,7 +403,7 @@ def actualizar_cache_con_editado(df_editado: pd.DataFrame, cols_editables: list[
 def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, razon=None):
     st.subheader("🗓️ Control de Asistencia")
 
-    if not validar_o_crear_cabecera(hoja_asistencia):
+    if not validar_cabecera_sin_red(hoja_asistencia):
         return
 
     periodo = periodo_actual()
@@ -516,12 +553,16 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                 if not updates:
                     st.info("ℹ️ No se detectaron cambios para guardar.")
                 else:
-                    for i in range(0, len(updates), 100):
+                    # Un solo batch_update cuando cabe; sleep solo entre lotes (rate limit).
+                    chunk_size = 100
+                    chunks = [updates[i : i + chunk_size] for i in range(0, len(updates), chunk_size)]
+                    for i, chunk in enumerate(chunks):
                         hoja_asistencia.batch_update(
-                            updates[i:i+100],
+                            chunk,
                             value_input_option="USER_ENTERED",
                         )
-                        time.sleep(0.3)
+                        if i < len(chunks) - 1:
+                            time.sleep(0.12)
                     actualizar_cache_con_editado(df_editado, cols_dias_hasta_hoy)
                     # Guardar mensaje de éxito para mostrarlo tras el rerun
                     st.session_state["asis_guardado_msg"] = f"✅ Asistencia guardada. Celdas actualizadas: {len(updates)}"
