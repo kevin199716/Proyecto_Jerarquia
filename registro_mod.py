@@ -72,7 +72,7 @@ def mostrar_tabla(hoja, razon_usuario=None):
 # =========================
 def dar_de_baja(df, hoja, razon_usuario=None):
 
-    st.subheader("🔻 Dar de baja")
+    st.markdown("<span class='wow-section-title'>🔻 Dar de baja</span>", unsafe_allow_html=True)
 
     df.columns = df.columns.str.strip().str.upper()
 
@@ -221,7 +221,7 @@ def dar_de_baja(df, hoja, razon_usuario=None):
 # =========================
 def editar_registro(df, hoja, hoja_ubi):
 
-    st.subheader("✏️ Editar registro")
+    st.markdown("<span class='wow-section-title'>✏️ Editar registro</span>", unsafe_allow_html=True)
 
     df.columns = df.columns.str.strip().str.upper()
 

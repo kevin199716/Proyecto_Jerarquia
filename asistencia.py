@@ -286,8 +286,8 @@ def filtrar_df(df: pd.DataFrame, supervisor: str, coordinador: str, departamento
 # =====================================================
 def estilo_asistencia(valor: str) -> str:
     v = limpiar_marca(valor)
-    if v == "A": return "background-color:#C6EFCE;color:#006100;font-weight:bold;text-align:center;"
-    if v == "F": return "background-color:#FFC7CE;color:#9C0006;font-weight:bold;text-align:center;"
+    if v == "A": return "background-color:#D4EDDA;color:#155724;font-weight:bold;text-align:center;"
+    if v == "F": return "background-color:#F8D7DA;color:#721C24;font-weight:bold;text-align:center;"
     return "text-align:center;"
 
 
@@ -441,7 +441,7 @@ def actualizar_cache_con_editado(df_editado: pd.DataFrame, cols_editables: list[
 # MAIN
 # =====================================================
 def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, razon=None):
-    st.subheader("🗓️ Control de Asistencia")
+    st.markdown("<span class='wow-section-title'>🗓️ Control de Asistencia</span>", unsafe_allow_html=True)
 
     if not validar_cabecera_sin_red(hoja_asistencia):
         return
@@ -640,7 +640,7 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
 
     if registro_mod is not None:
         st.divider()
-        st.subheader("📋 Matriz de jerarquía")
+        st.markdown("<span class='wow-section-title'>📋 Matriz de jerarquía</span>", unsafe_allow_html=True)
         try:
             registro_mod.mostrar_tabla(hoja_colaboradores, razon)
         except Exception as e:

@@ -105,7 +105,7 @@ def mostrar_formulario(
     hoja_ubicaciones
 ):
 
-    st.subheader("📋 Registro de Vendedores")
+    st.markdown("<span class='wow-section-title'>📋 Registro de Vendedores</span>", unsafe_allow_html=True)
 
     if st.session_state.get("mensaje_ok"):
 

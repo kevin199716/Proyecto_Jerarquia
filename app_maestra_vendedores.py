@@ -39,7 +39,8 @@ from asistencia import (
 # CONFIG
 # =========================
 st.set_page_config(
-    page_title="Sistema",
+    page_title="WOW | Portal Vendedores",
+    page_icon="🟣",
     layout="wide"
 )
 
@@ -97,13 +98,14 @@ hoja_asistencia = get_worksheet(
 
 
 # =========================
-# ESTILO CABECERA AZUL
+# ESTILO CABECERA WOW
 # =========================
 st.markdown(
     """
     <style>
+        /* ── Cabecera ── */
         .cabecera-app {
-            background: linear-gradient(90deg, #0B5CAD, #1976D2);
+            background: linear-gradient(135deg, #4B0067 0%, #A531EF 100%);
             padding: 14px 18px;
             border-radius: 10px;
             color: white;
@@ -111,12 +113,53 @@ st.markdown(
         }
         .cabecera-app h2 {
             margin: 0;
-            color: white;
+            color: white !important;
         }
         .cabecera-app p {
             margin: 4px 0 0 0;
-            color: white;
+            color: white !important;
             font-size: 14px;
+        }
+        /* ── Sidebar fondo morado ── */
+        section[data-testid="stSidebar"] > div:first-child {
+            background-color: #4B0067;
+        }
+        section[data-testid="stSidebar"] label,
+        section[data-testid="stSidebar"] p,
+        section[data-testid="stSidebar"] .stMarkdown p {
+            color: white !important;
+        }
+        /* ── Botones CTA (form submit) ── */
+        .stFormSubmitButton > button {
+            background-color: #EC6608 !important;
+            color: white !important;
+            border: none !important;
+            border-radius: 8px !important;
+        }
+        .stFormSubmitButton > button:hover {
+            background-color: #c4550a !important;
+            color: white !important;
+        }
+        /* ── Botones normales ── */
+        .stButton > button {
+            background-color: #A531EF !important;
+            color: white !important;
+            border: none !important;
+            border-radius: 8px !important;
+        }
+        .stButton > button:hover {
+            background-color: #4B0067 !important;
+            color: white !important;
+        }
+        /* ── Subheaders WOW ── */
+        .wow-section-title {
+            color: #4B0067;
+            font-weight: 800;
+            font-size: 1.1em;
+            border-bottom: 3px solid #EC6608;
+            padding-bottom: 6px;
+            margin-bottom: 12px;
+            display: inline-block;
         }
     </style>
     """,
