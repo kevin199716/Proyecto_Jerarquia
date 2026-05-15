@@ -1,5 +1,12 @@
+"""
+auth.py — v3
+Fix crítico: usar textwrap.dedent() para que st.markdown no interprete el HTML
+indentado como bloque de código.
+"""
 import json
 import os
+import textwrap
+
 import streamlit as st
 
 
@@ -22,64 +29,48 @@ def cargar_usuarios():
         st.stop()
 
 
+# Helper para no repetir textwrap.dedent
+def _md(html: str):
+    st.markdown(textwrap.dedent(html), unsafe_allow_html=True)
+
+
 # =========================
-# LOGIN — UI v2 (2 columnas en área principal, sidebar oculta)
+# LOGIN — v3
 # =========================
 def login(usuarios):
-    """
-    Login en área principal con layout de 2 columnas:
-    - Izquierda: hero morado con branding WOW D2D
-    - Derecha: formulario de credenciales
-    Sidebar oculta durante este flujo (vía CSS inyectada por wow_theme.hide_sidebar_for_login).
-    """
     from wow_theme import hide_sidebar_for_login
     hide_sidebar_for_login()
 
-    # Renderizar las 2 columnas
     col_hero, col_form = st.columns([1.05, 0.95], gap="medium")
 
     # ─── HERO (col izquierda) ───────────────────────────────────────────────
     with col_hero:
-        st.markdown(
-            """
-            <div class="wow-login-hero" style="border-radius: 20px 0 0 20px; height: 100%;">
-                <div class="brand">
-                    <img src="https://raw.githubusercontent.com/leocorbur/st_apps/refs/heads/main/images/logo_horizontal_blanco.png"
-                         alt="WOW D2D" />
-                </div>
-
-                <div>
-                    <div class="wow-login-eyebrow">
-                        ✦ Portal de Vendedores
-                    </div>
-                    <h1>Gestiona tu fuerza de ventas<br/><span class="accent">con claridad</span>.</h1>
-                    <p>Altas, bajas, asistencia y jerarquía en un solo lugar. Toda la operación de WOW D2D, sincronizada en tiempo real.</p>
-
-                    <div class="features">
-                        <div class="feat"><div class="ico">👥</div> Altas y bajas</div>
-                        <div class="feat"><div class="ico">🗓️</div> Asistencia diaria</div>
-                        <div class="feat"><div class="ico">📋</div> Jerarquía</div>
-                    </div>
-                </div>
-
-                <div class="footer">© 2026 WOW Perú · v2.4.0</div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        _md("""
+<div class="wow-login-hero" style="border-radius:20px; height:100%; min-height:540px;">
+<div class="brand"><img src="https://raw.githubusercontent.com/leocorbur/st_apps/refs/heads/main/images/logo_horizontal_blanco.png" alt="WOW D2D" /></div>
+<div>
+<div class="wow-login-eyebrow">✦ Portal de Vendedores</div>
+<h1>Gestiona tu fuerza de ventas<br/><span class="accent">con claridad</span>.</h1>
+<p>Altas, bajas, asistencia y jerarquía en un solo lugar. Toda la operación de WOW D2D, sincronizada en tiempo real.</p>
+<div class="features">
+<div class="feat"><div class="ico">👥</div> Altas y bajas</div>
+<div class="feat"><div class="ico">🗓️</div> Asistencia diaria</div>
+<div class="feat"><div class="ico">📋</div> Jerarquía</div>
+</div>
+</div>
+<div class="footer">© 2026 WOW Perú · v2.4.0</div>
+</div>
+""")
 
     # ─── FORM (col derecha) ─────────────────────────────────────────────────
     with col_form:
-        st.markdown(
-            """
-            <div style="padding: 8px 8px 0;">
-                <div class="wow-login-form-eyebrow">🔒 Acceso seguro</div>
-                <h2>Bienvenido de vuelta</h2>
-                <p class="subtitle">Ingresa con tus credenciales corporativas para acceder al portal.</p>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        _md("""
+<div style="padding:24px 8px 0;">
+<div class="wow-login-form-eyebrow">🔒 Acceso seguro</div>
+<h2 style="margin:0 0 6px; font-size:26px; font-weight:800; color:var(--ink-900); letter-spacing:-0.4px;">Bienvenido de vuelta</h2>
+<p style="margin:0 0 20px; font-size:13.5px; color:var(--ink-500); line-height:1.5;">Ingresa con tus credenciales corporativas para acceder al portal.</p>
+</div>
+""")
 
         usuario = st.text_input(
             "Usuario",
@@ -94,8 +85,12 @@ def login(usuarios):
             placeholder="••••••••",
         ).strip()
 
-        # CTA principal
-        ingresar = st.button("Ingresar al portal →", key="btn_login", type="primary", use_container_width=True)
+        ingresar = st.button(
+            "Ingresar al portal  →",
+            key="btn_login",
+            type="primary",
+            use_container_width=True,
+        )
 
         if ingresar:
             datos_usuario = usuarios.get(usuario)
@@ -113,50 +108,28 @@ def login(usuarios):
                 st.error("❌ Usuario o contraseña incorrectos")
 
         # Caja de soporte
-        st.markdown(
-            """
-            <div style="
-                margin-top: 18px;
-                padding: 12px 14px;
-                background: #DFF1F6;
-                border: 1px solid #B7E2ED;
-                border-radius: 10px;
-                color: #1F6A7E;
-                font-size: 12px;
-                line-height: 1.5;
-                display: flex;
-                gap: 10px;
-                align-items: flex-start;
-            ">
-                <span style="font-size:14px;">ℹ️</span>
-                <div>
-                    <strong>¿Problemas para ingresar?</strong>
-                    Contacta al área de soporte:
-                    <strong style="color:#4B0067;">ksa@wowperu.pe</strong>
-                </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+        _md("""
+<div style="margin-top:18px; padding:12px 14px; background:#DFF1F6; border:1px solid #B7E2ED; border-radius:10px; color:#1F6A7E; font-size:12px; line-height:1.5; display:flex; gap:10px; align-items:flex-start;">
+<span style="font-size:14px;">ℹ️</span>
+<div><strong>¿Problemas para ingresar?</strong> Contacta al área de soporte: <strong style="color:#4B0067;">ksa@wowperu.pe</strong></div>
+</div>
+""")
 
-    # Estilo extra: el botón primary en área main debe ser naranja (login CTA)
-    st.markdown(
-        """
-        <style>
-            .main button[kind="primary"] {
-                background: var(--wow-orange-500, #EC6608) !important;
-                color: white !important;
-                border: 1px solid var(--wow-orange-500, #EC6608) !important;
-                box-shadow: var(--shadow-cta, 0 6px 18px rgba(236,102,8,0.30)) !important;
-                font-weight: 700 !important;
-                height: 48px !important;
-                font-size: 14px !important;
-            }
-            .main button[kind="primary"]:hover {
-                background: var(--wow-orange-600, #D45605) !important;
-                color: white !important;
-            }
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
+    # Botón primary naranja en main area (override final con !important)
+    _md("""
+<style>
+.main button[kind="primary"] {
+    background: #EC6608 !important;
+    color: white !important;
+    border: 1px solid #EC6608 !important;
+    box-shadow: 0 6px 18px rgba(236,102,8,0.30) !important;
+    font-weight: 700 !important;
+    height: 48px !important;
+    font-size: 14px !important;
+}
+.main button[kind="primary"]:hover {
+    background: #D45605 !important;
+    color: white !important;
+}
+</style>
+""")

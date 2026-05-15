@@ -1,18 +1,22 @@
 """
-wow_theme.py — Sistema de diseño WOW D2D (v2 — 2-col login + sidebar nav)
+wow_theme.py — v3
 
-Cambios v2:
-- Login en área principal con 2 columnas (hero + form), sidebar oculto
-- Sidebar post-login con avatar de usuario + nav vertical estilizado
-- Más componentes reutilizables (hero post-login, etc.)
+Fixes vs v2:
+- Cabecera alineada con sidebar (sin gap superior)
+- Tablas con estilo: header morado, hover, bordes redondeados, sticky header
+- Formularios con tarjetas (st.form se ve como card con sombra)
+- textwrap.dedent en todas las plantillas HTML para evitar bug de markdown
 """
 
+import textwrap
 import streamlit as st
 
 
-# =====================================================
-# CSS GLOBAL
-# =====================================================
+def _md(html: str):
+    """Renderiza HTML aplicando textwrap.dedent para evitar que st.markdown lo trate como code block."""
+    st.markdown(textwrap.dedent(html), unsafe_allow_html=True)
+
+
 _THEME_CSS = """
 <style>
 @import url('https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=JetBrains+Mono:wght@400;600&display=swap');
@@ -49,6 +53,7 @@ _THEME_CSS = """
     --warning-100: #FFE8B3;
     --shadow-sm: 0 1px 2px rgba(26,21,33,0.06), 0 1px 1px rgba(26,21,33,0.04);
     --shadow-md: 0 4px 12px rgba(26,21,33,0.07);
+    --shadow-lg: 0 14px 32px rgba(26,21,33,0.10);
     --shadow-brand: 0 8px 24px rgba(75,0,103,0.25);
     --shadow-cta: 0 6px 18px rgba(236,102,8,0.30);
 }
@@ -59,17 +64,24 @@ html, body, [class*="css"], .stApp {
 }
 code, kbd, pre, .mono { font-family: 'JetBrains Mono', monospace !important; }
 
+/* ============================================================
+   LAYOUT — alineación cabecera con sidebar
+   ============================================================ */
 .main .block-container {
-    padding-top: 1.5rem;
+    padding-top: 1rem !important;
     padding-bottom: 4rem;
     max-width: 1280px;
 }
+/* Streamlit deja un header invisible arriba — colapsamos */
+[data-testid="stHeader"] { display: none !important; height: 0 !important; }
+.stApp > header { height: 0 !important; }
 
 /* ============================================================
-   SIDEBAR — modo POST-LOGIN (morado, con nav vertical)
+   SIDEBAR — modo POST-LOGIN
    ============================================================ */
 section[data-testid="stSidebar"] > div:first-child {
     background: linear-gradient(180deg, #4B0067 0%, #3a0052 100%);
+    padding-top: 1.5rem;
 }
 section[data-testid="stSidebar"] label,
 section[data-testid="stSidebar"] p,
@@ -82,20 +94,14 @@ section[data-testid="stSidebar"] h3 {
     color: white !important;
 }
 
-/* Sidebar: oculto durante login (clase aplicada por auth.py vía JS) */
+/* Sidebar oculta durante login */
 body[data-wow-hide-sidebar="true"] section[data-testid="stSidebar"],
 body[data-wow-hide-sidebar="true"] [data-testid="collapsedControl"] {
     display: none !important;
 }
-body[data-wow-hide-sidebar="true"] .main .block-container {
-    max-width: 1280px;
-    padding-top: 2rem;
-}
 
-/* Sidebar nav: radio vertical estilizado como menú */
-section[data-testid="stSidebar"] [data-testid="stRadio"] > label {
-    display: none; /* ocultar label "Módulo" */
-}
+/* Sidebar nav: radio vertical */
+section[data-testid="stSidebar"] [data-testid="stRadio"] > label { display: none; }
 section[data-testid="stSidebar"] [data-testid="stRadio"] > div {
     flex-direction: column !important;
     gap: 4px !important;
@@ -110,7 +116,7 @@ section[data-testid="stSidebar"] [data-testid="stRadio"] label {
     font-size: 13.5px !important;
     width: 100%;
     cursor: pointer;
-    transition: background 0.15s;
+    transition: background 0.15s, color 0.15s;
 }
 section[data-testid="stSidebar"] [data-testid="stRadio"] label:hover {
     background: rgba(255,255,255,0.08) !important;
@@ -120,11 +126,10 @@ section[data-testid="stSidebar"] [data-testid="stRadio"] label:has(input:checked
     background: rgba(255,255,255,0.14) !important;
     color: white !important;
     box-shadow: inset 3px 0 0 var(--wow-orange-500);
+    font-weight: 700 !important;
 }
 
-/* ============================================================
-   SIDEBAR — modo LOGIN (cuando se ve, antes de hideando)
-   ============================================================ */
+/* Sidebar — INPUTS de login (cuando sidebar visible antes de hide) */
 section[data-testid="stSidebar"] input {
     background: white !important;
     color: var(--ink-900) !important;
@@ -133,41 +138,37 @@ section[data-testid="stSidebar"] input {
     padding: 10px 12px !important;
     font-size: 14px !important;
 }
-section[data-testid="stSidebar"] input:focus {
-    border-color: var(--wow-orange-500) !important;
-    box-shadow: 0 0 0 3px rgba(236,102,8,0.25) !important;
-}
+
+/* Sidebar — botón cerrar sesión */
 section[data-testid="stSidebar"] .stButton > button {
-    background: var(--wow-orange-500) !important;
+    background: rgba(255,255,255,0.08) !important;
     color: white !important;
-    border: none !important;
+    border: 1px solid rgba(255,255,255,0.18) !important;
     border-radius: 10px !important;
     width: 100%;
-    height: 44px;
-    font-weight: 700 !important;
-    font-size: 14px !important;
-    box-shadow: var(--shadow-cta);
+    height: 42px;
+    font-weight: 600 !important;
+    font-size: 13px !important;
+    transition: background 0.15s;
 }
 section[data-testid="stSidebar"] .stButton > button:hover {
-    background: var(--wow-orange-600) !important;
+    background: rgba(236,102,8,0.20) !important;
+    border-color: rgba(236,102,8,0.4) !important;
 }
 
 /* ============================================================
    BOTONES área principal
    ============================================================ */
-.main .stButton > button,
-.main .stFormSubmitButton > button {
-    border-radius: 10px !important;
-    padding: 9px 18px !important;
-    font-weight: 700 !important;
-    font-size: 13px !important;
-    letter-spacing: 0.2px;
-}
 .main .stFormSubmitButton > button {
     background: var(--wow-orange-500) !important;
     color: white !important;
     border: none !important;
+    border-radius: 10px !important;
+    padding: 10px 22px !important;
+    font-weight: 700 !important;
+    font-size: 13.5px !important;
     box-shadow: var(--shadow-cta);
+    letter-spacing: 0.2px;
 }
 .main .stFormSubmitButton > button:hover {
     background: var(--wow-orange-600) !important;
@@ -176,6 +177,10 @@ section[data-testid="stSidebar"] .stButton > button:hover {
     background: var(--wow-purple-500) !important;
     color: white !important;
     border: none !important;
+    border-radius: 10px !important;
+    padding: 9px 18px !important;
+    font-weight: 700 !important;
+    font-size: 13px !important;
     box-shadow: 0 4px 12px rgba(165,49,239,0.25);
 }
 .main .stButton > button:hover {
@@ -183,7 +188,7 @@ section[data-testid="stSidebar"] .stButton > button:hover {
 }
 
 /* ============================================================
-   TITLE de sección WOW (clase usada por asistencia/formulario/registro_mod)
+   SECTION TITLES (clase usada por todos los módulos)
    ============================================================ */
 .wow-section-title {
     display: inline-block;
@@ -197,7 +202,7 @@ section[data-testid="stSidebar"] .stButton > button:hover {
 }
 
 /* ============================================================
-   LABELS / INPUTS / SELECTS área principal
+   LABELS / INPUTS / SELECTS
    ============================================================ */
 .main [data-testid="stWidgetLabel"] p,
 .main .stSelectbox label,
@@ -217,11 +222,18 @@ section[data-testid="stSidebar"] .stButton > button:hover {
     background: white !important;
     padding: 10px 14px !important;
     font-size: 13px !important;
+    box-shadow: var(--shadow-sm);
 }
 .main .stTextInput > div > div > input:focus,
-.main [data-testid="stTextInput"] input:focus {
+.main [data-testid="stTextInput"] input:focus,
+.main [data-testid="stDateInput"] input:focus {
     border-color: var(--wow-purple-500) !important;
     box-shadow: 0 0 0 3px rgba(165,49,239,0.15) !important;
+}
+.main .stTextInput > div > div > input:disabled,
+.main [data-testid="stTextInput"] input:disabled {
+    background: var(--ink-100) !important;
+    color: var(--ink-500) !important;
 }
 .main .stSelectbox > div > div,
 .main div[data-baseweb="select"] > div {
@@ -229,31 +241,172 @@ section[data-testid="stSidebar"] .stButton > button:hover {
     border-radius: 10px !important;
     background: white !important;
     min-height: 42px;
+    box-shadow: var(--shadow-sm);
 }
 
+/* ============================================================
+   FORMULARIOS — convertir st.form en tarjeta
+   ============================================================ */
+[data-testid="stForm"] {
+    background: white;
+    border: 1px solid var(--ink-200);
+    border-radius: 16px;
+    padding: 24px 28px !important;
+    box-shadow: var(--shadow-sm);
+    margin: 14px 0;
+    position: relative;
+}
+[data-testid="stForm"]::before {
+    content: "";
+    position: absolute;
+    top: 0; left: 24px; right: 24px;
+    height: 3px;
+    background: linear-gradient(90deg, var(--wow-orange-500) 0%, var(--wow-purple-500) 100%);
+    border-radius: 0 0 4px 4px;
+}
+
+/* Grupo visual: cuando hay st.columns dentro del form */
+[data-testid="stForm"] [data-testid="stHorizontalBlock"] {
+    gap: 18px;
+}
+
+/* ============================================================
+   TABLAS — dataframe y data_editor
+   ============================================================ */
+[data-testid="stDataFrame"],
+[data-testid="stDataFrameContainer"],
+[data-testid="stDataEditor"],
+[data-testid="stDataEditorContainer"] {
+    border: 1px solid var(--ink-200) !important;
+    border-radius: 12px !important;
+    overflow: hidden !important;
+    box-shadow: var(--shadow-sm) !important;
+    background: white !important;
+}
+
+/* Header del dataframe — morado */
+[data-testid="stDataFrame"] [role="columnheader"],
+[data-testid="stDataEditor"] [role="columnheader"],
+.glideDataEditor [data-testid="data-grid-canvas"] + div {
+    background: var(--wow-purple-50) !important;
+    color: var(--wow-purple-700) !important;
+    font-weight: 700 !important;
+    text-transform: uppercase;
+    font-size: 11px !important;
+    letter-spacing: 0.5px;
+    border-bottom: 2px solid var(--wow-purple-100) !important;
+}
+
+/* Hover row */
+[data-testid="stDataFrame"] [role="row"]:hover,
+[data-testid="stDataEditor"] [role="row"]:hover {
+    background: var(--wow-purple-50) !important;
+}
+
+/* Glide grid (st.dataframe interno usa glide-data-grid) */
+.glideDataEditor {
+    --gdg-bg-header: var(--wow-purple-50);
+    --gdg-bg-header-has-focus: var(--wow-purple-100);
+    --gdg-text-header: #4B0067;
+    --gdg-header-bottom-border-color: #E5DDF0;
+    --gdg-bg-cell: #FFFFFF;
+    --gdg-bg-cell-medium: #FAF8FC;
+    --gdg-bg-search-result: var(--wow-orange-50);
+    --gdg-accent-color: var(--wow-purple-500);
+    --gdg-accent-fg: white;
+    --gdg-accent-light: rgba(165,49,239,0.10);
+    --gdg-text-dark: var(--ink-900);
+    --gdg-text-medium: var(--ink-500);
+    --gdg-text-light: var(--ink-400);
+    --gdg-text-bubble: var(--wow-purple-700);
+    --gdg-bg-bubble: var(--wow-purple-50);
+    --gdg-bg-bubble-selected: var(--wow-purple-100);
+    --gdg-cell-horizontal-padding: 12px;
+    --gdg-cell-vertical-padding: 9px;
+    --gdg-header-icon-size: 16px;
+    --gdg-font-family: 'Plus Jakarta Sans', sans-serif;
+    --gdg-header-font-style: 600 12px;
+    --gdg-base-font-style: 13px;
+}
+
+/* Wrapper de tabla con padding extra */
+.wow-table-card {
+    background: white;
+    border: 1px solid var(--ink-200);
+    border-radius: 14px;
+    padding: 4px;
+    box-shadow: var(--shadow-sm);
+    margin: 10px 0 18px;
+    overflow: hidden;
+}
+.wow-table-toolbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px 8px;
+    border-bottom: 1px solid var(--ink-100);
+}
+.wow-table-toolbar .title {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--ink-900);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+.wow-table-toolbar .count {
+    font-size: 11px;
+    color: var(--ink-500);
+    background: var(--wow-purple-50);
+    border: 1px solid var(--wow-purple-100);
+    border-radius: 999px;
+    padding: 3px 10px;
+    font-weight: 600;
+    color: var(--wow-purple-700);
+}
+
+/* Streamlit DIVIDER */
 hr { border-color: var(--ink-100) !important; margin: 1.5rem 0 !important; }
+
+/* ============================================================
+   ALERTS (st.success / st.error / st.warning / st.info)
+   ============================================================ */
+[data-testid="stAlert"] {
+    border-radius: 12px !important;
+    padding: 14px 16px !important;
+    border: 1px solid !important;
+}
+[data-testid="stAlert"][kind="success"] {
+    background: var(--success-100) !important;
+    border-color: #B0DCC1 !important;
+    color: var(--success-700) !important;
+}
+[data-testid="stAlert"][kind="error"] {
+    background: var(--danger-100) !important;
+    border-color: #ECB7B3 !important;
+    color: var(--danger-700) !important;
+}
+[data-testid="stAlert"][kind="warning"] {
+    background: var(--warning-100) !important;
+    border-color: #F0D78A !important;
+    color: var(--warning-700) !important;
+}
+[data-testid="stAlert"][kind="info"] {
+    background: var(--wow-sky-100) !important;
+    border-color: var(--wow-sky-200) !important;
+    color: #1F6A7E !important;
+}
 
 /* ============================================================
    COMPONENTES PERSONALIZADOS
    ============================================================ */
 
-/* Login 2-col hero panel */
-.wow-login-grid {
-    display: grid;
-    grid-template-columns: 1.05fr 0.95fr;
-    gap: 32px;
-    min-height: 600px;
-    background: white;
-    border-radius: 20px;
-    overflow: hidden;
-    box-shadow: 0 24px 60px rgba(75,0,103,0.18), 0 0 0 1px rgba(75,0,103,0.06);
-    margin-top: 1rem;
-}
+/* Login 2-col hero */
 .wow-login-hero {
     background:
-        radial-gradient(700px 400px at 0% 0%, rgba(165,49,239,0.45), transparent 60%),
-        radial-gradient(500px 300px at 100% 100%, rgba(236,102,8,0.30), transparent 55%),
-        linear-gradient(135deg, #2A003D 0%, #4B0067 55%, #6E1098 100%);
+      radial-gradient(700px 400px at 0% 0%, rgba(165,49,239,0.45), transparent 60%),
+      radial-gradient(500px 300px at 100% 100%, rgba(236,102,8,0.30), transparent 55%),
+      linear-gradient(135deg, #2A003D 0%, #4B0067 55%, #6E1098 100%);
     color: white;
     padding: 44px 48px;
     display: flex;
@@ -261,8 +414,10 @@ hr { border-color: var(--ink-100) !important; margin: 1.5rem 0 !important; }
     justify-content: space-between;
     position: relative;
     overflow: hidden;
+    border-radius: 20px;
+    box-shadow: var(--shadow-brand);
+    min-height: 540px;
 }
-.wow-login-hero .brand { display: flex; align-items: center; }
 .wow-login-hero .brand img { height: 32px; }
 .wow-login-eyebrow {
     display: inline-flex; align-items: center; gap: 6px;
@@ -271,31 +426,24 @@ hr { border-color: var(--ink-100) !important; margin: 1.5rem 0 !important; }
     color: rgba(255,255,255,0.9);
     border-radius: 999px;
     padding: 5px 14px;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 1.2px;
-    text-transform: uppercase;
+    font-size: 11px; font-weight: 700;
+    letter-spacing: 1.2px; text-transform: uppercase;
     margin-bottom: 18px;
 }
 .wow-login-hero h1 {
     margin: 0 0 14px;
-    font-size: 34px;
-    font-weight: 800;
-    letter-spacing: -0.5px;
-    line-height: 1.1;
+    font-size: 34px; font-weight: 800;
+    letter-spacing: -0.5px; line-height: 1.1;
     color: white !important;
 }
 .wow-login-hero h1 .accent { color: #FFB07A; }
 .wow-login-hero p {
     font-size: 14px;
     color: rgba(255,255,255,0.82) !important;
-    margin: 0;
-    line-height: 1.55;
+    margin: 0; line-height: 1.55;
     max-width: 480px;
 }
-.wow-login-hero .features {
-    display: flex; gap: 24px; margin-top: 32px;
-}
+.wow-login-hero .features { display: flex; gap: 24px; margin-top: 32px; flex-wrap: wrap; }
 .wow-login-hero .feat {
     display: flex; align-items: center; gap: 8px;
     font-size: 12px; color: rgba(255,255,255,0.85);
@@ -313,15 +461,8 @@ hr { border-color: var(--ink-100) !important; margin: 1.5rem 0 !important; }
     font-size: 11px;
     color: rgba(255,255,255,0.5);
     letter-spacing: 0.5px;
-    position: relative;
 }
 
-.wow-login-form-wrap {
-    padding: 44px 44px;
-    display: flex;
-    flex-direction: column;
-    justify-content: center;
-}
 .wow-login-form-eyebrow {
     display: inline-flex; align-items: center; gap: 6px;
     background: var(--wow-orange-50);
@@ -329,33 +470,17 @@ hr { border-color: var(--ink-100) !important; margin: 1.5rem 0 !important; }
     color: var(--wow-orange-600);
     border-radius: 999px;
     padding: 5px 11px;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 1px;
-    text-transform: uppercase;
+    font-size: 11px; font-weight: 700;
+    letter-spacing: 1px; text-transform: uppercase;
     margin-bottom: 18px;
-    align-self: flex-start;
-}
-.wow-login-form-wrap h2 {
-    margin: 0 0 6px;
-    font-size: 26px;
-    font-weight: 800;
-    color: var(--ink-900);
-    letter-spacing: -0.4px;
-}
-.wow-login-form-wrap .subtitle {
-    margin: 0 0 24px;
-    font-size: 13.5px;
-    color: var(--ink-500);
-    line-height: 1.5;
 }
 
-/* App header post-login */
+/* App header */
 .wow-app-header {
     background: linear-gradient(120deg, #2A003D 0%, #4B0067 50%, #6E1098 100%);
     border-radius: 16px;
-    padding: 22px 28px;
-    margin-bottom: 22px;
+    padding: 20px 26px;
+    margin: 0 0 22px;
     position: relative;
     overflow: hidden;
     box-shadow: var(--shadow-brand);
@@ -379,14 +504,13 @@ hr { border-color: var(--ink-100) !important; margin: 1.5rem 0 !important; }
 }
 .wow-app-header h1 {
     margin: 0;
-    font-size: 22px;
-    font-weight: 800;
+    font-size: 20px; font-weight: 800;
     letter-spacing: -0.4px;
     color: white !important;
 }
 .wow-app-header-sub {
     margin: 2px 0 0;
-    font-size: 13px;
+    font-size: 12.5px;
     color: rgba(255,255,255,0.78) !important;
 }
 .wow-app-header-meta { display: flex; gap: 8px; flex-wrap: wrap; }
@@ -399,12 +523,11 @@ hr { border-color: var(--ink-100) !important; margin: 1.5rem 0 !important; }
 }
 .wow-pill-orange { background: rgba(236,102,8,0.18); color: #FFD0A8; border-color: rgba(236,102,8,0.35); }
 .wow-pill-purple { background: rgba(255,255,255,0.10); color: white; border-color: rgba(255,255,255,0.22); }
-.wow-pill-light  { background: var(--wow-purple-50); color: var(--wow-purple-700); border-color: var(--wow-purple-100); }
 
-/* Sidebar header (post-login) — user card */
+/* Sidebar header post-login */
 .wow-sidebar-brand-pl {
     display: flex; align-items: center; justify-content: center;
-    padding: 6px 0 14px;
+    padding: 0 0 14px;
     border-bottom: 1px solid rgba(255,255,255,0.1);
     margin-bottom: 16px;
 }
@@ -445,7 +568,7 @@ hr { border-color: var(--ink-100) !important; margin: 1.5rem 0 !important; }
     padding: 8px 14px 4px;
 }
 .wow-sidebar-help {
-    margin-top: auto;
+    margin-top: 24px;
     padding: 12px 14px;
     background: rgba(236,102,8,0.10);
     border: 1px solid rgba(236,102,8,0.25);
@@ -463,147 +586,109 @@ hr { border-color: var(--ink-100) !important; margin: 1.5rem 0 !important; }
     line-height: 1.45;
 }
 
-/* Hide Streamlit default chrome (deploy menu, etc. — opcional) */
+/* Hide deploy menu / footer */
 #MainMenu { visibility: hidden; }
 footer { visibility: hidden; }
 
 /* Responsive */
 @media (max-width: 900px) {
-    .wow-login-grid { grid-template-columns: 1fr; min-height: auto; }
-    .wow-login-hero { padding: 32px 28px; }
-    .wow-login-hero h1 { font-size: 26px; }
-    .wow-login-form-wrap { padding: 28px 24px; }
-    .wow-app-header { padding: 18px 20px; }
-    .wow-app-header h1 { font-size: 18px; }
+    .wow-login-hero { padding: 28px 24px; min-height: 360px; }
+    .wow-login-hero h1 { font-size: 24px; }
+    .wow-app-header { padding: 16px 18px; }
+    .wow-app-header h1 { font-size: 17px; }
     .main .block-container { padding-left: 1rem; padding-right: 1rem; }
+    [data-testid="stForm"] { padding: 18px 16px !important; }
 }
 </style>
-
-<script>
-// Etiqueta body cuando un componente lo pide (para hide sidebar en login)
-(function() {
-    const flag = window.parent.document.querySelector('iframe').contentWindow.document;
-}) ();
-</script>
 """
 
 
 def inject_global_theme():
-    """Inyecta el CSS global de WOW D2D. Llamar UNA vez después de st.set_page_config."""
     st.markdown(_THEME_CSS, unsafe_allow_html=True)
 
 
 def hide_sidebar_for_login():
-    """
-    Oculta la sidebar de Streamlit durante el flujo de login.
-    Hack: marca el body con data-wow-hide-sidebar=true vía JS desde un iframe
-    de st.components, ya que st.markdown corre en su propio sandbox.
-    """
     st.markdown(
         """
         <style>
             section[data-testid="stSidebar"],
             [data-testid="collapsedControl"] { display: none !important; }
-            .main .block-container { max-width: 1280px; padding-top: 2rem; }
+            .main .block-container { max-width: 1280px; padding-top: 1.5rem; }
         </style>
         """,
         unsafe_allow_html=True,
     )
 
 
-# =====================================================
-# COMPONENTES HTML
-# =====================================================
 def render_app_header(usuario: str, rol: str, razon: str):
-    """Cabecera principal post-login con saludo + meta info."""
     usuario_safe = usuario.capitalize() if usuario else "—"
     rol_safe = rol or "—"
     razon_safe = razon or "—"
-    st.markdown(
-        f"""
-        <div class="wow-app-header">
-          <div class="wow-app-header-row">
-            <div>
-              <h1>Portal de Vendedores</h1>
-              <p class="wow-app-header-sub">
-                Hola, <strong>{usuario_safe}</strong> · sesión activa
-              </p>
-            </div>
-            <div class="wow-app-header-meta">
-              <span class="wow-pill wow-pill-orange">{rol_safe}</span>
-              <span class="wow-pill wow-pill-purple">{razon_safe}</span>
-            </div>
-          </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    _md(f"""
+<div class="wow-app-header">
+<div class="wow-app-header-row">
+<div>
+<h1>Portal de Vendedores</h1>
+<p class="wow-app-header-sub">Hola, <strong>{usuario_safe}</strong> · sesión activa</p>
+</div>
+<div class="wow-app-header-meta">
+<span class="wow-pill wow-pill-orange">{rol_safe}</span>
+<span class="wow-pill wow-pill-purple">{razon_safe}</span>
+</div>
+</div>
+</div>
+""")
 
 
 def render_sidebar_user(usuario: str, rol: str, razon: str):
-    """Header del sidebar post-login: logo + tarjeta de usuario."""
     inicial = (usuario[0] if usuario else "?").upper()
     usuario_safe = usuario.capitalize() if usuario else "—"
     rol_safe = (rol or "—").upper()
     razon_short = (razon.split()[0] if razon else "—")
 
-    st.sidebar.markdown(
-        f"""
-        <div class="wow-sidebar-brand-pl">
-            <img src="https://raw.githubusercontent.com/leocorbur/st_apps/refs/heads/main/images/logo_horizontal_blanco.png"
-                 alt="WOW D2D" />
-        </div>
-        <div class="wow-user-card">
-            <div class="wow-user-avatar">{inicial}</div>
-            <div class="wow-user-info">
-                <div class="wow-user-name">{usuario_safe}</div>
-                <div class="wow-user-meta">{rol_safe} · {razon_short}</div>
-            </div>
-        </div>
-        <div class="wow-nav-label">Módulos</div>
-        """,
-        unsafe_allow_html=True,
-    )
+    st.sidebar.markdown(textwrap.dedent(f"""
+<div class="wow-sidebar-brand-pl">
+<img src="https://raw.githubusercontent.com/leocorbur/st_apps/refs/heads/main/images/logo_horizontal_blanco.png" alt="WOW D2D" />
+</div>
+<div class="wow-user-card">
+<div class="wow-user-avatar">{inicial}</div>
+<div class="wow-user-info">
+<div class="wow-user-name">{usuario_safe}</div>
+<div class="wow-user-meta">{rol_safe} · {razon_short}</div>
+</div>
+</div>
+<div class="wow-nav-label">Módulos</div>
+"""), unsafe_allow_html=True)
 
 
 def render_sidebar_help():
-    """Footer del sidebar con info de soporte."""
-    st.sidebar.markdown(
-        """
-        <div class="wow-sidebar-help">
-            <div class="wow-sidebar-help-title">❓ ¿Necesitas ayuda?</div>
-            <div class="wow-sidebar-help-body">
-                Soporte:<br/><strong style="color:#FFB07A;">ksa@wowperu.pe</strong>
-            </div>
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    st.sidebar.markdown(textwrap.dedent("""
+<div class="wow-sidebar-help">
+<div class="wow-sidebar-help-title">❓ ¿Necesitas ayuda?</div>
+<div class="wow-sidebar-help-body">Soporte:<br/><strong style="color:#FFB07A;">ksa@wowperu.pe</strong></div>
+</div>
+"""), unsafe_allow_html=True)
 
 
 def wow_section(titulo: str, icono: str = ""):
-    """Subheader con barra naranja inferior."""
     safe = f"{icono} {titulo}".strip()
     st.markdown(f'<span class="wow-section-title">{safe}</span>', unsafe_allow_html=True)
 
 
+def wow_table_header(titulo: str, count_label: str = None, icono: str = "📋"):
+    """Cabecera decorativa para una tabla. Llamar antes de st.dataframe."""
+    count_html = f'<div class="count">{count_label}</div>' if count_label else ""
+    _md(f"""
+<div class="wow-table-toolbar">
+<div class="title">{icono} {titulo}</div>
+{count_html}
+</div>
+""")
+
+
 def wow_callout(texto_html: str):
-    """Bloque rosa con borde naranja para mensajes contextuales."""
-    st.markdown(
-        f"""
-        <div style="
-            background: var(--wow-pink-100, #FAE8EA);
-            border: 1px solid var(--wow-pink-200, #F5D4D9);
-            border-left: 4px solid var(--wow-orange-500, #EC6608);
-            border-radius: 10px;
-            padding: 14px 18px;
-            margin: 14px 0;
-            color: var(--wow-purple-700, #4B0067);
-            font-size: 13px;
-            line-height: 1.55;
-        ">
-            {texto_html}
-        </div>
-        """,
-        unsafe_allow_html=True,
-    )
+    _md(f"""
+<div style="background:#FAE8EA; border:1px solid #F5D4D9; border-left:4px solid #EC6608; border-radius:10px; padding:14px 18px; margin:14px 0; color:#4B0067; font-size:13px; line-height:1.55;">
+{texto_html}
+</div>
+""")
