@@ -305,6 +305,25 @@ def mostrar_espejo_mes(df: pd.DataFrame, dias_validos: list[int]) -> None:
 # =====================================================
 # GUARDADO OPTIMIZADO (batch por fila, no por celda)
 # =====================================================
+def normalizar_para_guardado(df: pd.DataFrame, cols_dias: list[str]) -> pd.DataFrame:
+    """
+    Alinea tipos del data_editor con el caché: ROW_SHEET entero y DIA_* solo '', 'A', 'F'.
+    Evita falsos positivos en el segundo guardado (miles de updates y timeout).
+    """
+    out = df.copy()
+    if "ROW_SHEET" not in out.columns:
+        return out
+    out["ROW_SHEET"] = pd.to_numeric(out["ROW_SHEET"], errors="coerce")
+    out = out.dropna(subset=["ROW_SHEET"])
+    if out.empty:
+        return out
+    out["ROW_SHEET"] = out["ROW_SHEET"].astype(int)
+    for c in cols_dias:
+        if c in out.columns:
+            out[c] = out[c].map(limpiar_marca)
+    return out
+
+
 def preparar_updates(
     df_editado: pd.DataFrame,
     df_original: pd.DataFrame,
@@ -315,16 +334,27 @@ def preparar_updates(
     Agrupa los cambios por fila y construye un solo rango por fila modificada.
     Esto reduce dramáticamente el número de peticiones a la API de Sheets.
     """
+    df_e = normalizar_para_guardado(df_editado.copy(), cols_editables)
+    df_o = normalizar_para_guardado(df_original.copy(), cols_editables)
+    if df_e.empty or "ROW_SHEET" not in df_e.columns:
+        return []
+    if df_o.empty or "ROW_SHEET" not in df_o.columns:
+        return []
+    if df_o["ROW_SHEET"].duplicated().any():
+        df_o = df_o.groupby("ROW_SHEET", as_index=False, sort=False).first()
+    if df_e["ROW_SHEET"].duplicated().any():
+        df_e = df_e.groupby("ROW_SHEET", as_index=False, sort=False).last()
+
     mapa_col = {limpiar_texto(col).upper(): idx + 1 for idx, col in enumerate(headers)}
     updates: list[dict] = []
 
     # Índice O(1) por fila de hoja (evita df_original[mask] en cada iteración).
     try:
-        orig_idx = df_original.set_index("ROW_SHEET", drop=False)
+        orig_idx = df_o.set_index("ROW_SHEET", drop=False)
     except Exception:
-        orig_idx = df_original.copy().set_index("ROW_SHEET", drop=False)
+        orig_idx = df_o.copy().set_index("ROW_SHEET", drop=False)
 
-    for _, row in df_editado.iterrows():
+    for _, row in df_e.iterrows():
         try:
             row_sheet = int(row["ROW_SHEET"])
         except Exception:
@@ -374,14 +404,24 @@ def preparar_updates(
 def actualizar_cache_con_editado(df_editado: pd.DataFrame, cols_editables: list[str]) -> None:
     if KEY_DF_TOTAL not in st.session_state:
         return
+    df_editado = normalizar_para_guardado(df_editado.copy(), cols_editables)
+    n_antes = len(df_editado)
+    if "ROW_SHEET" in df_editado.columns and df_editado["ROW_SHEET"].duplicated().any():
+        df_editado = df_editado.groupby("ROW_SHEET", as_index=False, sort=False).last()
+        if len(df_editado) < n_antes:
+            st.warning(
+                "Hay filas duplicadas por ROW_SHEET en el editor; se aplicó la última versión por fila."
+            )
     df_total = st.session_state[KEY_DF_TOTAL].copy()
     use_cols = ["ROW_SHEET"] + [c for c in cols_editables if c in df_editado.columns]
     patch = df_editado[use_cols].copy()
     patch["ROW_SHEET"] = pd.to_numeric(patch["ROW_SHEET"], errors="coerce")
     patch = patch.dropna(subset=["ROW_SHEET"])
+    patch["ROW_SHEET"] = patch["ROW_SHEET"].astype(int)
     for c in cols_editables:
         if c in patch.columns:
             patch[c] = patch[c].map(limpiar_marca)
+    patch = patch.drop_duplicates(subset=["ROW_SHEET"], keep="last")
     patch = patch.set_index("ROW_SHEET")
     df_total["_rk"] = pd.to_numeric(df_total["ROW_SHEET"], errors="coerce")
     for c in cols_editables:
@@ -543,30 +583,38 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
     if st.button("💾 Guardar Asistencia", key="btn_guardar_asistencia"):
         with st.spinner("Guardando en Google Drive…"):
             try:
-                df_editado = pd.DataFrame(editado).fillna("")
-                updates = preparar_updates(
-                    df_editado=df_editado,
-                    df_original=df_original,
-                    headers=headers,
-                    cols_editables=cols_dias_hasta_hoy,
+                df_editado = normalizar_para_guardado(
+                    pd.DataFrame(editado).fillna(""),
+                    cols_dias_hasta_hoy,
                 )
-                if not updates:
-                    st.info("ℹ️ No se detectaron cambios para guardar.")
+                if df_editado.empty or "ROW_SHEET" not in df_editado.columns:
+                    st.warning("No se pudo leer la tabla del editor (falta ROW_SHEET). Recarga la página.")
                 else:
-                    # Un solo batch_update cuando cabe; sleep solo entre lotes (rate limit).
-                    chunk_size = 100
-                    chunks = [updates[i : i + chunk_size] for i in range(0, len(updates), chunk_size)]
-                    for i, chunk in enumerate(chunks):
-                        hoja_asistencia.batch_update(
-                            chunk,
-                            value_input_option="USER_ENTERED",
-                        )
-                        if i < len(chunks) - 1:
-                            time.sleep(0.12)
-                    actualizar_cache_con_editado(df_editado, cols_dias_hasta_hoy)
-                    # Guardar mensaje de éxito para mostrarlo tras el rerun
-                    st.session_state["asis_guardado_msg"] = f"✅ Asistencia guardada. Celdas actualizadas: {len(updates)}"
-                    st.rerun()   # ← rerenderiza toda la página con el caché ya actualizado
+                    if df_editado["ROW_SHEET"].duplicated().any():
+                        df_editado = df_editado.groupby("ROW_SHEET", as_index=False, sort=False).last()
+                    updates = preparar_updates(
+                        df_editado=df_editado,
+                        df_original=df_original,
+                        headers=headers,
+                        cols_editables=cols_dias_hasta_hoy,
+                    )
+                    if not updates:
+                        st.info("ℹ️ No se detectaron cambios para guardar.")
+                    else:
+                        # Un solo batch_update cuando cabe; sleep solo entre lotes (rate limit).
+                        chunk_size = 100
+                        chunks = [updates[i : i + chunk_size] for i in range(0, len(updates), chunk_size)]
+                        for i, chunk in enumerate(chunks):
+                            hoja_asistencia.batch_update(
+                                chunk,
+                                value_input_option="USER_ENTERED",
+                            )
+                            if i < len(chunks) - 1:
+                                time.sleep(0.12)
+                        actualizar_cache_con_editado(df_editado, cols_dias_hasta_hoy)
+                        # Guardar mensaje de éxito para mostrarlo tras el rerun
+                        st.session_state["asis_guardado_msg"] = f"✅ Asistencia guardada. Celdas actualizadas: {len(updates)}"
+                        st.rerun()   # ← rerenderiza toda la página con el caché ya actualizado
             except Exception as e:
                 st.error(f"❌ Error guardando asistencia: {e}")
 
