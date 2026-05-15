@@ -37,9 +37,14 @@ def login(usuarios):
             }
             section[data-testid="stSidebar"] label,
             section[data-testid="stSidebar"] p,
-            section[data-testid="stSidebar"] input,
-            section[data-testid="stSidebar"] .stMarkdown p {
+            section[data-testid="stSidebar"] .stMarkdown p,
+            section[data-testid="stSidebar"] [data-testid="stWidgetLabel"] p,
+            section[data-testid="stSidebar"] [data-testid="stWidgetLabel"] span {
                 color: white !important;
+            }
+            section[data-testid="stSidebar"] input,
+            section[data-testid="stSidebar"] input::placeholder {
+                color: #333 !important;
             }
             section[data-testid="stSidebar"] .stButton > button {
                 background-color: #EC6608 !important;
