@@ -502,7 +502,7 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
         key="editor_asistencia_mes_completo",
     )
 
-    # ── FIX 4: batch_update optimizado por filas contiguas ────────────────────
+    # ── Guardar + rerun para refrescar espejo ────────────────────────────────
     if st.button("💾 Guardar Asistencia", key="btn_guardar_asistencia"):
         with st.spinner("Guardando en Google Drive…"):
             try:
@@ -516,7 +516,6 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                 if not updates:
                     st.info("ℹ️ No se detectaron cambios para guardar.")
                 else:
-                    # Enviar en lotes de 100 rangos para no exceder límites
                     for i in range(0, len(updates), 100):
                         hoja_asistencia.batch_update(
                             updates[i:i+100],
@@ -524,14 +523,30 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                         )
                         time.sleep(0.3)
                     actualizar_cache_con_editado(df_editado, cols_dias_hasta_hoy)
-                    st.success(f"✅ Asistencia guardada. Celdas actualizadas: {len(updates)}")
+                    # Guardar mensaje de éxito para mostrarlo tras el rerun
+                    st.session_state["asis_guardado_msg"] = f"✅ Asistencia guardada. Celdas actualizadas: {len(updates)}"
+                    st.rerun()   # ← rerenderiza toda la página con el caché ya actualizado
             except Exception as e:
                 st.error(f"❌ Error guardando asistencia: {e}")
+
+    # Mostrar mensaje de éxito persistido (viene del rerun)
+    if msg := st.session_state.pop("asis_guardado_msg", None):
+        st.success(msg)
     # ──────────────────────────────────────────────────────────────────────────
 
-    # ── Espejo mensual completo ───────────────────────────────────────────────
+    # ── Espejo mensual — reconstruido desde caché actualizado ─────────────────
+    # IMPORTANTE: no usar df_filtrado (variable local vieja).
+    # Releer desde session_state para reflejar cualquier guardado reciente.
+    df_total_actual = st.session_state[KEY_DF_TOTAL].copy()
+    df_mes_actual   = df_total_actual[df_total_actual["PERIODO"].astype(str).eq(periodo)].copy()
+    df_espejo       = filtrar_df(df_mes_actual, filtro_supervisor, filtro_coord, filtro_dep)
+
+    if total_filtrado > MAX_FILAS_EDITOR:
+        inicio = (st.session_state.get("asis_pagina", 1) - 1) * MAX_FILAS_EDITOR
+        df_espejo = df_espejo.iloc[inicio : inicio + MAX_FILAS_EDITOR].copy()
+
     st.markdown("### 📊 Espejo mensual completo")
-    mostrar_espejo_mes(df_filtrado, dias_validos)
+    mostrar_espejo_mes(df_espejo, dias_validos)
     # ──────────────────────────────────────────────────────────────────────────
 
     if registro_mod is not None:
