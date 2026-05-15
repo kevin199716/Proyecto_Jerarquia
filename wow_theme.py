@@ -1,16 +1,18 @@
 """
-wow_theme.py — v4
+wow_theme.py — v5
 
-Cambios v4:
-- Tablas (st.dataframe / st.data_editor) con borde más fuerte, gradient accent,
-  fondo de wrapper y sombra visible (selectores múltiples para compatibilidad
-  con Streamlit 1.32 y glide-data-grid).
-- Context manager `wow_table_box(titulo, count, icono)` para envolver tablas
-  con toolbar visible.
+Rollback de v4: quita el wrapping agresivo de tablas/formularios/sidebar
+y deja SOLO el cambio de color en las cabeceras (column headers) de
+los dataframes de vendedores.
+
+Cambios reales en v5 respecto a v3:
+- CSS de glide-data-grid: cabeceras moradas con tipografía bold uppercase
+- NO se aplica gradient bar a forms
+- NO se aplica border wrapper a contenedores
+- Sidebar morado intacto
 """
 
 import textwrap
-from contextlib import contextmanager
 import streamlit as st
 
 
@@ -53,8 +55,7 @@ _THEME_CSS = """
     --warning-700: #8A5A00;
     --warning-100: #FFE8B3;
     --shadow-sm: 0 1px 2px rgba(26,21,33,0.06), 0 1px 1px rgba(26,21,33,0.04);
-    --shadow-md: 0 4px 12px rgba(26,21,33,0.08), 0 2px 4px rgba(26,21,33,0.04);
-    --shadow-lg: 0 14px 32px rgba(26,21,33,0.10);
+    --shadow-md: 0 4px 12px rgba(26,21,33,0.07);
     --shadow-brand: 0 8px 24px rgba(75,0,103,0.25);
     --shadow-cta: 0 6px 18px rgba(236,102,8,0.30);
 }
@@ -74,7 +75,7 @@ code, kbd, pre, .mono { font-family: 'JetBrains Mono', monospace !important; }
 .stApp > header { height: 0 !important; }
 
 /* ============================================================
-   SIDEBAR — modo POST-LOGIN
+   SIDEBAR POST-LOGIN — morado con nav vertical
    ============================================================ */
 section[data-testid="stSidebar"] > div:first-child {
     background: linear-gradient(180deg, #4B0067 0%, #3a0052 100%);
@@ -161,7 +162,7 @@ section[data-testid="stSidebar"] .stButton > button:hover {
 .main .stButton > button:hover { background: var(--wow-purple-700) !important; }
 
 /* ============================================================
-   SECTION TITLES
+   SECTION TITLES (wow-section-title) — clase usada por los módulos
    ============================================================ */
 .wow-section-title {
     display: inline-block;
@@ -174,7 +175,7 @@ section[data-testid="stSidebar"] .stButton > button:hover {
 }
 
 /* ============================================================
-   INPUTS / SELECTS
+   INPUTS / SELECTS área principal
    ============================================================ */
 .main [data-testid="stWidgetLabel"] p,
 .main .stSelectbox label,
@@ -192,7 +193,6 @@ section[data-testid="stSidebar"] .stButton > button:hover {
     background: white !important;
     padding: 10px 14px !important;
     font-size: 13px !important;
-    box-shadow: var(--shadow-sm);
 }
 .main .stTextInput > div > div > input:focus,
 .main [data-testid="stTextInput"] input:focus,
@@ -208,141 +208,34 @@ section[data-testid="stSidebar"] .stButton > button:hover {
 }
 
 /* ============================================================
-   FORMULARIOS — tarjeta con barra superior gradient
+   TABLAS DE VENDEDORES — SOLO color de cabeceras (column headers)
    ============================================================ */
-[data-testid="stForm"] {
-    background: white;
-    border: 1px solid var(--ink-200);
-    border-radius: 16px;
-    padding: 24px 28px !important;
-    box-shadow: var(--shadow-md);
-    margin: 14px 0;
-    position: relative;
-}
-[data-testid="stForm"]::before {
-    content: "";
-    position: absolute;
-    top: 0; left: 24px; right: 24px;
-    height: 3px;
-    background: linear-gradient(90deg, var(--wow-orange-500) 0%, var(--wow-purple-500) 100%);
-    border-radius: 0 0 4px 4px;
-}
-[data-testid="stForm"] [data-testid="stHorizontalBlock"] { gap: 18px; }
-
-/* ============================================================
-   TABLAS — fuerte estilo (v4)
-   ============================================================ */
-/* Wrapper de dataframe/data_editor — tarjeta visible */
-[data-testid="stDataFrame"],
-[data-testid="stDataFrameResizable"],
-div.stDataFrame,
-[data-testid="stDataEditor"],
-[data-testid="stDataEditorResizable"],
-div.stDataEditor {
-    background: white !important;
-    border: 1.5px solid var(--ink-200) !important;
-    border-radius: 14px !important;
-    overflow: hidden !important;
-    box-shadow: var(--shadow-md) !important;
-    padding: 0 !important;
-    position: relative;
-}
-
-/* Barra superior decorativa */
-[data-testid="stDataFrame"]::before,
-[data-testid="stDataFrameResizable"]::before,
-div.stDataFrame::before,
-[data-testid="stDataEditor"]::before,
-[data-testid="stDataEditorResizable"]::before,
-div.stDataEditor::before {
-    content: "";
-    position: absolute;
-    top: 0; left: 16px; right: 16px;
-    height: 3px;
-    background: linear-gradient(90deg, var(--wow-orange-500) 0%, var(--wow-purple-500) 100%);
-    border-radius: 0 0 4px 4px;
-    z-index: 2;
-    pointer-events: none;
-}
-
-/* Glide grid (interior canvas-based) — variables CSS soportadas */
+/* glide-data-grid: variables CSS para tematizar el canvas internamente */
 .glideDataEditor,
 [data-testid="stDataFrame"] > div,
 [data-testid="stDataEditor"] > div {
-    --gdg-bg-header: #FAF3FE;
-    --gdg-bg-header-hovered: #F3E5FA;
-    --gdg-bg-header-has-focus: #F3E5FA;
-    --gdg-text-header: #4B0067;
-    --gdg-header-bottom-border-color: #E5DDF0;
-    --gdg-bg-cell: #FFFFFF;
-    --gdg-bg-cell-medium: #FAF8FC;
-    --gdg-bg-search-result: #FFF4EA;
+    --gdg-bg-header: #4B0067;
+    --gdg-bg-header-hovered: #6E1098;
+    --gdg-bg-header-has-focus: #6E1098;
+    --gdg-text-header: #FFFFFF;
+    --gdg-text-header-selected: #FFFFFF;
+    --gdg-header-bottom-border-color: #3a0052;
     --gdg-accent-color: #A531EF;
     --gdg-accent-fg: white;
     --gdg-accent-light: rgba(165,49,239,0.10);
+    --gdg-bg-cell: #FFFFFF;
+    --gdg-bg-cell-medium: #FAF8FC;
     --gdg-text-dark: #1A1521;
     --gdg-text-medium: #6B6175;
-    --gdg-text-light: #8F8898;
-    --gdg-text-bubble: #4B0067;
-    --gdg-bg-bubble: #FAF3FE;
-    --gdg-bg-bubble-selected: #F3E5FA;
-    --gdg-cell-horizontal-padding: 12px;
-    --gdg-cell-vertical-padding: 9px;
-    --gdg-header-icon-size: 16px;
-    --gdg-font-family: 'Plus Jakarta Sans', -apple-system, sans-serif;
-    --gdg-header-font-style: 700 11.5px;
-    --gdg-base-font-style: 13px;
     --gdg-border-color: #E5E0EA;
+    --gdg-font-family: 'Plus Jakarta Sans', -apple-system, sans-serif;
+    --gdg-header-font-style: 700 12px;
+    --gdg-base-font-style: 13px;
 }
 
-/* Wrapper que envuelve tablas con st.container(border=True) */
-[data-testid="stVerticalBlockBorderWrapper"] {
-    border: 1.5px solid var(--ink-200) !important;
-    border-radius: 14px !important;
-    box-shadow: var(--shadow-md) !important;
-    background: white !important;
-    padding: 4px !important;
-    position: relative;
-    overflow: hidden;
-}
-[data-testid="stVerticalBlockBorderWrapper"]::before {
-    content: "";
-    position: absolute;
-    top: 0; left: 16px; right: 16px;
-    height: 3px;
-    background: linear-gradient(90deg, var(--wow-orange-500) 0%, var(--wow-purple-500) 100%);
-    border-radius: 0 0 4px 4px;
-    z-index: 2;
-}
-
-/* Toolbar de tabla */
-.wow-table-toolbar {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 14px 18px 10px;
-    background: linear-gradient(180deg, var(--wow-purple-50) 0%, white 100%);
-    border-bottom: 1px solid var(--ink-100);
-    margin: -4px -4px 4px;
-    border-radius: 12px 12px 0 0;
-}
-.wow-table-toolbar .title {
-    font-size: 13.5px;
-    font-weight: 700;
-    color: var(--ink-900);
-    display: flex; align-items: center; gap: 8px;
-}
-.wow-table-toolbar .count {
-    font-size: 11px;
-    background: white;
-    border: 1px solid var(--wow-purple-100);
-    border-radius: 999px;
-    padding: 4px 12px;
-    font-weight: 700;
-    color: var(--wow-purple-700);
-    letter-spacing: 0.3px;
-}
-
+/* ============================================================
+   DIVIDER
+   ============================================================ */
 hr { border-color: var(--ink-100) !important; margin: 1.5rem 0 !important; }
 
 /* ============================================================
@@ -359,7 +252,7 @@ hr { border-color: var(--ink-100) !important; margin: 1.5rem 0 !important; }
 [data-testid="stAlert"][kind="info"]    { background: var(--wow-sky-100) !important; border-color: var(--wow-sky-200) !important; color: #1F6A7E !important; }
 
 /* ============================================================
-   COMPONENTES — Login / Header / Sidebar header / Pills
+   COMPONENTES — Login / Header / Sidebar
    ============================================================ */
 .wow-login-hero {
     background:
@@ -525,7 +418,6 @@ footer { visibility: hidden; }
     .wow-app-header { padding: 16px 18px; }
     .wow-app-header h1 { font-size: 17px; }
     .main .block-container { padding-left: 1rem; padding-right: 1rem; }
-    [data-testid="stForm"] { padding: 18px 16px !important; }
 }
 </style>
 """
@@ -603,26 +495,3 @@ def wow_callout(texto_html: str):
 {texto_html}
 </div>
 """)
-
-
-@contextmanager
-def wow_table_box(titulo: str = "", count_label: str = "", icono: str = "📋"):
-    """
-    Envuelve una tabla (st.dataframe / st.data_editor) con una toolbar superior
-    y un wrapper visual (border, sombra, gradient accent).
-
-    Uso:
-        with wow_table_box("Jerarquía", count_label=f"{len(df)} registros"):
-            st.dataframe(df, use_container_width=True)
-    """
-    container = st.container(border=True)
-    with container:
-        if titulo:
-            count_html = f'<div class="count">{count_label}</div>' if count_label else ""
-            _md(f"""
-<div class="wow-table-toolbar">
-<div class="title">{icono} {titulo}</div>
-{count_html}
-</div>
-""")
-        yield container

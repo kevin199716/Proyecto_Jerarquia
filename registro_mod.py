@@ -3,8 +3,6 @@ import pandas as pd
 from datetime import datetime, timedelta
 import pytz
 
-from wow_theme import wow_table_box, wow_section
-
 # =========================
 # ZONA HORARIA PERÚ
 # =========================
@@ -64,8 +62,7 @@ def mostrar_tabla(hoja, razon_usuario=None):
     if rol != "backoffice":
         df = df[df["RAZON SOCIAL"] == razon_usuario]
 
-    with wow_table_box("Jerarquía de vendedores", count_label=f"{len(df)} registros", icono="📋"):
-        st.dataframe(df, use_container_width=True)
+    st.dataframe(df, use_container_width=True)
 
     return df
 
