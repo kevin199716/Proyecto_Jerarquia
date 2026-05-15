@@ -126,8 +126,24 @@ st.markdown(
         }
         section[data-testid="stSidebar"] label,
         section[data-testid="stSidebar"] p,
-        section[data-testid="stSidebar"] .stMarkdown p {
+        section[data-testid="stSidebar"] .stMarkdown p,
+        section[data-testid="stSidebar"] [data-testid="stWidgetLabel"] p,
+        section[data-testid="stSidebar"] [data-testid="stWidgetLabel"] span {
             color: white !important;
+        }
+        section[data-testid="stSidebar"] input,
+        section[data-testid="stSidebar"] input::placeholder {
+            color: #333 !important;
+        }
+        section[data-testid="stSidebar"] .stButton > button {
+            background-color: #EC6608 !important;
+            color: white !important;
+            border: none !important;
+            border-radius: 8px !important;
+            width: 100%;
+        }
+        section[data-testid="stSidebar"] .stButton > button:hover {
+            background-color: #c4550a !important;
         }
         /* ── Botones CTA (form submit) ── */
         .stFormSubmitButton > button {
@@ -161,6 +177,81 @@ st.markdown(
             margin-bottom: 12px;
             display: inline-block;
         }
+
+        /* ── Labels de campos ── */
+        [data-testid="stWidgetLabel"] p,
+        [data-testid="stWidgetLabel"] label,
+        .stSelectbox label,
+        .stTextInput label,
+        .stDateInput label {
+            color: #4B0067 !important;
+            font-weight: 600 !important;
+            font-size: 0.82em !important;
+            letter-spacing: 0.5px;
+        }
+
+        /* ── Selectboxes / dropdowns ── */
+        .stSelectbox > div > div,
+        [data-testid="stSelectbox"] > div > div,
+        div[data-baseweb="select"] > div {
+            border: 1.5px solid #d0b0e0 !important;
+            border-radius: 8px !important;
+            background-color: #fdf8ff !important;
+        }
+        .stSelectbox > div > div:focus-within,
+        div[data-baseweb="select"] > div:focus-within {
+            border-color: #A531EF !important;
+            box-shadow: 0 0 0 2px rgba(165,49,239,0.15) !important;
+        }
+
+        /* ── Text inputs ── */
+        .stTextInput > div > div > input,
+        [data-testid="stTextInput"] input {
+            border: 1.5px solid #d0b0e0 !important;
+            border-radius: 8px !important;
+            background-color: #fdf8ff !important;
+        }
+        .stTextInput > div > div > input:focus,
+        [data-testid="stTextInput"] input:focus {
+            border-color: #A531EF !important;
+            box-shadow: 0 0 0 2px rgba(165,49,239,0.15) !important;
+        }
+        .stTextInput > div > div > input:disabled,
+        [data-testid="stTextInput"] input:disabled {
+            background-color: #f0e8f8 !important;
+            color: #9a6bb5 !important;
+            border-color: #e0cce8 !important;
+        }
+
+        /* ── Menú de navegación (radio horizontal) ── */
+        div[data-testid="stHorizontalBlock"] [data-testid="stRadio"] > div {
+            gap: 8px;
+        }
+        div[data-testid="stRadio"] label {
+            background-color: #f0e8f8;
+            border: 1.5px solid #d0b0e0;
+            border-radius: 20px;
+            padding: 6px 18px !important;
+            color: #4B0067 !important;
+            font-weight: 600 !important;
+            transition: all 0.2s;
+        }
+        div[data-testid="stRadio"] label:hover {
+            background-color: #e0c8f8;
+            border-color: #A531EF;
+        }
+
+        /* ── Date input ── */
+        [data-testid="stDateInput"] input {
+            border: 1.5px solid #d0b0e0 !important;
+            border-radius: 8px !important;
+            background-color: #fdf8ff !important;
+        }
+
+        /* ── Divider ── */
+        hr {
+            border-color: #e8d8f8 !important;
+        }
     </style>
     """,
     unsafe_allow_html=True
@@ -182,7 +273,7 @@ st.markdown(
 # =====================================================
 def mostrar_matriz_jerarquia(titulo="📋 Estado actual de la jerarquía"):
     st.divider()
-    st.subheader(titulo)
+    st.markdown(f"<span class='wow-section-title'>{titulo}</span>", unsafe_allow_html=True)
 
     try:
         if rol == "editor":
@@ -256,9 +347,7 @@ if rol == "backoffice":
 # =====================================================
 elif rol == "dealer":
 
-    st.subheader(
-        f"📌 Socio: {razon}"
-    )
+    st.markdown(f"<span class='wow-section-title'>📌 Socio: {razon}</span>", unsafe_allow_html=True)
 
     pagina = menu_modulos([
         "Registro",
@@ -299,9 +388,7 @@ elif rol == "dealer":
 # =====================================================
 elif rol == "editor":
 
-    st.subheader(
-        "✏️ Modo edición"
-    )
+    st.markdown("<span class='wow-section-title'>✏️ Modo edición</span>", unsafe_allow_html=True)
 
     pagina = menu_modulos([
         "Edición",

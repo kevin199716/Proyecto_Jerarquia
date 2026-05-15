@@ -541,7 +541,7 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
     # ──────────────────────────────────────────────────────────────────────────
 
     # ── Editor ────────────────────────────────────────────────────────────────
-    st.markdown("### ✏️ Editar asistencia")
+    st.markdown("<span class='wow-section-title'>✏️ Editar asistencia</span>", unsafe_allow_html=True)
     st.caption(
         f"Días editables: DIA_1 a DIA_{hoy_dia} (todos los días transcurridos del mes). "
         "Registra **A** = Asistió · **F** = Faltó."
@@ -634,7 +634,7 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
         inicio = (st.session_state.get("asis_pagina", 1) - 1) * MAX_FILAS_EDITOR
         df_espejo = df_espejo.iloc[inicio : inicio + MAX_FILAS_EDITOR].copy()
 
-    st.markdown("### 📊 Espejo mensual completo")
+    st.markdown("<span class='wow-section-title'>📊 Espejo mensual completo</span>", unsafe_allow_html=True)
     mostrar_espejo_mes(df_espejo, dias_validos)
     # ──────────────────────────────────────────────────────────────────────────
 
