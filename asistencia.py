@@ -43,125 +43,6 @@ CACHE_TTL = 300
 # Máximo de filas en el editor para no congelar Render
 MAX_FILAS_EDITOR = 200
 
-# Paleta Brandbook Wow (hex oficiales)
-WOW_DEEP_PURPLE = "#4B0067"
-WOW_ORANGE = "#EC6608"
-WOW_VIOLET = "#A531EF"
-WOW_LIGHT_BLUE = "#B7E2ED"
-WOW_PALE_PINK = "#FAE8EA"
-WOW_WHITE = "#FFFFFF"
-
-
-# =====================================================
-# TEMA UI (Wow, minimal)
-# =====================================================
-def aplicar_tema_wow() -> None:
-    """Inyecta estilos globales para esta vista (Streamlit)."""
-    st.markdown(
-        f"""
-        <style>
-          .stApp {{
-            background: linear-gradient(180deg, {WOW_PALE_PINK} 0%, {WOW_WHITE} 42%, {WOW_WHITE} 100%);
-          }}
-          .block-container {{
-            padding-top: 1.25rem;
-            padding-bottom: 2.5rem;
-            max-width: 1200px;
-          }}
-          h1, h2, h3 {{
-            color: {WOW_DEEP_PURPLE} !important;
-            font-weight: 600 !important;
-            letter-spacing: -0.02em;
-          }}
-          .wow-hero-title {{
-            font-size: 1.65rem;
-            font-weight: 600;
-            color: {WOW_DEEP_PURPLE};
-            margin: 0 0 0.35rem 0;
-            line-height: 1.2;
-          }}
-          .wow-hero-sub {{
-            font-size: 0.9rem;
-            color: rgba(75, 0, 103, 0.55);
-            margin: 0 0 1rem 0;
-            line-height: 1.45;
-          }}
-          .wow-meta-bar {{
-            display: flex;
-            flex-wrap: wrap;
-            gap: 0.5rem 1.25rem;
-            font-size: 0.8125rem;
-            color: {WOW_DEEP_PURPLE};
-            opacity: 0.85;
-            padding: 0.65rem 0.85rem;
-            background: {WOW_WHITE};
-            border-radius: 10px;
-            border: 1px solid rgba(183, 226, 237, 0.9);
-            margin-bottom: 1rem;
-          }}
-          .wow-meta-bar span {{
-            white-space: nowrap;
-          }}
-          .wow-meta-bar strong {{
-            color: {WOW_VIOLET};
-            font-weight: 600;
-          }}
-          .wow-section-label {{
-            font-size: 0.7rem;
-            text-transform: uppercase;
-            letter-spacing: 0.08em;
-            color: rgba(75, 0, 103, 0.45);
-            margin: 1.25rem 0 0.35rem 0;
-          }}
-          .wow-section-title {{
-            font-size: 1.1rem;
-            font-weight: 600;
-            color: {WOW_DEEP_PURPLE};
-            margin: 0 0 0.5rem 0;
-          }}
-          hr {{
-            margin: 1.25rem 0 !important;
-            border: none !important;
-            height: 1px !important;
-            background: linear-gradient(90deg, transparent, {WOW_LIGHT_BLUE}, transparent) !important;
-          }}
-          [data-testid="baseButton-primary"] {{
-            background-color: {WOW_ORANGE} !important;
-            border-color: {WOW_ORANGE} !important;
-            color: {WOW_WHITE} !important;
-          }}
-          [data-testid="baseButton-primary"]:hover {{
-            border-color: #d45a07 !important;
-            background-color: #d45a07 !important;
-          }}
-          [data-testid="baseButton-secondary"] {{
-            background-color: {WOW_WHITE} !important;
-            border: 1px solid {WOW_DEEP_PURPLE} !important;
-            color: {WOW_DEEP_PURPLE} !important;
-          }}
-          [data-testid="baseButton-secondary"]:hover {{
-            border-color: {WOW_VIOLET} !important;
-            color: {WOW_VIOLET} !important;
-            background-color: rgba(165, 49, 239, 0.06) !important;
-          }}
-          div[data-testid="stAlert"] {{
-            border-radius: 10px !important;
-            border: 1px solid rgba(183, 226, 237, 0.85) !important;
-            background: rgba(255, 255, 255, 0.92) !important;
-          }}
-          [data-baseweb="select"] > div {{
-            border-radius: 8px !important;
-          }}
-          [data-testid="stDataFrame"], [data-testid="stDataEditor"] {{
-            border-radius: 10px;
-            overflow: hidden;
-            border: 1px solid rgba(183, 226, 237, 0.75);
-          }}
-        </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
 
 # =====================================================
 # UTILIDADES
@@ -383,17 +264,9 @@ def filtrar_df(df: pd.DataFrame, supervisor: str, coordinador: str, departamento
 # =====================================================
 def estilo_asistencia(valor: str) -> str:
     v = limpiar_marca(valor)
-    if v == "A":
-        return (
-            f"background-color:#D8F0F6;color:{WOW_DEEP_PURPLE};"
-            "font-weight:600;text-align:center;border-bottom:2px solid #9FD4E3;"
-        )
-    if v == "F":
-        return (
-            f"background-color:{WOW_PALE_PINK};color:{WOW_ORANGE};"
-            "font-weight:600;text-align:center;border-bottom:2px solid rgba(236,102,8,0.35);"
-        )
-    return f"text-align:center;color:rgba(75,0,103,0.35);background-color:{WOW_WHITE};"
+    if v == "A": return "background-color:#C6EFCE;color:#006100;font-weight:bold;text-align:center;"
+    if v == "F": return "background-color:#FFC7CE;color:#9C0006;font-weight:bold;text-align:center;"
+    return "text-align:center;"
 
 
 def mostrar_espejo_mes(df: pd.DataFrame, dias_validos: list[int]) -> None:
@@ -491,7 +364,7 @@ def actualizar_cache_con_editado(df_editado: pd.DataFrame, cols_editables: list[
 # MAIN
 # =====================================================
 def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, razon=None):
-    aplicar_tema_wow()
+    st.subheader("🗓️ Control de Asistencia")
 
     if not validar_o_crear_cabecera(hoja_asistencia):
         return
@@ -499,47 +372,38 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
     periodo = periodo_actual()
 
     # ── FIX 1: todos los días del mes, no solo la semana ──────────────────────
-    dias_validos = dias_del_mes_actual()          # [1, 2, …, 30] ó [1..31]
-    hoy_dia      = datetime.now().day
+    dias_validos    = dias_del_mes_actual()          # [1, 2, …, 30] ó [1..31]
+    cols_editables  = [f"DIA_{d}" for d in dias_validos]
+    hoy_dia         = datetime.now().day
     # ──────────────────────────────────────────────────────────────────────────
 
-    st.markdown(
-        f'<p class="wow-hero-title">Control de asistencia</p>'
-        f'<p class="wow-hero-sub">Marcación mensual alineada al periodo actual. Los datos se leen desde Google Drive.</p>',
-        unsafe_allow_html=True,
-    )
+    c1, c2, c3 = st.columns([1, 1, 5])
 
-    c1, c2, c3 = st.columns([1, 1, 2.2])
     with c1:
-        if st.button("Sincronizar mes", key="btn_sync_asistencia", type="secondary"):
+        if st.button("🔄 Sincronizar mes", key="btn_sync_asistencia"):
             with st.spinner("Sincronizando con Drive…"):
                 try:
                     nuevos = sincronizar_mes(hoja_asistencia, hoja_colaboradores)
                     cargar_cache_desde_drive(hoja_asistencia, forzar=True)
-                    st.success(f"Mes sincronizado. Registros nuevos: {nuevos}")
+                    st.success(f"✅ Mes sincronizado. Registros nuevos: {nuevos}")
                 except Exception as e:
                     st.error(f"Error sincronizando: {e}")
                     return
 
     with c2:
-        if st.button("Recargar Drive", key="btn_reload_asistencia", type="secondary"):
+        if st.button("♻️ Recargar Drive", key="btn_reload_asistencia"):
             with st.spinner("Recargando desde Drive…"):
                 try:
                     cargar_cache_desde_drive(hoja_asistencia, forzar=True)
-                    st.success("Datos actualizados.")
+                    st.success("✅ Datos actualizados.")
                 except Exception as e:
                     st.error(f"Error recargando: {e}")
                     return
 
     with c3:
-        st.markdown(
-            f'<div class="wow-meta-bar">'
-            f"<span>Periodo <strong>{periodo}</strong></span>"
-            f"<span>{len(dias_validos)} días en el mes</span>"
-            f"<span>Hoy <strong>DIA_{hoy_dia}</strong></span>"
-            f"<span>Caché · refresco cada 5 min</span>"
-            f"</div>",
-            unsafe_allow_html=True,
+        st.info(
+            f"📅 Periodo: **{periodo}** | Días del mes: **{len(dias_validos)}** | "
+            f"Hoy: **DIA_{hoy_dia}** | Caché se refresca automáticamente cada 5 min."
         )
 
     # ── FIX 2: caché con TTL — solo llama a Drive si es necesario ─────────────
@@ -557,14 +421,10 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
     df_mes = df_total[df_total["PERIODO"].astype(str).eq(periodo)].copy()
 
     if df_mes.empty:
-        st.warning("No hay registros del periodo actual. Usa **Sincronizar mes** para generarlos.")
+        st.warning("⚠️ No hay registros del periodo actual. Presiona **Sincronizar mes**.")
         return
 
     # ── Filtros encadenados ────────────────────────────────────────────────────
-    st.markdown(
-        '<p class="wow-section-label">Filtros</p><p class="wow-section-title">Equipo</p>',
-        unsafe_allow_html=True,
-    )
     f1, f2, f3 = st.columns(3)
     with f1:
         filtro_supervisor = st.selectbox("Supervisor",  lista_opciones(df_mes, "SUPERVISOR"),  key="asis_supervisor")
@@ -584,12 +444,12 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
     total_filtrado = len(df_filtrado)
 
     # ── FIX 3: paginación para evitar cuelgues en Render ──────────────────────
-    st.caption(f"{total_filtrado} registro(s) con los filtros actuales")
+    st.caption(f"Registros encontrados: **{total_filtrado}**")
 
     if total_filtrado > MAX_FILAS_EDITOR:
         st.warning(
-            f"Hay {total_filtrado} registros; el editor muestra hasta {MAX_FILAS_EDITOR} por bloque. "
-            "Ajusta filtros o usa el bloque siguiente."
+            f"⚠️ Hay {total_filtrado} registros. El editor muestra máximo {MAX_FILAS_EDITOR} "
+            "para mantener el rendimiento. Usa los filtros o el slider para navegar."
         )
         pagina = st.slider(
             "Bloque de registros",
@@ -604,15 +464,11 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
     # ──────────────────────────────────────────────────────────────────────────
 
     # ── Editor ────────────────────────────────────────────────────────────────
-    st.markdown(
-        '<p class="wow-section-label">Edición</p><p class="wow-section-title">Asistencia del mes</p>',
-        unsafe_allow_html=True,
+    st.markdown("### ✏️ Editar asistencia")
+    st.caption(
+        f"Días editables: DIA_1 a DIA_{hoy_dia} (todos los días transcurridos del mes). "
+        "Registra **A** = Asistió · **F** = Faltó."
     )
-    with st.expander("Cómo registrar (A / F)", expanded=False):
-        st.caption(
-            f"Solo se editan columnas **DIA_1** … **DIA_{hoy_dia}** (días ya ocurridos). "
-            "**A** asistió · **F** faltó · vacío sin marca."
-        )
 
     # Solo mostrar columnas de días que ya han pasado (incluyendo hoy)
     cols_dias_hasta_hoy = [f"DIA_{d}" for d in dias_validos if d <= hoy_dia]
@@ -647,7 +503,7 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
     )
 
     # ── Guardar + rerun para refrescar espejo ────────────────────────────────
-    if st.button("Guardar asistencia", key="btn_guardar_asistencia", type="primary"):
+    if st.button("💾 Guardar Asistencia", key="btn_guardar_asistencia"):
         with st.spinner("Guardando en Google Drive…"):
             try:
                 df_editado = pd.DataFrame(editado).fillna("")
@@ -658,7 +514,7 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                     cols_editables=cols_dias_hasta_hoy,
                 )
                 if not updates:
-                    st.info("No se detectaron cambios para guardar.")
+                    st.info("ℹ️ No se detectaron cambios para guardar.")
                 else:
                     for i in range(0, len(updates), 100):
                         hoja_asistencia.batch_update(
@@ -668,10 +524,10 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                         time.sleep(0.3)
                     actualizar_cache_con_editado(df_editado, cols_dias_hasta_hoy)
                     # Guardar mensaje de éxito para mostrarlo tras el rerun
-                    st.session_state["asis_guardado_msg"] = f"Asistencia guardada. Actualizaciones: {len(updates)}"
+                    st.session_state["asis_guardado_msg"] = f"✅ Asistencia guardada. Celdas actualizadas: {len(updates)}"
                     st.rerun()   # ← rerenderiza toda la página con el caché ya actualizado
             except Exception as e:
-                st.error(f"Error guardando asistencia: {e}")
+                st.error(f"❌ Error guardando asistencia: {e}")
 
     # Mostrar mensaje de éxito persistido (viene del rerun)
     if msg := st.session_state.pop("asis_guardado_msg", None):
@@ -689,19 +545,13 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
         inicio = (st.session_state.get("asis_pagina", 1) - 1) * MAX_FILAS_EDITOR
         df_espejo = df_espejo.iloc[inicio : inicio + MAX_FILAS_EDITOR].copy()
 
-    st.markdown(
-        '<p class="wow-section-label">Vista previa</p><p class="wow-section-title">Calendario del mes (solo lectura)</p>',
-        unsafe_allow_html=True,
-    )
+    st.markdown("### 📊 Espejo mensual completo")
     mostrar_espejo_mes(df_espejo, dias_validos)
     # ──────────────────────────────────────────────────────────────────────────
 
     if registro_mod is not None:
         st.divider()
-        st.markdown(
-            '<p class="wow-section-label">Organización</p><p class="wow-section-title">Matriz de jerarquía</p>',
-            unsafe_allow_html=True,
-        )
+        st.subheader("📋 Matriz de jerarquía")
         try:
             registro_mod.mostrar_tabla(hoja_colaboradores, razon)
         except Exception as e:
