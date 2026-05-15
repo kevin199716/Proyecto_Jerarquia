@@ -16,6 +16,8 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
+from wow_theme import wow_table_box
+
 # =====================================================
 # CONSTANTES
 # =====================================================
@@ -299,7 +301,8 @@ def mostrar_espejo_mes(df: pd.DataFrame, dias_validos: list[int]) -> None:
     columnas = COLUMNAS_FIJAS_EDITOR + cols_dias_validos
     df_vista = df[columnas].copy()
     styler = df_vista.style.applymap(estilo_asistencia, subset=cols_dias_validos)
-    st.dataframe(styler, use_container_width=True, height=400)
+    with wow_table_box("Espejo mensual", count_label=f"{len(df_vista)} promotores", icono="📊"):
+        st.dataframe(styler, use_container_width=True, height=400)
 
 
 # =====================================================
@@ -568,16 +571,17 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
             col, options=["", "A", "F"], width="small"
         )
 
-    editado = st.data_editor(
-        df_editor,
-        use_container_width=True,
-        height=min(600, 50 + len(df_editor) * 35),   # altura dinámica
-        hide_index=True,
-        disabled=disabled_cols,
-        column_config=column_config,
-        num_rows="fixed",
-        key="editor_asistencia_mes_completo",
-    )
+    with wow_table_box("Editor de asistencia", count_label=f"{len(df_editor)} promotores · días hasta hoy", icono="✏️"):
+        editado = st.data_editor(
+            df_editor,
+            use_container_width=True,
+            height=min(600, 50 + len(df_editor) * 35),   # altura dinámica
+            hide_index=True,
+            disabled=disabled_cols,
+            column_config=column_config,
+            num_rows="fixed",
+            key="editor_asistencia_mes_completo",
+        )
 
     # ── Guardar + rerun para refrescar espejo ────────────────────────────────
     if st.button("💾 Guardar Asistencia", key="btn_guardar_asistencia"):
