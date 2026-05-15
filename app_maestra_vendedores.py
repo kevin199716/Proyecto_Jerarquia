@@ -9,7 +9,7 @@ if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
 # =========================
-# IMPORTS ORIGINALES
+# IMPORTS ORIGINALES (BACKEND INTACTO)
 # =========================
 import registro_mod as registro
 
@@ -34,15 +34,26 @@ from asistencia import (
     mostrar_asistencia
 )
 
+# 🆕 NUEVO — Tema centralizado
+from wow_theme import (
+    inject_global_theme,
+    render_app_header,
+    wow_section
+)
+
 
 # =========================
 # CONFIG
 # =========================
 st.set_page_config(
-    page_title="WOW | Portal Vendedores",
+    page_title="WOW D2D | Portal Vendedores",
     page_icon="🟣",
-    layout="wide"
+    layout="wide",
+    initial_sidebar_state="expanded"
 )
+
+# 🆕 Inyectar tema global UNA sola vez (reemplaza el viejo bloque <style>)
+inject_global_theme()
 
 
 # =========================
@@ -98,182 +109,21 @@ hoja_asistencia = get_worksheet(
 
 
 # =========================
-# ESTILO CABECERA WOW
+# CABECERA WOW
 # =========================
-st.markdown(
-    """
-    <style>
-        /* ── Cabecera ── */
-        .cabecera-app {
-            background: linear-gradient(135deg, #4B0067 0%, #A531EF 100%);
-            padding: 14px 18px;
-            border-radius: 10px;
-            color: white;
-            margin-bottom: 14px;
-        }
-        .cabecera-app h2 {
-            margin: 0;
-            color: white !important;
-        }
-        .cabecera-app p {
-            margin: 4px 0 0 0;
-            color: white !important;
-            font-size: 14px;
-        }
-        /* ── Sidebar fondo morado ── */
-        section[data-testid="stSidebar"] > div:first-child {
-            background-color: #4B0067;
-        }
-        section[data-testid="stSidebar"] label,
-        section[data-testid="stSidebar"] p,
-        section[data-testid="stSidebar"] .stMarkdown p,
-        section[data-testid="stSidebar"] [data-testid="stWidgetLabel"] p,
-        section[data-testid="stSidebar"] [data-testid="stWidgetLabel"] span {
-            color: white !important;
-        }
-        section[data-testid="stSidebar"] input,
-        section[data-testid="stSidebar"] input::placeholder {
-            color: #333 !important;
-        }
-        section[data-testid="stSidebar"] .stButton > button {
-            background-color: #EC6608 !important;
-            color: white !important;
-            border: none !important;
-            border-radius: 8px !important;
-            width: 100%;
-        }
-        section[data-testid="stSidebar"] .stButton > button:hover {
-            background-color: #c4550a !important;
-        }
-        /* ── Botones CTA (form submit) ── */
-        .stFormSubmitButton > button {
-            background-color: #EC6608 !important;
-            color: white !important;
-            border: none !important;
-            border-radius: 8px !important;
-        }
-        .stFormSubmitButton > button:hover {
-            background-color: #c4550a !important;
-            color: white !important;
-        }
-        /* ── Botones normales ── */
-        .stButton > button {
-            background-color: #A531EF !important;
-            color: white !important;
-            border: none !important;
-            border-radius: 8px !important;
-        }
-        .stButton > button:hover {
-            background-color: #4B0067 !important;
-            color: white !important;
-        }
-        /* ── Subheaders WOW ── */
-        .wow-section-title {
-            color: #4B0067;
-            font-weight: 800;
-            font-size: 1.1em;
-            border-bottom: 3px solid #EC6608;
-            padding-bottom: 6px;
-            margin-bottom: 12px;
-            display: inline-block;
-        }
-
-        /* ── Labels de campos ── */
-        [data-testid="stWidgetLabel"] p,
-        [data-testid="stWidgetLabel"] label,
-        .stSelectbox label,
-        .stTextInput label,
-        .stDateInput label {
-            color: #4B0067 !important;
-            font-weight: 600 !important;
-            font-size: 0.82em !important;
-            letter-spacing: 0.5px;
-        }
-
-        /* ── Selectboxes / dropdowns ── */
-        .stSelectbox > div > div,
-        [data-testid="stSelectbox"] > div > div,
-        div[data-baseweb="select"] > div {
-            border: 1.5px solid #d0b0e0 !important;
-            border-radius: 8px !important;
-            background-color: #fdf8ff !important;
-        }
-        .stSelectbox > div > div:focus-within,
-        div[data-baseweb="select"] > div:focus-within {
-            border-color: #A531EF !important;
-            box-shadow: 0 0 0 2px rgba(165,49,239,0.15) !important;
-        }
-
-        /* ── Text inputs ── */
-        .stTextInput > div > div > input,
-        [data-testid="stTextInput"] input {
-            border: 1.5px solid #d0b0e0 !important;
-            border-radius: 8px !important;
-            background-color: #fdf8ff !important;
-        }
-        .stTextInput > div > div > input:focus,
-        [data-testid="stTextInput"] input:focus {
-            border-color: #A531EF !important;
-            box-shadow: 0 0 0 2px rgba(165,49,239,0.15) !important;
-        }
-        .stTextInput > div > div > input:disabled,
-        [data-testid="stTextInput"] input:disabled {
-            background-color: #f0e8f8 !important;
-            color: #9a6bb5 !important;
-            border-color: #e0cce8 !important;
-        }
-
-        /* ── Menú de navegación (radio horizontal) ── */
-        div[data-testid="stHorizontalBlock"] [data-testid="stRadio"] > div {
-            gap: 8px;
-        }
-        div[data-testid="stRadio"] label {
-            background-color: #f0e8f8;
-            border: 1.5px solid #d0b0e0;
-            border-radius: 20px;
-            padding: 6px 18px !important;
-            color: #4B0067 !important;
-            font-weight: 600 !important;
-            transition: all 0.2s;
-        }
-        div[data-testid="stRadio"] label:hover {
-            background-color: #e0c8f8;
-            border-color: #A531EF;
-        }
-
-        /* ── Date input ── */
-        [data-testid="stDateInput"] input {
-            border: 1.5px solid #d0b0e0 !important;
-            border-radius: 8px !important;
-            background-color: #fdf8ff !important;
-        }
-
-        /* ── Divider ── */
-        hr {
-            border-color: #e8d8f8 !important;
-        }
-    </style>
-    """,
-    unsafe_allow_html=True
-)
-
-st.markdown(
-    f"""
-    <div class="cabecera-app">
-        <h2>📊 Sistema de Vendedores</h2>
-        <p><b>Usuario:</b> {usuario if usuario else '-'} &nbsp; | &nbsp; <b>Rol:</b> {rol if rol else '-'} &nbsp; | &nbsp; <b>Razón:</b> {razon if razon else '-'}</p>
-    </div>
-    """,
-    unsafe_allow_html=True
+render_app_header(
+    usuario=usuario,
+    rol=rol,
+    razon=razon
 )
 
 
 # =====================================================
 # FUNCIONES UI
 # =====================================================
-def mostrar_matriz_jerarquia(titulo="📋 Estado actual de la jerarquía"):
+def mostrar_matriz_jerarquia(titulo="Estado actual de la jerarquía", icono="📋"):
     st.divider()
-    st.markdown(f"<span class='wow-section-title'>{titulo}</span>", unsafe_allow_html=True)
+    wow_section(titulo, icono)
 
     try:
         if rol == "editor":
@@ -347,7 +197,7 @@ if rol == "backoffice":
 # =====================================================
 elif rol == "dealer":
 
-    st.markdown(f"<span class='wow-section-title'>📌 Socio: {razon}</span>", unsafe_allow_html=True)
+    wow_section(f"Socio: {razon}", "📌")
 
     pagina = menu_modulos([
         "Registro",
@@ -388,7 +238,7 @@ elif rol == "dealer":
 # =====================================================
 elif rol == "editor":
 
-    st.markdown("<span class='wow-section-title'>✏️ Modo edición</span>", unsafe_allow_html=True)
+    wow_section("Modo edición", "✏️")
 
     pagina = menu_modulos([
         "Edición",
