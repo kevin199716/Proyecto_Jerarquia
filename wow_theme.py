@@ -233,6 +233,59 @@ section[data-testid="stSidebar"] .stButton > button:hover {
     --gdg-base-font-style: 13px;
 }
 
+/* HTML vendor table (st.markdown con df.to_html) — cabeceras moradas garantizadas */
+.wow-vendor-table-wrap {
+    width: 100%;
+    overflow-x: auto;
+    border: 1px solid var(--ink-200);
+    border-radius: 12px;
+    box-shadow: var(--shadow-sm);
+    background: white;
+    margin: 8px 0 16px;
+}
+.wow-vendor-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12.5px;
+    font-family: 'Plus Jakarta Sans', sans-serif;
+    color: var(--ink-900);
+}
+.wow-vendor-table thead th {
+    background: linear-gradient(180deg, #4B0067 0%, #3a0052 100%) !important;
+    color: white !important;
+    font-weight: 700 !important;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-size: 11px;
+    padding: 12px 14px !important;
+    text-align: left;
+    border: none !important;
+    border-bottom: 2px solid #2A003D !important;
+    white-space: nowrap;
+    position: sticky;
+    top: 0;
+    z-index: 1;
+}
+.wow-vendor-table tbody td {
+    padding: 9px 14px;
+    border-bottom: 1px solid var(--ink-100);
+    color: var(--ink-900);
+    vertical-align: middle;
+}
+.wow-vendor-table tbody tr:nth-child(even) td {
+    background: var(--ink-50);
+}
+.wow-vendor-table tbody tr:hover td {
+    background: var(--wow-purple-50);
+}
+/* Pandas styler index column — esconder cuando no aporta */
+.wow-vendor-table thead th.blank,
+.wow-vendor-table tbody th.row_heading,
+.wow-vendor-table tbody th.blank,
+.wow-vendor-table .index_name {
+    display: none;
+}
+
 /* ============================================================
    DIVIDER
    ============================================================ */
@@ -495,3 +548,51 @@ def wow_callout(texto_html: str):
 {texto_html}
 </div>
 """)
+
+
+def render_vendor_table(df, max_rows: int = 500):
+    """
+    Renderiza un DataFrame como tabla HTML con cabeceras moradas (estilo WOW).
+
+    A diferencia de st.dataframe (que usa canvas y no respeta nuestros estilos),
+    esto produce un <table> nativo que recibe TODO el CSS de .wow-vendor-table.
+
+    Uso típico (reemplazo directo de st.dataframe):
+        from wow_theme import render_vendor_table
+        render_vendor_table(df)
+    """
+    import pandas as pd
+
+    if df is None or (hasattr(df, "empty") and df.empty):
+        st.info("No hay datos para mostrar.")
+        return
+
+    # Limitar filas para no romper la página
+    df_show = df.head(max_rows) if max_rows else df
+    truncated = len(df) > max_rows if max_rows else False
+
+    # Pandas Styler -> HTML, o df.to_html directo
+    if hasattr(df_show, "to_html") and not hasattr(df_show, "applymap"):
+        # Es un DataFrame plano
+        html = df_show.to_html(
+            classes="wow-vendor-table",
+            index=False,
+            border=0,
+            escape=True,
+        )
+    else:
+        # Es un Styler (preserva colores de celda como en asistencia/espejo)
+        try:
+            html = df_show.to_html()
+            # Inyectar la clase para que el CSS lo pille
+            html = html.replace('<table ', '<table class="wow-vendor-table" ', 1)
+        except Exception:
+            html = df_show.to_html(classes="wow-vendor-table", index=False, border=0)
+
+    st.markdown(
+        f'<div class="wow-vendor-table-wrap">{html}</div>',
+        unsafe_allow_html=True,
+    )
+
+    if truncated:
+        st.caption(f"Mostrando {max_rows} de {len(df)} registros. Usa los filtros para refinar.")

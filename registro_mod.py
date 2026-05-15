@@ -3,6 +3,8 @@ import pandas as pd
 from datetime import datetime, timedelta
 import pytz
 
+from wow_theme import render_vendor_table
+
 # =========================
 # ZONA HORARIA PERÚ
 # =========================
@@ -62,7 +64,7 @@ def mostrar_tabla(hoja, razon_usuario=None):
     if rol != "backoffice":
         df = df[df["RAZON SOCIAL"] == razon_usuario]
 
-    st.dataframe(df, use_container_width=True)
+    render_vendor_table(df)
 
     return df
 

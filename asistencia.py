@@ -16,6 +16,8 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
+from wow_theme import render_vendor_table
+
 # =====================================================
 # CONSTANTES
 # =====================================================
@@ -299,7 +301,7 @@ def mostrar_espejo_mes(df: pd.DataFrame, dias_validos: list[int]) -> None:
     columnas = COLUMNAS_FIJAS_EDITOR + cols_dias_validos
     df_vista = df[columnas].copy()
     styler = df_vista.style.applymap(estilo_asistencia, subset=cols_dias_validos)
-    st.dataframe(styler, use_container_width=True, height=400)
+    render_vendor_table(styler, max_rows=300)
 
 
 # =====================================================
