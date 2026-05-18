@@ -260,7 +260,7 @@ def validar_formulario(campos: dict, df_colab: pd.DataFrame) -> list[str]:
 
     requeridos = [
         "RAZON SOCIAL", "CANAL", "SUB CANAL", "REGION", "CARGO (ROL)",
-        "NOMBRES", "APELLIDO PATERNO", "APELLIDO MATERNO", "CELULAR",
+        "NOMBRES", "APELLIDO PATERNO", "CELULAR",
         "TIPO DE DOC", "DNI", "CORREO", "TIPO DE CONTRATO",
         "FECHA DE CREACION USUARIO", "CONTRATO FIRMADO",
         "DEPARTAMENTO", "PROVINCIA", "SUPERVISOR A CARGO", "DNI SUPERVISOR",
@@ -510,15 +510,18 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
 
             if hoja_asistencia is not None:
                 try:
-                    from asistencia import sincronizar_mes, cargar_cache_desde_drive
-                    nuevos, actualizados = sincronizar_mes(hoja_asistencia, hoja_colaboradores)
+                    # No se ejecuta Sincronizar mes completo aquí porque eso lee toda la base
+                    # y hacía lento el alta. Solo se intenta agregar este DNI al periodo actual
+                    # de Presencialidad, sin tocar marcajes existentes.
+                    from asistencia import registrar_alta_en_asistencia, cargar_cache_desde_drive
+                    estado_pres = registrar_alta_en_asistencia(hoja_asistencia, campos)
                     cargar_cache_desde_drive(hoja_asistencia, forzar=True)
-                    st.session_state["mensaje_ok"] = f"✅ Registrado correctamente. Presencialidad actualizada: nuevos {nuevos}, base actualizada {actualizados}."
+                    st.session_state["mensaje_ok"] = f"✅ Alta registrada correctamente. {estado_pres}"
                 except Exception as e_sync:
-                    st.session_state["mensaje_ok"] = "✅ Registrado correctamente. Para verlo en Presencialidad Dealer, presiona Sincronizar mes."
-                    st.session_state["mensaje_sync_warning"] = f"⚠️ No se pudo sincronizar presencialidad automáticamente: {e_sync}"
+                    st.session_state["mensaje_ok"] = "✅ Alta registrada correctamente. Para verlo en Presencialidad Dealer, presiona Sincronizar mes."
+                    st.session_state["mensaje_sync_warning"] = f"⚠️ No se pudo actualizar presencialidad en automático: {e_sync}"
             else:
-                st.session_state["mensaje_ok"] = "✅ Registrado correctamente. Para verlo en Presencialidad Dealer, presiona Sincronizar mes."
+                st.session_state["mensaje_ok"] = "✅ Alta registrada correctamente. Para verlo en Presencialidad Dealer, presiona Sincronizar mes."
 
             limpiar_form()
             st.rerun()

@@ -59,8 +59,9 @@ KEY_HEADERS = "asis_headers_cache"
 KEY_LOADED = "asis_loaded"
 KEY_LOAD_TS = "asis_load_timestamp"
 
-CACHE_TTL = 300
-MAX_FILAS_EDITOR = 200
+CACHE_TTL = 600
+# Menos filas visibles para que cada cambio de filtro no congele Render/Chrome.
+MAX_FILAS_EDITOR = 80
 
 # =====================================================
 # UTILIDADES
@@ -395,6 +396,65 @@ def sincronizar_mes(hoja_asistencia, hoja_colaboradores) -> tuple[int, int]:
     return len(nuevas), len(updates)
 
 
+def registrar_alta_en_asistencia(hoja_asistencia, campos: dict) -> str:
+    """
+    Agrega SOLO el alta recién registrada al periodo actual de Presencialidad.
+    Evita ejecutar Sincronizar mes completo desde el formulario de Alta, porque
+    eso lee toda la base y hacía que el formulario se frizara.
+    """
+    if not validar_o_crear_cabecera(hoja_asistencia):
+        return "Presencialidad pendiente: recrea la cabecera o presiona Sincronizar mes."
+
+    valores = hoja_asistencia.get_all_values()
+    if not valores:
+        hoja_asistencia.append_row(COLUMNAS_ASISTENCIA, value_input_option="USER_ENTERED")
+        valores = [COLUMNAS_ASISTENCIA]
+
+    headers = [limpiar_texto(x).upper() for x in valores[0]]
+    periodo = periodo_actual()
+    dni = normalizar_dni(campos.get("DNI", ""))
+    if not dni:
+        return "Presencialidad pendiente: DNI vacío."
+
+    # Revisión rápida contra el periodo actual para no duplicar DNI.
+    try:
+        idx_dni = headers.index("DNI")
+        idx_periodo = headers.index("PERIODO")
+        for fila in valores[1:]:
+            dni_existente = normalizar_dni(fila[idx_dni] if len(fila) > idx_dni else "")
+            periodo_existente = limpiar_texto(fila[idx_periodo] if len(fila) > idx_periodo else "")
+            if dni_existente == dni and periodo_existente == periodo:
+                return "Presencialidad ya tenía este DNI en el periodo actual; no se duplicó."
+    except Exception:
+        pass
+
+    fila_base = {col: "" for col in COLUMNAS_ASISTENCIA}
+    fila_base.update({
+        "RAZON SOCIAL": limpiar_texto(campos.get("RAZON SOCIAL", "")),
+        "SUPERVISOR": limpiar_texto(campos.get("SUPERVISOR A CARGO", campos.get("SUPERVISOR", ""))),
+        "COORDINADOR": limpiar_texto(campos.get("COORDINADOR", "")),
+        "DEPARTAMENTO": limpiar_texto(campos.get("DEPARTAMENTO", "")),
+        "PROVINCIA": limpiar_texto(campos.get("PROVINCIA", "")),
+        "DNI": dni,
+        "NOMBRE": " ".join([
+            limpiar_texto(campos.get("NOMBRES", "")),
+            limpiar_texto(campos.get("APELLIDO PATERNO", "")),
+            limpiar_texto(campos.get("APELLIDO MATERNO", "")),
+        ]).strip(),
+        "ESTADO": "ACTIVO",
+        "FECHA_ALTA": str(parse_fecha(campos.get("FECHA DE CREACION USUARIO", "")) or ""),
+        "FECHA_CESE": "",
+        "MES": mes_actual(),
+        "PERIODO": periodo,
+    })
+    hoja_asistencia.append_row([fila_base.get(h, "") for h in headers], value_input_option="USER_ENTERED")
+    # Limpia cache local para que al entrar/cambiar a Presencialidad se vea actualizado.
+    for k in [KEY_DF_TOTAL, KEY_DF_ORIGINAL, KEY_HEADERS, KEY_LOADED, KEY_LOAD_TS]:
+        if k in st.session_state:
+            del st.session_state[k]
+    return "Presencialidad actualizada con este alta."
+
+
 # =====================================================
 # CACHÉ
 # =====================================================
@@ -650,14 +710,14 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                 f"⚠️ Hay {total_filtrado} registros editables hoy. El editor muestra máximo {MAX_FILAS_EDITOR} "
                 "para no congelar la página. Esto NO borra registros; solo pagina la vista. Usa filtros o cambia de página."
             )
-            pagina = st.slider(
-                "Página de registros (solo divide la vista, no borra nada)",
-                min_value=1,
-                max_value=max(1, -(-total_filtrado // MAX_FILAS_EDITOR)),
-                value=1,
+            total_paginas = max(1, -(-total_filtrado // MAX_FILAS_EDITOR))
+            pagina = st.selectbox(
+                "Bloque de registros (solo divide la vista, no borra nada)",
+                list(range(1, total_paginas + 1)),
+                index=0,
                 key="asis_pagina",
             )
-            inicio = (pagina - 1) * MAX_FILAS_EDITOR
+            inicio = (int(pagina) - 1) * MAX_FILAS_EDITOR
             df_editor_base = df_editor_base.iloc[inicio: inicio + MAX_FILAS_EDITOR].copy()
             st.caption(f"Mostrando filas {inicio + 1}–{min(inicio + MAX_FILAS_EDITOR, total_filtrado)} de {total_filtrado}")
 
@@ -669,7 +729,7 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
             if col not in df_editor_base.columns:
                 df_editor_base[col] = ""
 
-        df_editor = df_editor_base[columnas_editor].copy()
+        df_editor = df_editor_base[columnas_editor].copy().fillna("").replace({"None": "", "nan": ""})
         df_editor[col_hoy] = df_editor[col_hoy].apply(limpiar_marca)
 
         disabled_cols = [col for col in df_editor.columns if col != col_hoy]
@@ -723,8 +783,12 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
     df_mes_actual = df_total_actual[df_total_actual["PERIODO"].astype(str).eq(periodo)].copy()
     df_espejo = filtrar_df(df_mes_actual, filtro_razon, filtro_supervisor, filtro_coord, filtro_dep, filtro_prov)
 
-    st.markdown("<span class='wow-section-title'>📊 Espejo mensual completo</span>", unsafe_allow_html=True)
-    mostrar_espejo_mes(df_espejo, dias_validos)
+    ver_espejo = st.checkbox("📊 Ver espejo mensual completo", value=False, key="asis_ver_espejo")
+    if ver_espejo:
+        st.markdown("<span class='wow-section-title'>📊 Espejo mensual completo</span>", unsafe_allow_html=True)
+        mostrar_espejo_mes(df_espejo, dias_validos)
+    else:
+        st.caption("Espejo mensual oculto para mejorar rendimiento. Actívalo solo cuando necesites revisar el mes completo.")
 
     if registro_mod is not None:
         st.divider()
