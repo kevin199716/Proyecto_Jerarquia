@@ -23,7 +23,7 @@ def ahora_peru_fecha_hora() -> str:
 # LIMPIAR FORM
 # =========================
 def limpiar_form():
-    conservar = {"autenticado", "rol", "razon", "usuario", "user", "pass", "mensaje_ok", "mensaje_sync_warning"}
+    conservar = {"autenticado", "rol", "razon", "usuario", "user", "pass", "mensaje_ok", "mensaje_sync_warning", "alta_form_version"}
     for k in list(st.session_state.keys()):
         if k not in conservar:
             del st.session_state[k]
@@ -228,21 +228,31 @@ def validar_dni_unico_historico(df_colab: pd.DataFrame, dni_limpio: str, fecha_a
             f"Registro activo: {razon} / {nombre}."
         )
 
-    columnas_baja = [
+    # Para histórico de reingreso solo se evalúan bajas reales.
+    # FECHA MOV NO se llena en altas; se usa únicamente al aplicar baja.
+    # Si por datos antiguos existe FECHA MOV en un registro ACTIVO, se ignora.
+    columnas_baja_base = [
         "FECHA DE CESE",
         "FECHA CESE",
-        "FECHA MOV",
         "FECHA_BAJA_REGISTRO",
         "FECHA BAJA REGISTRO",
     ]
 
     fechas_baja = []
     for _, row in encontrados.iterrows():
-        for col in columnas_baja:
+        estado_row = limpiar_texto(row.get("ESTADO", "")).upper()
+
+        for col in columnas_baja_base:
             if col in encontrados.columns:
                 f = parse_fecha(row.get(col))
                 if f:
                     fechas_baja.append(f)
+
+        # FECHA MOV solo cuenta como baja si la fila ya está INACTIVA.
+        if estado_row == "INACTIVO" and "FECHA MOV" in encontrados.columns:
+            f_mov = parse_fecha(row.get("FECHA MOV"))
+            if f_mov:
+                fechas_baja.append(f_mov)
 
     if fechas_baja:
         ultima_baja = max(fechas_baja)
@@ -352,6 +362,11 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
     rol = st.session_state.get("rol", "")
     razon_usuario = st.session_state.get("razon", "")
 
+    # Versión dinámica de llaves: cuando el alta se guarda correctamente,
+    # se incrementa y todos los campos vuelven limpios como si se abriera el módulo desde cero.
+    version_form = int(st.session_state.get("alta_form_version", 0))
+    k = lambda nombre: f"alta_v{version_form}_{nombre}"
+
     # Solo ubicación se lee al cargar. Está cacheada 5 minutos para que el formulario no se frizee.
     df_ubi = leer_ubicaciones(hoja_ubicaciones)
 
@@ -378,25 +393,25 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
 
     with col_izq:
         st.markdown("**Datos del colaborador**")
-        nombres = st.text_input("NOMBRES", key="alta_nombres")
-        apellido_p = st.text_input("APELLIDO PATERNO", key="alta_apellido_p")
-        apellido_m = st.text_input("APELLIDO MATERNO", key="alta_apellido_m")
-        celular = st.text_input("CELULAR", max_chars=9, key="alta_celular")
-        tipo_doc = st.selectbox("TIPO DE DOC", ["DNI", "CPP", "CEX", "OTROS"], key="alta_tipo_doc")
-        dni = st.text_input("DNI", max_chars=8, key="alta_dni")
-        correo = st.text_input("CORREO (USUARIO SGC/PRONTO)", key="alta_correo")
+        nombres = st.text_input("NOMBRES", key=k("nombres"))
+        apellido_p = st.text_input("APELLIDO PATERNO", key=k("apellido_p"))
+        apellido_m = st.text_input("APELLIDO MATERNO", key=k("apellido_m"))
+        celular = st.text_input("CELULAR", max_chars=9, key=k("celular"))
+        tipo_doc = st.selectbox("TIPO DE DOC", ["DNI", "CPP", "CEX", "OTROS"], key=k("tipo_doc"))
+        dni = st.text_input("DNI", max_chars=8, key=k("dni"))
+        correo = st.text_input("CORREO (USUARIO SGC/PRONTO)", key=k("correo"))
 
     with col_der:
         st.markdown("**Datos comerciales**")
         if rol == "backoffice":
-            razon = st.selectbox("RAZÓN SOCIAL", [""] + razones, key="alta_razon")
+            razon = st.selectbox("RAZÓN SOCIAL", [""] + razones, key=k("razon"))
         else:
             razon = razon_usuario
-            st.text_input("RAZÓN SOCIAL", value=razon, disabled=True, key="alta_razon_dealer")
+            st.text_input("RAZÓN SOCIAL", value=razon, disabled=True, key=k("razon_dealer"))
 
-        canal = st.selectbox("CANAL", ["VENTAS INDIRECTAS"], key="alta_canal")
-        subcanal = st.selectbox("SUB CANAL", ["VENTAS INDIRECTAS", "OUTBOUND"], key="alta_subcanal")
-        region = st.selectbox("REGIÓN", ["", "CENTRAL", "NORORIENTE", "SUR"], key="alta_region")
+        canal = st.selectbox("CANAL", ["VENTAS INDIRECTAS"], key=k("canal"))
+        subcanal = st.selectbox("SUB CANAL", ["VENTAS INDIRECTAS", "OUTBOUND"], key=k("subcanal"))
+        region = st.selectbox("REGIÓN", ["", "CENTRAL", "NORORIENTE", "SUR"], key=k("region"))
         cargo = st.selectbox(
             "CARGO (ROL)",
             [
@@ -406,45 +421,45 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
                 "Supervisor D2D - Dealer",
                 "Coordinador D2D - Dealer",
             ],
-            key="alta_cargo",
+            key=k("cargo"),
         )
-        tipo_contrato = st.selectbox("TIPO DE CONTRATO", ["PLANILLA", "MEDIA PLANILLA"], key="alta_tipo_contrato")
+        tipo_contrato = st.selectbox("TIPO DE CONTRATO", ["PLANILLA", "MEDIA PLANILLA"], key=k("tipo_contrato"))
         hoy_alta = datetime.now(zona_peru).date()
         fecha_creacion = st.date_input(
             "FECHA CREACIÓN USUARIO",
             value=hoy_alta,
             min_value=hoy_alta - timedelta(days=1),
             max_value=hoy_alta + timedelta(days=1),
-            key="alta_fecha_creacion",
+            key=k("fecha_creacion"),
             help="Solo permite ayer, hoy o mañana."
         )
-        contrato_firmado = st.selectbox("CONTRATO FIRMADO", ["SI"], index=0, key="alta_contrato_firmado")
+        contrato_firmado = st.selectbox("CONTRATO FIRMADO", ["SI"], index=0, key=k("contrato_firmado"))
 
     st.divider()
     st.markdown("**Ubicación y jerarquía**")
     col_u1, col_u2 = st.columns(2)
 
     with col_u1:
-        departamento = st.selectbox("DEPARTAMENTO", [""] + departamentos, key="alta_departamento")
+        departamento = st.selectbox("DEPARTAMENTO", [""] + departamentos, key=k("departamento"))
 
         provincias = []
         if departamento and "DEPARTAMENTO" in df_ubi.columns and "PROVINCIA" in df_ubi.columns:
             df_dep = df_ubi[serie_columna(df_ubi, "DEPARTAMENTO").eq(str(departamento).strip())]
             provincias = lista_limpia(df_dep, "PROVINCIA")
 
-        provincia = st.selectbox("PROVINCIA", [""] + provincias, key="alta_provincia")
+        provincia = st.selectbox("PROVINCIA", [""] + provincias, key=k("provincia"))
 
-        coordinador = st.selectbox("COORDINADOR", [""] + coordinadores, key="alta_coordinador")
+        coordinador = st.selectbox("COORDINADOR", [""] + coordinadores, key=k("coordinador"))
         dni_coordinador = buscar_dni_por_nombre(df_ubi, "COORDINADOR FINAL", "DNI COORDINADOR", coordinador)
-        st.text_input("DNI COORDINADOR", value=dni_coordinador, disabled=True, key="alta_dni_coordinador")
+        st.text_input("DNI COORDINADOR", value=dni_coordinador, disabled=True, key=k("dni_coordinador"))
 
     with col_u2:
-        supervisor = st.selectbox("SUPERVISOR A CARGO", [""] + supervisores, key="alta_supervisor")
+        supervisor = st.selectbox("SUPERVISOR A CARGO", [""] + supervisores, key=k("supervisor"))
         dni_supervisor = buscar_dni_por_nombre(df_ubi, "SUPERVISOR A CARGO FINAL", "DNI SUPERVISOR", supervisor)
-        st.text_input("DNI SUPERVISOR", value=dni_supervisor, disabled=True, key="alta_dni_supervisor")
+        st.text_input("DNI SUPERVISOR", value=dni_supervisor, disabled=True, key=k("dni_supervisor"))
 
     st.markdown("")
-    submit = st.button("Guardar Alta", key="btn_guardar_alta")
+    submit = st.button("Guardar Alta", key=k("btn_guardar_alta"))
 
     if submit:
         dni_limpio = normalizar_dni(dni)
@@ -453,7 +468,9 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
         marca_alta = ahora_peru_fecha_hora()
 
         campos = {
-            "FECHA MOV": str(fecha_creacion),
+            # En ALTA no se marca FECHA MOV.
+            # FECHA MOV se actualiza únicamente en BAJAS.
+            "FECHA MOV": "",
             "RAZON SOCIAL": razon,
             "CANAL": canal,
             "SUB CANAL": subcanal,
@@ -523,6 +540,8 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             else:
                 st.session_state["mensaje_ok"] = "✅ Alta registrada correctamente. Para verlo en Presencialidad Dealer, presiona Sincronizar mes."
 
+            # Fuerza que el próximo render use llaves nuevas y todos los campos queden en blanco.
+            st.session_state["alta_form_version"] = int(st.session_state.get("alta_form_version", 0)) + 1
             limpiar_form()
             st.rerun()
         except Exception as e:

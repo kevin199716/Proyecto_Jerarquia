@@ -61,7 +61,7 @@ KEY_LOAD_TS = "asis_load_timestamp"
 
 CACHE_TTL = 600
 # Menos filas visibles para que cada cambio de filtro no congele Render/Chrome.
-MAX_FILAS_EDITOR = 80
+MAX_FILAS_EDITOR = 60
 
 # =====================================================
 # UTILIDADES
@@ -669,26 +669,77 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
         st.warning("⚠️ No hay registros del periodo actual. Presiona **Sincronizar mes**.")
         return
 
-    # Filtros encadenados: Razón Social > Supervisor > Coordinador > Departamento > Provincia
-    f1, f2, f3, f4, f5 = st.columns(5)
-    with f1:
-        filtro_razon = st.selectbox("Razón Social", lista_opciones(df_mes, "RAZON SOCIAL"), key="asis_razon")
-    df_base = aplicar_filtro(df_mes, "RAZON SOCIAL", filtro_razon)
+    # =====================================================
+    # FILTROS SIN REFRESCO POR CADA SELECCIÓN
+    # =====================================================
+    # Los selectores están dentro de un formulario. Así no se recalcula ni se vuelve
+    # a pintar el editor con cada clic; recién aplica cuando presionas "Aplicar filtros".
+    if "asis_filtros_aplicados" not in st.session_state:
+        st.session_state["asis_filtros_aplicados"] = {
+            "razon": "TODOS",
+            "supervisor": "TODOS",
+            "coordinador": "TODOS",
+            "departamento": "TODOS",
+            "provincia": "TODOS",
+        }
 
-    with f2:
-        filtro_supervisor = st.selectbox("Supervisor", lista_opciones(df_base, "SUPERVISOR"), key="asis_supervisor")
-    df_base = aplicar_filtro(df_base, "SUPERVISOR", filtro_supervisor)
+    filtros_prev = st.session_state["asis_filtros_aplicados"]
 
-    with f3:
-        filtro_coord = st.selectbox("Coordinador", lista_opciones(df_base, "COORDINADOR"), key="asis_coordinador")
-    df_base = aplicar_filtro(df_base, "COORDINADOR", filtro_coord)
+    with st.form("form_filtros_presencialidad"):
+        f1, f2, f3, f4, f5 = st.columns(5)
+        with f1:
+            filtro_razon_tmp = st.selectbox(
+                "Razón Social",
+                lista_opciones(df_mes, "RAZON SOCIAL"),
+                index=lista_opciones(df_mes, "RAZON SOCIAL").index(filtros_prev.get("razon", "TODOS")) if filtros_prev.get("razon", "TODOS") in lista_opciones(df_mes, "RAZON SOCIAL") else 0,
+                key="asis_razon_tmp",
+            )
+        with f2:
+            filtro_supervisor_tmp = st.selectbox(
+                "Supervisor",
+                lista_opciones(df_mes, "SUPERVISOR"),
+                index=lista_opciones(df_mes, "SUPERVISOR").index(filtros_prev.get("supervisor", "TODOS")) if filtros_prev.get("supervisor", "TODOS") in lista_opciones(df_mes, "SUPERVISOR") else 0,
+                key="asis_supervisor_tmp",
+            )
+        with f3:
+            filtro_coord_tmp = st.selectbox(
+                "Coordinador",
+                lista_opciones(df_mes, "COORDINADOR"),
+                index=lista_opciones(df_mes, "COORDINADOR").index(filtros_prev.get("coordinador", "TODOS")) if filtros_prev.get("coordinador", "TODOS") in lista_opciones(df_mes, "COORDINADOR") else 0,
+                key="asis_coordinador_tmp",
+            )
+        with f4:
+            filtro_dep_tmp = st.selectbox(
+                "Departamento",
+                lista_opciones(df_mes, "DEPARTAMENTO"),
+                index=lista_opciones(df_mes, "DEPARTAMENTO").index(filtros_prev.get("departamento", "TODOS")) if filtros_prev.get("departamento", "TODOS") in lista_opciones(df_mes, "DEPARTAMENTO") else 0,
+                key="asis_departamento_tmp",
+            )
+        with f5:
+            filtro_prov_tmp = st.selectbox(
+                "Provincia",
+                lista_opciones(df_mes, "PROVINCIA"),
+                index=lista_opciones(df_mes, "PROVINCIA").index(filtros_prev.get("provincia", "TODOS")) if filtros_prev.get("provincia", "TODOS") in lista_opciones(df_mes, "PROVINCIA") else 0,
+                key="asis_provincia_tmp",
+            )
 
-    with f4:
-        filtro_dep = st.selectbox("Departamento", lista_opciones(df_base, "DEPARTAMENTO"), key="asis_departamento")
-    df_base = aplicar_filtro(df_base, "DEPARTAMENTO", filtro_dep)
+        aplicar = st.form_submit_button("🔎 Aplicar filtros", use_container_width=True)
 
-    with f5:
-        filtro_prov = st.selectbox("Provincia", lista_opciones(df_base, "PROVINCIA"), key="asis_provincia")
+    if aplicar:
+        st.session_state["asis_filtros_aplicados"] = {
+            "razon": filtro_razon_tmp,
+            "supervisor": filtro_supervisor_tmp,
+            "coordinador": filtro_coord_tmp,
+            "departamento": filtro_dep_tmp,
+            "provincia": filtro_prov_tmp,
+        }
+
+    filtros = st.session_state["asis_filtros_aplicados"]
+    filtro_razon = filtros.get("razon", "TODOS")
+    filtro_supervisor = filtros.get("supervisor", "TODOS")
+    filtro_coord = filtros.get("coordinador", "TODOS")
+    filtro_dep = filtros.get("departamento", "TODOS")
+    filtro_prov = filtros.get("provincia", "TODOS")
 
     df_filtrado = filtrar_df(df_mes, filtro_razon, filtro_supervisor, filtro_coord, filtro_dep, filtro_prov)
 
@@ -738,18 +789,23 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
             col_hoy: st.column_config.SelectboxColumn(col_hoy, options=["", "A", "F", "DM", "S"], width="small"),
         }
 
-        editado = st.data_editor(
-            df_editor,
-            use_container_width=True,
-            height=min(600, 50 + len(df_editor) * 35),
-            hide_index=True,
-            disabled=disabled_cols,
-            column_config=column_config,
-            num_rows="fixed",
-            key="editor_presencialidad_dia_actual",
-        )
+        # El editor también queda dentro de un formulario para que seleccionar A/F/DM/S
+        # no refresque toda la página. Recién guarda y recalcula al presionar el botón.
+        with st.form("form_guardar_presencialidad"):
+            editado = st.data_editor(
+                df_editor,
+                use_container_width=True,
+                height=min(520, 50 + len(df_editor) * 32),
+                hide_index=True,
+                disabled=disabled_cols,
+                column_config=column_config,
+                num_rows="fixed",
+                key="editor_presencialidad_dia_actual",
+            )
 
-        if st.button("💾 Guardar Presencialidad", key="btn_guardar_asistencia"):
+            guardar_pres = st.form_submit_button("💾 Guardar Presencialidad", use_container_width=False)
+
+        if guardar_pres:
             with st.spinner("Guardando en Google Drive…"):
                 try:
                     df_editado = normalizar_para_guardado(pd.DataFrame(editado).fillna(""), col_hoy)
