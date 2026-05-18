@@ -255,12 +255,17 @@ def valor_por_columna(headers: list[str], campos: dict) -> list[str]:
 # =========================
 # FORMULARIO
 # =========================
-def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones):
+def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=None):
     st.markdown("<span class='wow-section-title'>📋 Alta de Vendedores</span>", unsafe_allow_html=True)
 
     if st.session_state.get("mensaje_ok"):
-        st.success("✅ Registrado correctamente")
+        msg_ok = st.session_state.get("mensaje_ok")
+        st.success(msg_ok if isinstance(msg_ok, str) else "✅ Registrado correctamente")
         del st.session_state["mensaje_ok"]
+
+    if st.session_state.get("mensaje_sync_warning"):
+        st.warning(st.session_state.get("mensaje_sync_warning"))
+        del st.session_state["mensaje_sync_warning"]
 
     usuario_actual = st.session_state.get("usuario", "")
     rol = st.session_state.get("rol", "")
@@ -286,150 +291,187 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones):
     if "DEPARTAMENTO" in df_ubi.columns:
         departamentos = sorted(df_ubi["DEPARTAMENTO"].replace("", pd.NA).dropna().astype(str).unique())
 
-    coordinadores = []
-    if "COORDINADOR FINAL" in df_ubi.columns:
-        coordinadores = sorted(df_ubi["COORDINADOR FINAL"].replace("", pd.NA).dropna().astype(str).unique())
+    # ==========================================================
+    # IMPORTANTE: estos campos quedan FUERA del st.form.
+    # En Streamlit, los widgets dentro de un form no recalculan dependientes
+    # hasta presionar submit. Por eso provincia/DNI supervisor/DNI coordinador
+    # se congelaban o quedaban en blanco.
+    # ==========================================================
+    st.caption("Primero completa datos del colaborador y dealer. La ubicación y jerarquía se actualiza en línea desde la hoja ubicaciones.")
 
-    supervisores = []
-    if "SUPERVISOR A CARGO FINAL" in df_ubi.columns:
-        supervisores = sorted(df_ubi["SUPERVISOR A CARGO FINAL"].replace("", pd.NA).dropna().astype(str).unique())
+    col_izq, col_der = st.columns(2)
 
-    with st.form("form_alta_vendedor"):
-        st.caption("Primero datos del colaborador y dealer. La ubicación y jerarquía van al final para evitar confusiones.")
+    with col_izq:
+        st.markdown("**Datos del colaborador**")
+        nombres = st.text_input("NOMBRES", key="alta_nombres")
+        apellido_p = st.text_input("APELLIDO PATERNO", key="alta_apellido_p")
+        apellido_m = st.text_input("APELLIDO MATERNO", key="alta_apellido_m")
+        celular = st.text_input("CELULAR", max_chars=9, key="alta_celular")
+        tipo_doc = st.selectbox("TIPO DE DOC", ["DNI", "CPP", "CEX", "OTROS"], key="alta_tipo_doc")
+        dni = st.text_input("DNI", max_chars=8, key="alta_dni")
+        correo = st.text_input("CORREO (USUARIO SGC/PRONTO)", key="alta_correo")
 
-        col_izq, col_der = st.columns(2)
+    with col_der:
+        st.markdown("**Datos comerciales**")
+        if rol == "backoffice":
+            razon = st.selectbox("RAZÓN SOCIAL", [""] + razones, key="alta_razon")
+        else:
+            razon = razon_usuario
+            st.text_input("RAZÓN SOCIAL", value=razon, disabled=True, key="alta_razon_dealer")
 
-        # BLOQUE SUPERIOR IZQUIERDO: datos personales
-        with col_izq:
-            st.markdown("**Datos del colaborador**")
-            nombres = st.text_input("NOMBRES", key="alta_nombres")
-            apellido_p = st.text_input("APELLIDO PATERNO", key="alta_apellido_p")
-            apellido_m = st.text_input("APELLIDO MATERNO", key="alta_apellido_m")
-            celular = st.text_input("CELULAR", max_chars=9, key="alta_celular")
-            tipo_doc = st.selectbox("TIPO DE DOC", ["DNI", "CPP", "CEX", "OTROS"], key="alta_tipo_doc")
-            dni = st.text_input("DNI", max_chars=8, key="alta_dni")
-            correo = st.text_input("CORREO (USUARIO SGC/PRONTO)", key="alta_correo")
+        canal = st.selectbox("CANAL", ["VENTAS INDIRECTAS"], key="alta_canal")
+        subcanal = st.selectbox("SUB CANAL", ["VENTAS INDIRECTAS", "OUTBOUND"], key="alta_subcanal")
+        region = st.selectbox("REGIÓN", ["", "NORORIENTE", "SUR", "CENTRO", "CENTRAL"], key="alta_region")
+        cargo = st.selectbox(
+            "CARGO (ROL)",
+            [
+                "",
+                "Agente BO D2D - Dealer",
+                "Promotor D2D - Dealer",
+                "Supervisor D2D - Dealer",
+                "Coordinador D2D - Dealer",
+            ],
+            key="alta_cargo",
+        )
+        tipo_contrato = st.selectbox(
+            "TIPO DE CONTRATO",
+            ["", "PLANILLA", "MEDIA PLANILLA"],
+            key="alta_tipo_contrato",
+        )
+        fecha_creacion = st.date_input("FECHA CREACIÓN USUARIO", value=datetime.now(zona_peru).date(), key="alta_fecha_creacion")
+        contrato_firmado = st.selectbox("CONTRATO FIRMADO", ["SI", "NO"], index=0, key="alta_contrato_firmado")
 
-        # BLOQUE SUPERIOR DERECHO: razón social y datos comerciales
-        with col_der:
-            st.markdown("**Datos comerciales**")
-            if rol == "backoffice":
-                razon = st.selectbox("RAZÓN SOCIAL", [""] + razones, key="alta_razon")
-            else:
-                razon = razon_usuario
-                st.text_input("RAZÓN SOCIAL", value=razon, disabled=True, key="alta_razon_dealer")
+    st.divider()
+    st.markdown("**Ubicación y jerarquía**")
+    col_u1, col_u2 = st.columns(2)
 
-            canal = st.selectbox("CANAL", ["VENTAS INDIRECTAS"], key="alta_canal")
-            subcanal = st.selectbox("SUB CANAL", ["VENTAS INDIRECTAS", "OUTBOUND"], key="alta_subcanal")
-            region = st.selectbox("REGIÓN", ["", "NORORIENTE", "SUR", "CENTRO", "CENTRAL"], key="alta_region")
-            cargo = st.selectbox(
-                "CARGO (ROL)",
-                [
-                    "",
-                    "Agente BO D2D - Dealer",
-                    "Promotor D2D - Dealer",
-                    "Supervisor D2D - Dealer",
-                    "Coordinador D2D - Dealer",
-                ],
-                key="alta_cargo",
-            )
-            tipo_contrato = st.selectbox(
-                "TIPO DE CONTRATO",
-                ["", "PLANILLA", "MEDIA PLANILLA"],
-                key="alta_tipo_contrato",
-            )
-            fecha_creacion = st.date_input("FECHA CREACIÓN USUARIO", value=datetime.now(zona_peru).date(), key="alta_fecha_creacion")
-            contrato_firmado = st.selectbox("CONTRATO FIRMADO", ["SI", "NO"], index=0, key="alta_contrato_firmado")
+    with col_u1:
+        departamento = st.selectbox("DEPARTAMENTO", [""] + departamentos, key="alta_departamento")
 
-        st.divider()
-        st.markdown("**Ubicación y jerarquía**")
-        col_u1, col_u2 = st.columns(2)
+        provincias = []
+        if departamento and "DEPARTAMENTO" in df_ubi.columns and "PROVINCIA" in df_ubi.columns:
+            df_dep = df_ubi[df_ubi["DEPARTAMENTO"].astype(str).str.strip().eq(str(departamento).strip())]
+            provincias = sorted(df_dep["PROVINCIA"].replace("", pd.NA).dropna().astype(str).unique())
 
-        with col_u1:
-            departamento = st.selectbox("DEPARTAMENTO", [""] + departamentos, key="alta_departamento")
-            provincias = []
-            if departamento and "DEPARTAMENTO" in df_ubi.columns and "PROVINCIA" in df_ubi.columns:
-                df_filtrado = df_ubi[df_ubi["DEPARTAMENTO"].astype(str).eq(departamento)]
-                provincias = sorted(df_filtrado["PROVINCIA"].replace("", pd.NA).dropna().astype(str).unique())
-            provincia = st.selectbox("PROVINCIA", [""] + provincias, key="alta_provincia")
+        provincia = st.selectbox("PROVINCIA", [""] + provincias, key="alta_provincia")
 
-            coordinador = st.selectbox("COORDINADOR", [""] + coordinadores, key="alta_coordinador")
-            dni_coordinador = ""
-            if coordinador and "COORDINADOR FINAL" in df_ubi.columns:
-                fila_coord = df_ubi[df_ubi["COORDINADOR FINAL"].astype(str).eq(coordinador)]
-                if not fila_coord.empty and "DNI COORDINADOR" in fila_coord.columns:
-                    dni_coordinador = limpiar_texto(fila_coord.iloc[0].get("DNI COORDINADOR", "")).replace(".0", "")
-            st.text_input("DNI COORDINADOR", value=dni_coordinador, disabled=True, key="alta_dni_coordinador")
+        # Coordinador filtrado por departamento/provincia cuando exista relación en la hoja.
+        df_jer = df_ubi.copy()
+        if departamento and "DEPARTAMENTO" in df_jer.columns:
+            df_jer = df_jer[df_jer["DEPARTAMENTO"].astype(str).str.strip().eq(str(departamento).strip())]
+        if provincia and "PROVINCIA" in df_jer.columns:
+            df_jer = df_jer[df_jer["PROVINCIA"].astype(str).str.strip().eq(str(provincia).strip())]
 
-        with col_u2:
-            supervisor = st.selectbox("SUPERVISOR A CARGO", [""] + supervisores, key="alta_supervisor")
-            dni_supervisor = ""
-            if supervisor and "SUPERVISOR A CARGO FINAL" in df_ubi.columns:
-                fila_supervisor = df_ubi[df_ubi["SUPERVISOR A CARGO FINAL"].astype(str).eq(supervisor)]
-                if not fila_supervisor.empty and "DNI SUPERVISOR" in fila_supervisor.columns:
-                    dni_supervisor = limpiar_texto(fila_supervisor.iloc[0].get("DNI SUPERVISOR", "")).replace(".0", "")
-            st.text_input("DNI SUPERVISOR", value=dni_supervisor, disabled=True, key="alta_dni_supervisor")
+        coordinadores = []
+        if "COORDINADOR FINAL" in df_jer.columns:
+            coordinadores = sorted(df_jer["COORDINADOR FINAL"].replace("", pd.NA).dropna().astype(str).unique())
+        elif "COORDINADOR FINAL" in df_ubi.columns:
+            coordinadores = sorted(df_ubi["COORDINADOR FINAL"].replace("", pd.NA).dropna().astype(str).unique())
 
-        submit = st.form_submit_button("Guardar Alta")
+        coordinador = st.selectbox("COORDINADOR", [""] + coordinadores, key="alta_coordinador")
+        dni_coordinador = ""
+        if coordinador and "COORDINADOR FINAL" in df_ubi.columns:
+            df_match = df_jer if not df_jer.empty else df_ubi
+            fila_coord = df_match[df_match["COORDINADOR FINAL"].astype(str).str.strip().eq(str(coordinador).strip())]
+            if fila_coord.empty:
+                fila_coord = df_ubi[df_ubi["COORDINADOR FINAL"].astype(str).str.strip().eq(str(coordinador).strip())]
+            if not fila_coord.empty and "DNI COORDINADOR" in fila_coord.columns:
+                dni_coordinador = limpiar_texto(fila_coord.iloc[0].get("DNI COORDINADOR", "")).replace(".0", "")
+        st.text_input("DNI COORDINADOR", value=dni_coordinador, disabled=True, key="alta_dni_coordinador")
 
-        if submit:
-            dni_limpio = normalizar_dni(dni)
-            celular_limpio = limpiar_celular(celular)
-            correo_limpio = limpiar_texto(correo).lower()
+    with col_u2:
+        supervisores = []
+        if "SUPERVISOR A CARGO FINAL" in df_jer.columns:
+            supervisores = sorted(df_jer["SUPERVISOR A CARGO FINAL"].replace("", pd.NA).dropna().astype(str).unique())
+        elif "SUPERVISOR A CARGO FINAL" in df_ubi.columns:
+            supervisores = sorted(df_ubi["SUPERVISOR A CARGO FINAL"].replace("", pd.NA).dropna().astype(str).unique())
 
-            campos = {
-                "FECHA MOV": str(fecha_creacion),  # fecha de movimiento: solo fecha
-                "RAZON SOCIAL": razon,
-                "CANAL": canal,
-                "SUB CANAL": subcanal,
-                "REGION": region,
-                "DEPARTAMENTO": departamento,
-                "PROVINCIA": provincia,
-                "SUPERVISOR A CARGO": supervisor,
-                "DNI SUPERVISOR": dni_supervisor,
-                "COORDINADOR": coordinador,
-                "DNI COORDINADOR": dni_coordinador,
-                "CARGO (ROL)": cargo,
-                "NOMBRES": limpiar_texto(nombres).upper(),
-                "APELLIDO PATERNO": limpiar_texto(apellido_p).upper(),
-                "APELLIDO MATERNO": limpiar_texto(apellido_m).upper(),
-                "CELULAR": celular_limpio,
-                "TIPO DE DOC": tipo_doc,
-                "DNI": dni_limpio,
-                "CORREO (USUARIO SGC/PRONTO)": correo_limpio,
-                "ESTADO": "ACTIVO",
-                "TIPO DE CONTRATO": tipo_contrato,
-                "FECHA DE CREACION USUARIO": str(fecha_creacion),
-                "FECHA DE CESE": "",
-                "MOTIVO": "",
-                "CONTRATO FIRMADO": contrato_firmado,
-                "FECHA_ALTA_REGISTRO": ahora_peru_fecha_hora(),  # marcaje: fecha y hora
-                "FECHA ALTA REGISTRO": ahora_peru_fecha_hora(),
-                "FECHA_BAJA_REGISTRO": "",
-                "FECHA BAJA REGISTRO": "",
-                "USUARIO_ALTA": usuario_actual,
-                "USUARIO ALTA": usuario_actual,
-                "USUARIO_BAJA": "",
-                "USUARIO BAJA": "",
-            }
+        supervisor = st.selectbox("SUPERVISOR A CARGO", [""] + supervisores, key="alta_supervisor")
+        dni_supervisor = ""
+        if supervisor and "SUPERVISOR A CARGO FINAL" in df_ubi.columns:
+            df_match = df_jer if not df_jer.empty else df_ubi
+            fila_supervisor = df_match[df_match["SUPERVISOR A CARGO FINAL"].astype(str).str.strip().eq(str(supervisor).strip())]
+            if fila_supervisor.empty:
+                fila_supervisor = df_ubi[df_ubi["SUPERVISOR A CARGO FINAL"].astype(str).str.strip().eq(str(supervisor).strip())]
+            if not fila_supervisor.empty and "DNI SUPERVISOR" in fila_supervisor.columns:
+                dni_supervisor = limpiar_texto(fila_supervisor.iloc[0].get("DNI SUPERVISOR", "")).replace(".0", "")
+        st.text_input("DNI SUPERVISOR", value=dni_supervisor, disabled=True, key="alta_dni_supervisor")
 
-            errores = validar_formulario(campos, df_colab)
-            if errores:
-                for err in errores:
-                    st.error(err)
+    st.markdown("")
+    submit = st.button("Guardar Alta", key="btn_guardar_alta")
+
+    if submit:
+        dni_limpio = normalizar_dni(dni)
+        celular_limpio = limpiar_celular(celular)
+        correo_limpio = limpiar_texto(correo).lower()
+        marca_alta = ahora_peru_fecha_hora()
+
+        campos = {
+            "FECHA MOV": str(fecha_creacion),  # movimiento del alta: solo fecha
+            "RAZON SOCIAL": razon,
+            "CANAL": canal,
+            "SUB CANAL": subcanal,
+            "REGION": region,
+            "DEPARTAMENTO": departamento,
+            "PROVINCIA": provincia,
+            "SUPERVISOR A CARGO": supervisor,
+            "DNI SUPERVISOR": dni_supervisor,
+            "COORDINADOR": coordinador,
+            "DNI COORDINADOR": dni_coordinador,
+            "CARGO (ROL)": cargo,
+            "NOMBRES": limpiar_texto(nombres).upper(),
+            "APELLIDO PATERNO": limpiar_texto(apellido_p).upper(),
+            "APELLIDO MATERNO": limpiar_texto(apellido_m).upper(),
+            "CELULAR": celular_limpio,
+            "TIPO DE DOC": tipo_doc,
+            "DNI": dni_limpio,
+            "CORREO (USUARIO SGC/PRONTO)": correo_limpio,
+            "ESTADO": "ACTIVO",
+            "TIPO DE CONTRATO": tipo_contrato,
+            "FECHA DE CREACION USUARIO": str(fecha_creacion),
+            "FECHA DE CESE": "",
+            "MOTIVO": "",
+            "CONTRATO FIRMADO": contrato_firmado,
+            "FECHA_ALTA_REGISTRO": marca_alta,  # marcaje de registro: fecha y hora
+            "FECHA ALTA REGISTRO": marca_alta,
+            "FECHA_BAJA_REGISTRO": "",
+            "FECHA BAJA REGISTRO": "",
+            "USUARIO_ALTA": usuario_actual,
+            "USUARIO ALTA": usuario_actual,
+            "USUARIO_BAJA": "",
+            "USUARIO BAJA": "",
+        }
+
+        errores = validar_formulario(campos, df_colab)
+        if errores:
+            for err in errores:
+                st.error(err)
+            return
+
+        try:
+            headers = obtener_headers(hoja_colaboradores)
+            if not headers:
+                st.error("❌ La hoja colaboradores no tiene cabecera. No se puede registrar.")
                 return
 
-            try:
-                headers = obtener_headers(hoja_colaboradores)
-                if not headers:
-                    st.error("❌ La hoja colaboradores no tiene cabecera. No se puede registrar.")
-                    return
+            fila = valor_por_columna(headers, campos)
+            hoja_colaboradores.append_row(fila, value_input_option="USER_ENTERED")
+            leer_colaboradores(hoja_colaboradores, forzar=True)
 
-                fila = valor_por_columna(headers, campos)
-                hoja_colaboradores.append_row(fila, value_input_option="USER_ENTERED")
-                leer_colaboradores(hoja_colaboradores, forzar=True)
-                st.session_state["mensaje_ok"] = True
-                limpiar_form()
-                st.rerun()
-            except Exception as e:
-                st.error(f"❌ Error al registrar el alta: {e}")
+            # Hace que el alta aparezca en Presencialidad Dealer sin esperar 5 minutos.
+            if hoja_asistencia is not None:
+                try:
+                    from asistencia import sincronizar_mes, cargar_cache_desde_drive
+                    nuevos, actualizados = sincronizar_mes(hoja_asistencia, hoja_colaboradores)
+                    cargar_cache_desde_drive(hoja_asistencia, forzar=True)
+                    st.session_state["mensaje_ok"] = f"✅ Registrado correctamente. Presencialidad actualizada: nuevos {nuevos}, base actualizada {actualizados}."
+                except Exception as e_sync:
+                    st.session_state["mensaje_ok"] = "✅ Registrado correctamente. Para verlo en Presencialidad Dealer, presiona Sincronizar mes."
+                    st.session_state["mensaje_sync_warning"] = f"⚠️ No se pudo sincronizar presencialidad automáticamente: {e_sync}"
+            else:
+                st.session_state["mensaje_ok"] = "✅ Registrado correctamente. Para verlo en Presencialidad Dealer, presiona Sincronizar mes."
+
+            limpiar_form()
+            st.rerun()
+        except Exception as e:
+            st.error(f"❌ Error al registrar el alta: {e}")

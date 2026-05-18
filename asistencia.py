@@ -349,7 +349,11 @@ def sincronizar_mes(hoja_asistencia, hoja_colaboradores) -> tuple[int, int]:
         if dni not in existentes:
             fila = {col: "" for col in COLUMNAS_ASISTENCIA}
             fila.update(payload)
-            nuevas.append([fila.get(col, "") for col in COLUMNAS_ASISTENCIA])
+            # La fila nueva se arma según el orden REAL de cabeceras de la hoja.
+            # Esto evita descuadres si la hoja Asistencia ya existía y se agregaron
+            # RAZON SOCIAL / FECHA_ALTA / FECHA_CESE al final.
+            headers_orden = [limpiar_texto(h).upper() for h in headers]
+            nuevas.append([fila.get(col, "") for col in headers_orden])
         else:
             row_sheet = existentes[dni]
             # Actualiza datos base del mes sin tocar días ya marcados.
@@ -617,10 +621,10 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
         if total_filtrado > MAX_FILAS_EDITOR:
             st.warning(
                 f"⚠️ Hay {total_filtrado} registros editables hoy. El editor muestra máximo {MAX_FILAS_EDITOR} "
-                "para mantener el rendimiento. Usa filtros o cambia de bloque."
+                "para no congelar la página. Esto NO borra registros; solo pagina la vista. Usa filtros o cambia de página."
             )
             pagina = st.slider(
-                "Bloque de registros",
+                "Página de registros (solo divide la vista, no borra nada)",
                 min_value=1,
                 max_value=max(1, -(-total_filtrado // MAX_FILAS_EDITOR)),
                 value=1,
