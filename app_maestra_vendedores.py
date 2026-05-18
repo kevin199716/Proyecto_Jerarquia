@@ -133,7 +133,10 @@ def mostrar_matriz_jerarquia(titulo="Estado actual de la jerarquía", icono="�
 if rol == "backoffice":
     if pagina == "Alta":
         mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia)
-        mostrar_matriz_jerarquia()
+        # IMPORTANTE: no cargar la matriz automáticamente en Alta.
+        # Evita congelamientos: cada cambio de input hacía leer toda la hoja colaboradores.
+        if st.button("📋 Ver matriz de jerarquía", key="btn_ver_matriz_alta_backoffice"):
+            mostrar_matriz_jerarquia()
 
     elif pagina == "Bajas":
         df = mostrar_matriz_jerarquia()
@@ -143,7 +146,9 @@ if rol == "backoffice":
 
     elif pagina == "Presencialidad Dealer":
         mostrar_asistencia(hoja_asistencia, hoja_colaboradores)
-        mostrar_matriz_jerarquia()
+        # No cargar la matriz automáticamente: Presencialidad ya usa su propio caché.
+        if st.button("📋 Ver matriz de jerarquía", key="btn_ver_matriz_pres_backoffice"):
+            mostrar_matriz_jerarquia()
 
 # =====================================================
 # DEALER
@@ -153,7 +158,10 @@ elif rol == "dealer":
 
     if pagina == "Alta":
         mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia)
-        mostrar_matriz_jerarquia()
+        # IMPORTANTE: no cargar la matriz automáticamente en Alta.
+        # Evita congelamientos: cada cambio de input hacía leer toda la hoja colaboradores.
+        if st.button("📋 Ver matriz de jerarquía", key="btn_ver_matriz_alta_dealer"):
+            mostrar_matriz_jerarquia()
 
     elif pagina == "Bajas":
         df = mostrar_matriz_jerarquia()
@@ -163,7 +171,8 @@ elif rol == "dealer":
 
     elif pagina == "Presencialidad Dealer":
         mostrar_asistencia(hoja_asistencia, hoja_colaboradores)
-        mostrar_matriz_jerarquia()
+        if st.button("📋 Ver matriz de jerarquía", key="btn_ver_matriz_pres_dealer"):
+            mostrar_matriz_jerarquia()
 
 # =====================================================
 # EDITOR
@@ -179,7 +188,8 @@ elif rol == "editor":
 
     elif pagina == "Presencialidad Dealer":
         mostrar_asistencia(hoja_asistencia, hoja_colaboradores)
-        mostrar_matriz_jerarquia()
+        if st.button("📋 Ver matriz de jerarquía", key="btn_ver_matriz_pres_editor"):
+            mostrar_matriz_jerarquia()
 
 # =====================================================
 # SIN PERMISOS

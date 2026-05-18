@@ -72,29 +72,50 @@ def parse_fecha(valor):
 # =========================
 # LECTURAS GOOGLE SHEETS
 # =========================
-def leer_ubicaciones(hoja_ubicaciones):
-    valores = hoja_ubicaciones.get_all_values()
+@st.cache_data(ttl=300, show_spinner=False)
+def _leer_ubicaciones_cached(_hoja_ubicaciones):
+    valores = _hoja_ubicaciones.get_all_values()
     if not valores:
         return pd.DataFrame()
 
     headers = [str(h).strip().upper() for h in valores[0]]
     data = valores[1:]
-    df = pd.DataFrame(data, columns=headers)
+    n = len(headers)
+    filas = []
+    for fila in data:
+        fila = list(fila)
+        if len(fila) < n:
+            fila += [""] * (n - len(fila))
+        filas.append(fila[:n])
 
+    df = pd.DataFrame(filas, columns=headers)
+
+    # En ubicaciones hay dos columnas con el mismo nombre: DNI FINAL.
+    # La primera corresponde a supervisor y la segunda a coordinador.
     nuevas_columnas = []
     contador_dni = 0
     for col in df.columns:
-        if col == "DNI FINAL":
+        col_up = str(col).strip().upper()
+        if col_up == "DNI FINAL":
             contador_dni += 1
             nuevas_columnas.append("DNI SUPERVISOR" if contador_dni == 1 else "DNI COORDINADOR")
         else:
-            nuevas_columnas.append(col)
+            nuevas_columnas.append(col_up)
 
     df.columns = nuevas_columnas
-    return normalizar_columnas(df).fillna("")
+    df = normalizar_columnas(df).fillna("")
+    for c in df.columns:
+        df[c] = df[c].astype(str).str.strip()
+    return df
 
 
-@st.cache_data(ttl=60, show_spinner=False)
+def leer_ubicaciones(hoja_ubicaciones, forzar=False):
+    if forzar:
+        _leer_ubicaciones_cached.clear()
+    return _leer_ubicaciones_cached(hoja_ubicaciones)
+
+
+@st.cache_data(ttl=300, show_spinner=False)
 def _leer_colaboradores_cached(_hoja_colaboradores):
     data = _hoja_colaboradores.get_all_records()
     df = pd.DataFrame(data)
@@ -114,6 +135,32 @@ def obtener_headers(hoja_colaboradores) -> list[str]:
     if not valores:
         return []
     return [str(h).strip().upper() for h in valores[0]]
+
+
+# =========================
+# LISTAS DESDE UBICACIONES
+# =========================
+def lista_limpia(df: pd.DataFrame, columna: str) -> list[str]:
+    if df.empty or columna not in df.columns:
+        return []
+    return sorted(
+        df[columna]
+        .astype(str)
+        .str.strip()
+        .replace("", pd.NA)
+        .dropna()
+        .unique()
+        .tolist()
+    )
+
+
+def buscar_dni_por_nombre(df: pd.DataFrame, columna_nombre: str, columna_dni: str, nombre: str) -> str:
+    if not nombre or df.empty or columna_nombre not in df.columns or columna_dni not in df.columns:
+        return ""
+    base = df[df[columna_nombre].astype(str).str.strip().eq(str(nombre).strip())]
+    if base.empty:
+        return ""
+    return limpiar_texto(base.iloc[0].get(columna_dni, "")).replace(".0", "")
 
 
 # =========================
@@ -149,8 +196,6 @@ def validar_dni_unico_historico(df_colab: pd.DataFrame, dni_limpio: str, fecha_a
             f"Registro activo: {razon} / {nombre}."
         )
 
-    # Si solo hay históricos inactivos, la nueva alta debe ser estrictamente mayor
-    # a la última fecha de cese/movimiento registrada.
     columnas_baja = [
         "FECHA DE CESE",
         "FECHA CESE",
@@ -200,11 +245,12 @@ def validar_formulario(campos: dict, df_colab: pd.DataFrame) -> list[str]:
 
     dni_original = limpiar_texto(campos.get("DNI", ""))
     dni_limpio = normalizar_dni(dni_original)
+    dni_sin_punto = dni_original.replace(".0", "")
     if not dni_original:
         errores.append("❌ El DNI es obligatorio.")
-    elif not dni_original.replace(".0", "").isdigit():
+    elif not dni_sin_punto.isdigit():
         errores.append("❌ El DNI solo debe contener números.")
-    elif len(dni_original.replace(".0", "")) > 8:
+    elif len(dni_sin_punto) > 8:
         errores.append("❌ El DNI no puede tener más de 8 dígitos.")
     elif len(dni_limpio) != 8:
         errores.append("❌ El DNI debe quedar con exactamente 8 dígitos.")
@@ -212,6 +258,10 @@ def validar_formulario(campos: dict, df_colab: pd.DataFrame) -> list[str]:
     correo = limpiar_texto(campos.get("CORREO", ""))
     if correo and not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", correo):
         errores.append("❌ El CORREO no tiene un formato válido.")
+
+    region = limpiar_texto(campos.get("REGION", "")).upper()
+    if region and region not in ("CENTRAL", "NORORIENTE", "SUR"):
+        errores.append("❌ REGIÓN inválida. Solo se permite CENTRAL, NORORIENTE o SUR.")
 
     contrato = limpiar_texto(campos.get("TIPO DE CONTRATO", "")).upper()
     if contrato and contrato not in ("PLANILLA", "MEDIA PLANILLA"):
@@ -222,7 +272,7 @@ def validar_formulario(campos: dict, df_colab: pd.DataFrame) -> list[str]:
         errores.append("❌ CONTRATO FIRMADO debe quedar en SI para registrar el alta.")
 
     fecha_alta = campos.get("FECHA DE CREACION USUARIO")
-    if fecha_alta:
+    if fecha_alta and dni_limpio:
         ok, msg = validar_dni_unico_historico(df_colab, dni_limpio, fecha_alta)
         if not ok:
             errores.append(msg)
@@ -234,7 +284,6 @@ def validar_formulario(campos: dict, df_colab: pd.DataFrame) -> list[str]:
 # APPEND POR NOMBRE DE COLUMNA
 # =========================
 def valor_por_columna(headers: list[str], campos: dict) -> list[str]:
-    # Compatibilidad con nombres reales/variaciones de la hoja.
     aliases = {
         "FECHA CREACIÓN": "FECHA DE CREACION USUARIO",
         "FECHA DE CREACIÓN USUARIO": "FECHA DE CREACION USUARIO",
@@ -271,7 +320,7 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
     rol = st.session_state.get("rol", "")
     razon_usuario = st.session_state.get("razon", "")
 
-    df_colab = leer_colaboradores(hoja_colaboradores)
+    # Solo ubicación se lee al cargar. Está cacheada 5 minutos para que el formulario no se frizee.
     df_ubi = leer_ubicaciones(hoja_ubicaciones)
 
     if df_ubi.empty:
@@ -287,17 +336,11 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
         "KONECTA SAC",
     ]
 
-    departamentos = []
-    if "DEPARTAMENTO" in df_ubi.columns:
-        departamentos = sorted(df_ubi["DEPARTAMENTO"].replace("", pd.NA).dropna().astype(str).unique())
+    departamentos = lista_limpia(df_ubi, "DEPARTAMENTO")
+    supervisores = lista_limpia(df_ubi, "SUPERVISOR A CARGO FINAL")
+    coordinadores = lista_limpia(df_ubi, "COORDINADOR FINAL")
 
-    # ==========================================================
-    # IMPORTANTE: estos campos quedan FUERA del st.form.
-    # En Streamlit, los widgets dentro de un form no recalculan dependientes
-    # hasta presionar submit. Por eso provincia/DNI supervisor/DNI coordinador
-    # se congelaban o quedaban en blanco.
-    # ==========================================================
-    st.caption("Primero completa datos del colaborador y dealer. La ubicación y jerarquía se actualiza en línea desde la hoja ubicaciones.")
+    st.caption("La provincia depende del departamento. Supervisor, coordinador y DNI se leen desde la misma hoja ubicaciones, sin cambiar la lógica original.")
 
     col_izq, col_der = st.columns(2)
 
@@ -321,7 +364,7 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
 
         canal = st.selectbox("CANAL", ["VENTAS INDIRECTAS"], key="alta_canal")
         subcanal = st.selectbox("SUB CANAL", ["VENTAS INDIRECTAS", "OUTBOUND"], key="alta_subcanal")
-        region = st.selectbox("REGIÓN", ["", "NORORIENTE", "SUR", "CENTRO", "CENTRAL"], key="alta_region")
+        region = st.selectbox("REGIÓN", ["", "CENTRAL", "NORORIENTE", "SUR"], key="alta_region")
         cargo = st.selectbox(
             "CARGO (ROL)",
             [
@@ -333,13 +376,9 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             ],
             key="alta_cargo",
         )
-        tipo_contrato = st.selectbox(
-            "TIPO DE CONTRATO",
-            ["", "PLANILLA", "MEDIA PLANILLA"],
-            key="alta_tipo_contrato",
-        )
+        tipo_contrato = st.selectbox("TIPO DE CONTRATO", ["PLANILLA", "MEDIA PLANILLA"], key="alta_tipo_contrato")
         fecha_creacion = st.date_input("FECHA CREACIÓN USUARIO", value=datetime.now(zona_peru).date(), key="alta_fecha_creacion")
-        contrato_firmado = st.selectbox("CONTRATO FIRMADO", ["SI", "NO"], index=0, key="alta_contrato_firmado")
+        contrato_firmado = st.selectbox("CONTRATO FIRMADO", ["SI"], index=0, key="alta_contrato_firmado")
 
     st.divider()
     st.markdown("**Ubicación y jerarquía**")
@@ -351,50 +390,17 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
         provincias = []
         if departamento and "DEPARTAMENTO" in df_ubi.columns and "PROVINCIA" in df_ubi.columns:
             df_dep = df_ubi[df_ubi["DEPARTAMENTO"].astype(str).str.strip().eq(str(departamento).strip())]
-            provincias = sorted(df_dep["PROVINCIA"].replace("", pd.NA).dropna().astype(str).unique())
+            provincias = lista_limpia(df_dep, "PROVINCIA")
 
         provincia = st.selectbox("PROVINCIA", [""] + provincias, key="alta_provincia")
 
-        # Coordinador filtrado por departamento/provincia cuando exista relación en la hoja.
-        df_jer = df_ubi.copy()
-        if departamento and "DEPARTAMENTO" in df_jer.columns:
-            df_jer = df_jer[df_jer["DEPARTAMENTO"].astype(str).str.strip().eq(str(departamento).strip())]
-        if provincia and "PROVINCIA" in df_jer.columns:
-            df_jer = df_jer[df_jer["PROVINCIA"].astype(str).str.strip().eq(str(provincia).strip())]
-
-        coordinadores = []
-        if "COORDINADOR FINAL" in df_jer.columns:
-            coordinadores = sorted(df_jer["COORDINADOR FINAL"].replace("", pd.NA).dropna().astype(str).unique())
-        elif "COORDINADOR FINAL" in df_ubi.columns:
-            coordinadores = sorted(df_ubi["COORDINADOR FINAL"].replace("", pd.NA).dropna().astype(str).unique())
-
         coordinador = st.selectbox("COORDINADOR", [""] + coordinadores, key="alta_coordinador")
-        dni_coordinador = ""
-        if coordinador and "COORDINADOR FINAL" in df_ubi.columns:
-            df_match = df_jer if not df_jer.empty else df_ubi
-            fila_coord = df_match[df_match["COORDINADOR FINAL"].astype(str).str.strip().eq(str(coordinador).strip())]
-            if fila_coord.empty:
-                fila_coord = df_ubi[df_ubi["COORDINADOR FINAL"].astype(str).str.strip().eq(str(coordinador).strip())]
-            if not fila_coord.empty and "DNI COORDINADOR" in fila_coord.columns:
-                dni_coordinador = limpiar_texto(fila_coord.iloc[0].get("DNI COORDINADOR", "")).replace(".0", "")
+        dni_coordinador = buscar_dni_por_nombre(df_ubi, "COORDINADOR FINAL", "DNI COORDINADOR", coordinador)
         st.text_input("DNI COORDINADOR", value=dni_coordinador, disabled=True, key="alta_dni_coordinador")
 
     with col_u2:
-        supervisores = []
-        if "SUPERVISOR A CARGO FINAL" in df_jer.columns:
-            supervisores = sorted(df_jer["SUPERVISOR A CARGO FINAL"].replace("", pd.NA).dropna().astype(str).unique())
-        elif "SUPERVISOR A CARGO FINAL" in df_ubi.columns:
-            supervisores = sorted(df_ubi["SUPERVISOR A CARGO FINAL"].replace("", pd.NA).dropna().astype(str).unique())
-
         supervisor = st.selectbox("SUPERVISOR A CARGO", [""] + supervisores, key="alta_supervisor")
-        dni_supervisor = ""
-        if supervisor and "SUPERVISOR A CARGO FINAL" in df_ubi.columns:
-            df_match = df_jer if not df_jer.empty else df_ubi
-            fila_supervisor = df_match[df_match["SUPERVISOR A CARGO FINAL"].astype(str).str.strip().eq(str(supervisor).strip())]
-            if fila_supervisor.empty:
-                fila_supervisor = df_ubi[df_ubi["SUPERVISOR A CARGO FINAL"].astype(str).str.strip().eq(str(supervisor).strip())]
-            if not fila_supervisor.empty and "DNI SUPERVISOR" in fila_supervisor.columns:
-                dni_supervisor = limpiar_texto(fila_supervisor.iloc[0].get("DNI SUPERVISOR", "")).replace(".0", "")
+        dni_supervisor = buscar_dni_por_nombre(df_ubi, "SUPERVISOR A CARGO FINAL", "DNI SUPERVISOR", supervisor)
         st.text_input("DNI SUPERVISOR", value=dni_supervisor, disabled=True, key="alta_dni_supervisor")
 
     st.markdown("")
@@ -407,7 +413,7 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
         marca_alta = ahora_peru_fecha_hora()
 
         campos = {
-            "FECHA MOV": str(fecha_creacion),  # movimiento del alta: solo fecha
+            "FECHA MOV": str(fecha_creacion),
             "RAZON SOCIAL": razon,
             "CANAL": canal,
             "SUB CANAL": subcanal,
@@ -425,6 +431,7 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             "CELULAR": celular_limpio,
             "TIPO DE DOC": tipo_doc,
             "DNI": dni_limpio,
+            "CORREO": correo_limpio,
             "CORREO (USUARIO SGC/PRONTO)": correo_limpio,
             "ESTADO": "ACTIVO",
             "TIPO DE CONTRATO": tipo_contrato,
@@ -432,7 +439,7 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             "FECHA DE CESE": "",
             "MOTIVO": "",
             "CONTRATO FIRMADO": contrato_firmado,
-            "FECHA_ALTA_REGISTRO": marca_alta,  # marcaje de registro: fecha y hora
+            "FECHA_ALTA_REGISTRO": marca_alta,
             "FECHA ALTA REGISTRO": marca_alta,
             "FECHA_BAJA_REGISTRO": "",
             "FECHA BAJA REGISTRO": "",
@@ -442,6 +449,9 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             "USUARIO BAJA": "",
         }
 
+        # Colaboradores se lee SOLO al guardar para validar histórico/duplicados.
+        # Así no se congela el formulario mientras llenas campos.
+        df_colab = leer_colaboradores(hoja_colaboradores, forzar=True)
         errores = validar_formulario(campos, df_colab)
         if errores:
             for err in errores:
@@ -458,7 +468,6 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             hoja_colaboradores.append_row(fila, value_input_option="USER_ENTERED")
             leer_colaboradores(hoja_colaboradores, forzar=True)
 
-            # Hace que el alta aparezca en Presencialidad Dealer sin esperar 5 minutos.
             if hoja_asistencia is not None:
                 try:
                     from asistencia import sincronizar_mes, cargar_cache_desde_drive

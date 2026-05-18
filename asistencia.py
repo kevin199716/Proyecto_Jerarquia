@@ -269,7 +269,9 @@ def obtener_promotores_vigentes_mes(df_colab: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame()
 
     df = df_colab.copy()
-    df = df[df.apply(es_promotor, axis=1)].copy()
+    # Se incluye todo colaborador vigente del mes.
+    # No se filtra solo PROMOTOR, porque el alta debe reflejarse en Presencialidad Dealer
+    # según el registro creado en colaboradores.
     df["DNI"] = df["DNI"].apply(normalizar_dni)
     df = df[df["DNI"].ne("")].copy()
 
