@@ -1,5 +1,5 @@
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pandas as pd
 import pytz
@@ -23,7 +23,7 @@ def ahora_peru_fecha_hora() -> str:
 # LIMPIAR FORM
 # =========================
 def limpiar_form():
-    conservar = {"autenticado", "rol", "razon", "usuario", "user", "pass"}
+    conservar = {"autenticado", "rol", "razon", "usuario", "user", "pass", "mensaje_ok", "mensaje_sync_warning"}
     for k in list(st.session_state.keys()):
         if k not in conservar:
             del st.session_state[k]
@@ -409,7 +409,15 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             key="alta_cargo",
         )
         tipo_contrato = st.selectbox("TIPO DE CONTRATO", ["PLANILLA", "MEDIA PLANILLA"], key="alta_tipo_contrato")
-        fecha_creacion = st.date_input("FECHA CREACIÓN USUARIO", value=datetime.now(zona_peru).date(), key="alta_fecha_creacion")
+        hoy_alta = datetime.now(zona_peru).date()
+        fecha_creacion = st.date_input(
+            "FECHA CREACIÓN USUARIO",
+            value=hoy_alta,
+            min_value=hoy_alta - timedelta(days=1),
+            max_value=hoy_alta + timedelta(days=1),
+            key="alta_fecha_creacion",
+            help="Solo permite ayer, hoy o mañana."
+        )
         contrato_firmado = st.selectbox("CONTRATO FIRMADO", ["SI"], index=0, key="alta_contrato_firmado")
 
     st.divider()

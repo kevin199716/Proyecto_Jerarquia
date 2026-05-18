@@ -7,7 +7,8 @@ Cambios aplicados:
   4. Sincroniza activos y también inactivos con cese dentro del mes para respetar historia.
   5. Solo permite editar el día actual. No permite modificar días anteriores ni futuros.
   6. Si un colaborador está inactivo, solo permite marcar hasta su fecha de cese.
-  7. Guardado optimizado con batch_update y caché en session_state.
+  7. Marcajes permitidos: A, F, DM y S.
+  8. Si la hoja tiene cabecera descuadrada, NO agrega columnas al final: obliga a recrear estructura para evitar mazamorra.
 """
 
 import calendar
@@ -79,7 +80,7 @@ def limpiar_texto(valor) -> str:
 
 def limpiar_marca(valor) -> str:
     v = limpiar_texto(valor).upper()
-    return v if v in ("A", "F") else ""
+    return v if v in ("A", "F", "DM", "S") else ""
 
 
 def normalizar_dni(valor) -> str:
@@ -184,17 +185,31 @@ def validar_o_crear_cabecera(hoja_asistencia) -> bool:
 
     if not valores:
         hoja_asistencia.append_row(COLUMNAS_ASISTENCIA, value_input_option="USER_ENTERED")
+        st.success("✅ Se creó la estructura correcta de la hoja Asistencia / Presencialidad.")
         return True
 
     headers = [limpiar_texto(x).upper() for x in valores[0]]
-    faltantes = [c for c in COLUMNAS_ASISTENCIA if c not in headers]
 
-    if faltantes:
-        # Agrega columnas faltantes al final sin borrar historia.
-        nueva_cabecera = headers + faltantes
-        fin = letra_columna(len(nueva_cabecera))
-        hoja_asistencia.update(f"A1:{fin}1", [nueva_cabecera], value_input_option="USER_ENTERED")
-        st.warning(f"⚠️ Se agregaron columnas faltantes en Asistencia: {', '.join(faltantes)}")
+    # Regla crítica: NO agregar columnas al final si ya existe una estructura antigua.
+    # Eso fue lo que descuadró la base (datos de DNI/nombre en columnas incorrectas).
+    if headers != COLUMNAS_ASISTENCIA:
+        st.error("❌ La hoja Asistencia tiene una estructura distinta a la esperada. Para evitar duplicados o datos cruzados, no se sincronizará hasta recrear la cabecera.")
+        st.warning("Si estás probando de cero, puedes borrar/recrear SOLO la pestaña Asistencia. No borres colaboradores ni ubicaciones.")
+        st.markdown("**Estructura correcta:**")
+        st.code(" | ".join(COLUMNAS_ASISTENCIA), language="text")
+
+        with st.expander("🧹 Recrear estructura de Asistencia desde la app"):
+            st.info("Esto borra únicamente la pestaña Asistencia y crea la cabecera correcta. Luego presiona Sincronizar mes para cargar colaboradores vigentes.")
+            confirmar = st.checkbox("Confirmo que deseo borrar SOLO la hoja Asistencia y recrear la cabecera", key="confirm_reset_asistencia")
+            if confirmar and st.button("🧹 Borrar Asistencia y crear cabecera", key="btn_reset_asistencia"):
+                hoja_asistencia.clear()
+                hoja_asistencia.append_row(COLUMNAS_ASISTENCIA, value_input_option="USER_ENTERED")
+                for k in [KEY_DF_TOTAL, KEY_DF_ORIGINAL, KEY_HEADERS, KEY_LOADED, KEY_LOAD_TS]:
+                    if k in st.session_state:
+                        del st.session_state[k]
+                st.success("✅ Hoja Asistencia recreada. Ahora presiona Sincronizar mes.")
+                st.rerun()
+        return False
 
     return True
 
@@ -435,6 +450,10 @@ def estilo_asistencia(valor: str) -> str:
         return "background-color:#D4EDDA;color:#155724;font-weight:bold;text-align:center;"
     if v == "F":
         return "background-color:#F8D7DA;color:#721C24;font-weight:bold;text-align:center;"
+    if v == "DM":
+        return "background-color:#FFF3CD;color:#7A5A00;font-weight:bold;text-align:center;"
+    if v == "S":
+        return "background-color:#E8D8FF;color:#4B0067;font-weight:bold;text-align:center;"
     return "text-align:center;"
 
 
@@ -643,7 +662,7 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
             st.caption(f"Mostrando filas {inicio + 1}–{min(inicio + MAX_FILAS_EDITOR, total_filtrado)} de {total_filtrado}")
 
         st.markdown("<span class='wow-section-title'>✏️ Registrar presencialidad de hoy</span>", unsafe_allow_html=True)
-        st.caption(f"Solo está habilitada la columna **{col_hoy}**. Registra **A** = Asistió · **F** = Faltó.")
+        st.caption(f"Solo está habilitada la columna **{col_hoy}**. Registra **A** = Asistió · **F** = Faltó · **DM** = Descanso médico · **S** = Seguimiento/Suspensión.")
 
         columnas_editor = COLUMNAS_FIJAS_EDITOR + [col_hoy, "ROW_SHEET"]
         for col in columnas_editor:
@@ -656,7 +675,7 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
         disabled_cols = [col for col in df_editor.columns if col != col_hoy]
         column_config = {
             "ROW_SHEET": None,
-            col_hoy: st.column_config.SelectboxColumn(col_hoy, options=["", "A", "F"], width="small"),
+            col_hoy: st.column_config.SelectboxColumn(col_hoy, options=["", "A", "F", "DM", "S"], width="small"),
         }
 
         editado = st.data_editor(

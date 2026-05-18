@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pandas as pd
 import pytz
@@ -165,8 +165,10 @@ def dar_de_baja(df, hoja, razon_usuario=None):
     fecha = st.date_input(
         "Fecha de cese",
         value=hoy,
+        min_value=hoy - timedelta(days=2),
         max_value=hoy,
         key="fecha_cese_baja",
+        help="Solo permite antier, ayer u hoy."
     )
 
     motivo = st.selectbox("Motivo de baja", MOTIVOS, key="motivo_baja")
