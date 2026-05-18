@@ -23,9 +23,15 @@ def ahora_peru_fecha_hora() -> str:
 # LIMPIAR FORM
 # =========================
 def limpiar_form():
-    conservar = {"autenticado", "rol", "razon", "usuario", "user", "pass", "mensaje_ok", "mensaje_sync_warning", "alta_form_version"}
+    conservar = {
+        "autenticado", "rol", "razon", "usuario", "user", "pass",
+        "mensaje_ok", "mensaje_sync_warning", "alta_form_version",
+    }
     for k in list(st.session_state.keys()):
-        if k not in conservar:
+        # Conserva navegación/sidebar y mensajes globales; limpia solo campos del alta.
+        if k in conservar or str(k).startswith("nav_"):
+            continue
+        if str(k).startswith("alta_v"):
             del st.session_state[k]
 
 
@@ -349,14 +355,14 @@ def valor_por_columna(headers: list[str], campos: dict) -> list[str]:
 def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=None):
     st.markdown("<span class='wow-section-title'>📋 Alta de Vendedores</span>", unsafe_allow_html=True)
 
-    if st.session_state.get("mensaje_ok"):
-        msg_ok = st.session_state.get("mensaje_ok")
-        st.success(msg_ok if isinstance(msg_ok, str) else "✅ Registrado correctamente")
-        del st.session_state["mensaje_ok"]
+    msg_ok_pendiente = st.session_state.get("mensaje_ok")
+    msg_warning_pendiente = st.session_state.get("mensaje_sync_warning")
 
-    if st.session_state.get("mensaje_sync_warning"):
-        st.warning(st.session_state.get("mensaje_sync_warning"))
-        del st.session_state["mensaje_sync_warning"]
+    if msg_ok_pendiente:
+        st.success(msg_ok_pendiente if isinstance(msg_ok_pendiente, str) else "✅ Alta registrada correctamente")
+
+    if msg_warning_pendiente:
+        st.warning(msg_warning_pendiente)
 
     usuario_actual = st.session_state.get("usuario", "")
     rol = st.session_state.get("rol", "")
@@ -461,6 +467,14 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
     st.markdown("")
     submit = st.button("Guardar Alta", key=k("btn_guardar_alta"))
 
+    # Mensaje también cerca del botón porque el navegador suele quedarse abajo luego del guardado.
+    if msg_ok_pendiente:
+        st.success(msg_ok_pendiente if isinstance(msg_ok_pendiente, str) else "✅ Alta registrada correctamente")
+        st.session_state.pop("mensaje_ok", None)
+    if msg_warning_pendiente:
+        st.warning(msg_warning_pendiente)
+        st.session_state.pop("mensaje_sync_warning", None)
+
     if submit:
         dni_limpio = normalizar_dni(dni)
         celular_limpio = limpiar_celular(celular)
@@ -530,9 +544,8 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
                     # No se ejecuta Sincronizar mes completo aquí porque eso lee toda la base
                     # y hacía lento el alta. Solo se intenta agregar este DNI al periodo actual
                     # de Presencialidad, sin tocar marcajes existentes.
-                    from asistencia import registrar_alta_en_asistencia, cargar_cache_desde_drive
+                    from asistencia import registrar_alta_en_asistencia
                     estado_pres = registrar_alta_en_asistencia(hoja_asistencia, campos)
-                    cargar_cache_desde_drive(hoja_asistencia, forzar=True)
                     st.session_state["mensaje_ok"] = f"✅ Alta registrada correctamente. {estado_pres}"
                 except Exception as e_sync:
                     st.session_state["mensaje_ok"] = "✅ Alta registrada correctamente. Para verlo en Presencialidad Dealer, presiona Sincronizar mes."

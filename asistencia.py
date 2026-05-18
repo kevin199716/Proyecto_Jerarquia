@@ -60,8 +60,8 @@ KEY_LOADED = "asis_loaded"
 KEY_LOAD_TS = "asis_load_timestamp"
 
 CACHE_TTL = 600
-# Menos filas visibles para que cada cambio de filtro no congele Render/Chrome.
-MAX_FILAS_EDITOR = 60
+# Mantener la vista amplia original. Solo pagina si realmente supera este límite.
+MAX_FILAS_EDITOR = 200
 
 # =====================================================
 # UTILIDADES
@@ -481,8 +481,16 @@ def cargar_cache_desde_drive(hoja_asistencia, forzar: bool = False) -> None:
 def lista_opciones(df: pd.DataFrame, columna: str) -> list[str]:
     if df.empty or columna not in df.columns:
         return ["TODOS"]
-    valores = df[columna].astype(str).str.strip().replace("", pd.NA).dropna().unique().tolist()
-    return ["TODOS"] + sorted(valores)
+    valores = (
+        df[columna]
+        .astype(str)
+        .str.strip()
+        .replace(["", "None", "NONE", "nan", "NaN", "NULL", "null"], pd.NA)
+        .dropna()
+        .unique()
+        .tolist()
+    )
+    return ["TODOS"] + sorted([v for v in valores if str(v).strip()])
 
 
 def aplicar_filtro(df: pd.DataFrame, columna: str, valor: str) -> pd.DataFrame:
@@ -670,76 +678,47 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
         return
 
     # =====================================================
-    # FILTROS SIN REFRESCO POR CADA SELECCIÓN
+    # FILTROS EFICIENTES EN MEMORIA
     # =====================================================
-    # Los selectores están dentro de un formulario. Así no se recalcula ni se vuelve
-    # a pintar el editor con cada clic; recién aplica cuando presionas "Aplicar filtros".
-    if "asis_filtros_aplicados" not in st.session_state:
-        st.session_state["asis_filtros_aplicados"] = {
-            "razon": "TODOS",
-            "supervisor": "TODOS",
-            "coordinador": "TODOS",
-            "departamento": "TODOS",
-            "provincia": "TODOS",
-        }
+    # Los filtros trabajan contra el caché local. Además están dentro de un form
+    # para que cambiar un desplegable NO recargue toda la vista hasta presionar Aplicar filtros.
+    op_razon = lista_opciones(df_mes, "RAZON SOCIAL")
+    op_supervisor = lista_opciones(df_mes, "SUPERVISOR")
+    op_coordinador = lista_opciones(df_mes, "COORDINADOR")
+    op_departamento = lista_opciones(df_mes, "DEPARTAMENTO")
+    op_provincia = lista_opciones(df_mes, "PROVINCIA")
 
-    filtros_prev = st.session_state["asis_filtros_aplicados"]
+    def _valor_guardado(clave, opciones):
+        valor = st.session_state.get(clave, "TODOS")
+        return valor if valor in opciones else "TODOS"
 
     with st.form("form_filtros_presencialidad"):
         f1, f2, f3, f4, f5 = st.columns(5)
         with f1:
-            filtro_razon_tmp = st.selectbox(
-                "Razón Social",
-                lista_opciones(df_mes, "RAZON SOCIAL"),
-                index=lista_opciones(df_mes, "RAZON SOCIAL").index(filtros_prev.get("razon", "TODOS")) if filtros_prev.get("razon", "TODOS") in lista_opciones(df_mes, "RAZON SOCIAL") else 0,
-                key="asis_razon_tmp",
-            )
+            tmp_razon = st.selectbox("Razón Social", op_razon, index=op_razon.index(_valor_guardado("asis_filtro_razon", op_razon)), key="asis_tmp_razon")
         with f2:
-            filtro_supervisor_tmp = st.selectbox(
-                "Supervisor",
-                lista_opciones(df_mes, "SUPERVISOR"),
-                index=lista_opciones(df_mes, "SUPERVISOR").index(filtros_prev.get("supervisor", "TODOS")) if filtros_prev.get("supervisor", "TODOS") in lista_opciones(df_mes, "SUPERVISOR") else 0,
-                key="asis_supervisor_tmp",
-            )
+            tmp_supervisor = st.selectbox("Supervisor", op_supervisor, index=op_supervisor.index(_valor_guardado("asis_filtro_supervisor", op_supervisor)), key="asis_tmp_supervisor")
         with f3:
-            filtro_coord_tmp = st.selectbox(
-                "Coordinador",
-                lista_opciones(df_mes, "COORDINADOR"),
-                index=lista_opciones(df_mes, "COORDINADOR").index(filtros_prev.get("coordinador", "TODOS")) if filtros_prev.get("coordinador", "TODOS") in lista_opciones(df_mes, "COORDINADOR") else 0,
-                key="asis_coordinador_tmp",
-            )
+            tmp_coord = st.selectbox("Coordinador", op_coordinador, index=op_coordinador.index(_valor_guardado("asis_filtro_coord", op_coordinador)), key="asis_tmp_coord")
         with f4:
-            filtro_dep_tmp = st.selectbox(
-                "Departamento",
-                lista_opciones(df_mes, "DEPARTAMENTO"),
-                index=lista_opciones(df_mes, "DEPARTAMENTO").index(filtros_prev.get("departamento", "TODOS")) if filtros_prev.get("departamento", "TODOS") in lista_opciones(df_mes, "DEPARTAMENTO") else 0,
-                key="asis_departamento_tmp",
-            )
+            tmp_dep = st.selectbox("Departamento", op_departamento, index=op_departamento.index(_valor_guardado("asis_filtro_dep", op_departamento)), key="asis_tmp_dep")
         with f5:
-            filtro_prov_tmp = st.selectbox(
-                "Provincia",
-                lista_opciones(df_mes, "PROVINCIA"),
-                index=lista_opciones(df_mes, "PROVINCIA").index(filtros_prev.get("provincia", "TODOS")) if filtros_prev.get("provincia", "TODOS") in lista_opciones(df_mes, "PROVINCIA") else 0,
-                key="asis_provincia_tmp",
-            )
+            tmp_prov = st.selectbox("Provincia", op_provincia, index=op_provincia.index(_valor_guardado("asis_filtro_prov", op_provincia)), key="asis_tmp_prov")
 
-        aplicar = st.form_submit_button("🔎 Aplicar filtros", use_container_width=True)
+        aplicar_filtros = st.form_submit_button("🔎 Aplicar filtros", use_container_width=True)
 
-    if aplicar:
-        st.session_state["asis_filtros_aplicados"] = {
-            "razon": filtro_razon_tmp,
-            "supervisor": filtro_supervisor_tmp,
-            "coordinador": filtro_coord_tmp,
-            "departamento": filtro_dep_tmp,
-            "provincia": filtro_prov_tmp,
-        }
+    if aplicar_filtros:
+        st.session_state["asis_filtro_razon"] = tmp_razon
+        st.session_state["asis_filtro_supervisor"] = tmp_supervisor
+        st.session_state["asis_filtro_coord"] = tmp_coord
+        st.session_state["asis_filtro_dep"] = tmp_dep
+        st.session_state["asis_filtro_prov"] = tmp_prov
 
-    filtros = st.session_state["asis_filtros_aplicados"]
-    filtro_razon = filtros.get("razon", "TODOS")
-    filtro_supervisor = filtros.get("supervisor", "TODOS")
-    filtro_coord = filtros.get("coordinador", "TODOS")
-    filtro_dep = filtros.get("departamento", "TODOS")
-    filtro_prov = filtros.get("provincia", "TODOS")
+    filtro_razon = _valor_guardado("asis_filtro_razon", op_razon)
+    filtro_supervisor = _valor_guardado("asis_filtro_supervisor", op_supervisor)
+    filtro_coord = _valor_guardado("asis_filtro_coord", op_coordinador)
+    filtro_dep = _valor_guardado("asis_filtro_dep", op_departamento)
+    filtro_prov = _valor_guardado("asis_filtro_prov", op_provincia)
 
     df_filtrado = filtrar_df(df_mes, filtro_razon, filtro_supervisor, filtro_coord, filtro_dep, filtro_prov)
 
@@ -758,8 +737,8 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
     else:
         if total_filtrado > MAX_FILAS_EDITOR:
             st.warning(
-                f"⚠️ Hay {total_filtrado} registros editables hoy. El editor muestra máximo {MAX_FILAS_EDITOR} "
-                "para no congelar la página. Esto NO borra registros; solo pagina la vista. Usa filtros o cambia de página."
+                f"⚠️ Hay {total_filtrado} registros editables hoy. Se mantiene el límite de {MAX_FILAS_EDITOR} por vista "
+                "para proteger el navegador. Esto NO borra registros; solo pagina la vista cuando supera el límite."
             )
             total_paginas = max(1, -(-total_filtrado // MAX_FILAS_EDITOR))
             pagina = st.selectbox(
@@ -784,26 +763,25 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
         df_editor[col_hoy] = df_editor[col_hoy].apply(limpiar_marca)
 
         disabled_cols = [col for col in df_editor.columns if col != col_hoy]
+        # Mantengo ROW_SHEET visible como FILA técnica para evitar el error React #185
+        # que aparece a veces cuando se oculta una columna usada para guardar.
         column_config = {
-            "ROW_SHEET": None,
+            "ROW_SHEET": st.column_config.NumberColumn("FILA", width="small", disabled=True),
             col_hoy: st.column_config.SelectboxColumn(col_hoy, options=["", "A", "F", "DM", "S"], width="small"),
         }
 
-        # El editor también queda dentro de un formulario para que seleccionar A/F/DM/S
-        # no refresque toda la página. Recién guarda y recalcula al presionar el botón.
-        with st.form("form_guardar_presencialidad"):
-            editado = st.data_editor(
-                df_editor,
-                use_container_width=True,
-                height=min(520, 50 + len(df_editor) * 32),
-                hide_index=True,
-                disabled=disabled_cols,
-                column_config=column_config,
-                num_rows="fixed",
-                key="editor_presencialidad_dia_actual",
-            )
+        editado = st.data_editor(
+            df_editor,
+            use_container_width=True,
+            height=min(460, 50 + len(df_editor) * 32),
+            hide_index=True,
+            disabled=disabled_cols,
+            column_config=column_config,
+            num_rows="fixed",
+            key="editor_presencialidad_dia_actual",
+        )
 
-            guardar_pres = st.form_submit_button("💾 Guardar Presencialidad", use_container_width=False)
+        guardar_pres = st.button("💾 Guardar Presencialidad", key="btn_guardar_presencialidad")
 
         if guardar_pres:
             with st.spinner("Guardando en Google Drive…"):
