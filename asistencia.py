@@ -580,6 +580,12 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
 
     df_mes = df_total[df_total["PERIODO"].astype(str).eq(periodo)].copy()
 
+    # Restricción por usuario: si el usuario tiene una razón social específica,
+    # solo verá esa razón. Si razon = ALL, ve todo.
+    razon_usuario = limpiar_texto(razon if razon is not None else st.session_state.get("razon", ""))
+    if razon_usuario and razon_usuario.upper() != "ALL" and "RAZON SOCIAL" in df_mes.columns:
+        df_mes = df_mes[df_mes["RAZON SOCIAL"].astype(str).str.strip().str.upper().eq(razon_usuario.upper())].copy()
+
     if df_mes.empty:
         st.warning("⚠️ No hay registros del periodo actual. Presiona **Sincronizar mes**.")
         return

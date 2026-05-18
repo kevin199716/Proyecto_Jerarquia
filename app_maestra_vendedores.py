@@ -85,6 +85,9 @@ if rol in ("backoffice", "dealer"):
     opciones_menu = ["Alta", "Bajas", "Presencialidad Dealer"]
 elif rol == "editor":
     opciones_menu = ["Edición", "Presencialidad Dealer"]
+elif rol in ("presencialidad", "presencialidad_dealer", "asistencia"):
+    # Usuarios operativos: solo pueden ingresar al módulo Presencialidad Dealer.
+    opciones_menu = ["Presencialidad Dealer"]
 else:
     opciones_menu = []
 
@@ -145,7 +148,7 @@ if rol == "backoffice":
             registro.dar_de_baja(df, hoja_colaboradores, razon)
 
     elif pagina == "Presencialidad Dealer":
-        mostrar_asistencia(hoja_asistencia, hoja_colaboradores)
+        mostrar_asistencia(hoja_asistencia, hoja_colaboradores, razon=razon)
         # No cargar la matriz automáticamente: Presencialidad ya usa su propio caché.
         if st.button("📋 Ver matriz de jerarquía", key="btn_ver_matriz_pres_backoffice"):
             mostrar_matriz_jerarquia()
@@ -170,7 +173,7 @@ elif rol == "dealer":
             registro.dar_de_baja(df, hoja_colaboradores, razon)
 
     elif pagina == "Presencialidad Dealer":
-        mostrar_asistencia(hoja_asistencia, hoja_colaboradores)
+        mostrar_asistencia(hoja_asistencia, hoja_colaboradores, razon=razon)
         if st.button("📋 Ver matriz de jerarquía", key="btn_ver_matriz_pres_dealer"):
             mostrar_matriz_jerarquia()
 
@@ -187,9 +190,16 @@ elif rol == "editor":
             registro.editar_registro(df, hoja_colaboradores, hoja_ubicaciones)
 
     elif pagina == "Presencialidad Dealer":
-        mostrar_asistencia(hoja_asistencia, hoja_colaboradores)
+        mostrar_asistencia(hoja_asistencia, hoja_colaboradores, razon=razon)
         if st.button("📋 Ver matriz de jerarquía", key="btn_ver_matriz_pres_editor"):
             mostrar_matriz_jerarquia()
+
+# =====================================================
+# USUARIO SOLO PRESENCIALIDAD
+# =====================================================
+elif rol in ("presencialidad", "presencialidad_dealer", "asistencia"):
+    if pagina == "Presencialidad Dealer":
+        mostrar_asistencia(hoja_asistencia, hoja_colaboradores, razon=razon)
 
 # =====================================================
 # SIN PERMISOS

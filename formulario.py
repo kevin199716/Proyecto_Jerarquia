@@ -45,6 +45,35 @@ def normalizar_columnas(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def hacer_columnas_unicas(columnas: list[str]) -> list[str]:
+    """
+    Evita el error: AttributeError: DataFrame object has no attribute str.
+    Ese error aparece cuando una cabecera está duplicada y df[col] devuelve otro DataFrame.
+    En la hoja ubicaciones hay columnas repetidas / bloques separados.
+    """
+    salida = []
+    vistos = {}
+    for i, col in enumerate(columnas, start=1):
+        base = str(col).strip().upper() or f"COLUMNA_{i}"
+        if base not in vistos:
+            vistos[base] = 1
+            salida.append(base)
+        else:
+            vistos[base] += 1
+            salida.append(f"{base}_{vistos[base]}")
+    return salida
+
+
+def serie_columna(df: pd.DataFrame, columna: str) -> pd.Series:
+    """Devuelve siempre una Serie aunque la columna exista duplicada."""
+    if df.empty or columna not in df.columns:
+        return pd.Series([], dtype=str)
+    obj = df[columna]
+    if isinstance(obj, pd.DataFrame):
+        obj = obj.iloc[:, 0]
+    return obj.astype(str).str.strip()
+
+
 def normalizar_dni(valor) -> str:
     dni = limpiar_texto(valor).replace(".0", "")
     dni = re.sub(r"\D", "", dni)
@@ -102,10 +131,12 @@ def _leer_ubicaciones_cached(_hoja_ubicaciones):
         else:
             nuevas_columnas.append(col_up)
 
-    df.columns = nuevas_columnas
+    df.columns = hacer_columnas_unicas(nuevas_columnas)
     df = normalizar_columnas(df).fillna("")
-    for c in df.columns:
-        df[c] = df[c].astype(str).str.strip()
+
+    # Limpieza segura: no usar df[c].str directo porque si una cabecera queda duplicada
+    # pandas devuelve DataFrame y rompe Render.
+    df = df.astype(str).apply(lambda col: col.str.strip())
     return df
 
 
@@ -143,10 +174,9 @@ def obtener_headers(hoja_colaboradores) -> list[str]:
 def lista_limpia(df: pd.DataFrame, columna: str) -> list[str]:
     if df.empty or columna not in df.columns:
         return []
+    serie = serie_columna(df, columna)
     return sorted(
-        df[columna]
-        .astype(str)
-        .str.strip()
+        serie
         .replace("", pd.NA)
         .dropna()
         .unique()
@@ -157,10 +187,12 @@ def lista_limpia(df: pd.DataFrame, columna: str) -> list[str]:
 def buscar_dni_por_nombre(df: pd.DataFrame, columna_nombre: str, columna_dni: str, nombre: str) -> str:
     if not nombre or df.empty or columna_nombre not in df.columns or columna_dni not in df.columns:
         return ""
-    base = df[df[columna_nombre].astype(str).str.strip().eq(str(nombre).strip())]
+    serie_nombre = serie_columna(df, columna_nombre)
+    base = df[serie_nombre.eq(str(nombre).strip())]
     if base.empty:
         return ""
-    return limpiar_texto(base.iloc[0].get(columna_dni, "")).replace(".0", "")
+    valor = base.iloc[0].get(columna_dni, "")
+    return limpiar_texto(valor).replace(".0", "")
 
 
 # =========================
@@ -389,7 +421,7 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
 
         provincias = []
         if departamento and "DEPARTAMENTO" in df_ubi.columns and "PROVINCIA" in df_ubi.columns:
-            df_dep = df_ubi[df_ubi["DEPARTAMENTO"].astype(str).str.strip().eq(str(departamento).strip())]
+            df_dep = df_ubi[serie_columna(df_ubi, "DEPARTAMENTO").eq(str(departamento).strip())]
             provincias = lista_limpia(df_dep, "PROVINCIA")
 
         provincia = st.selectbox("PROVINCIA", [""] + provincias, key="alta_provincia")
