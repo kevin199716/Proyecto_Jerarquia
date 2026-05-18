@@ -91,6 +91,21 @@ def normalizar_dni(valor) -> str:
     return dni
 
 
+def fecha_key(valor) -> str:
+    """Devuelve fecha normalizada YYYY-MM-DD para usarla como parte de la llave."""
+    f = parse_fecha(valor)
+    return str(f) if f else ""
+
+
+def clave_asistencia(dni, fecha_alta) -> str:
+    """Llave real de asistencia: DNI + FECHA_ALTA.
+
+    Esto permite que un DNI dado de baja y reingresado en el mismo mes tenga
+    su nueva fila sin chocar con el registro histórico anterior.
+    """
+    return f"{normalizar_dni(dni)}|{fecha_key(fecha_alta)}"
+
+
 def parse_fecha(valor):
     if valor in (None, ""):
         return None
@@ -319,6 +334,11 @@ def obtener_promotores_vigentes_mes(df_colab: pd.DataFrame) -> pd.DataFrame:
 
 
 def construir_payload_base(row: pd.Series) -> dict:
+    estado = limpiar_texto(row.get("ESTADO", "")).upper()
+    fecha_alta = str(parse_fecha(row.get("FECHA DE CREACION USUARIO", row.get("FECHA_CREACION_USUARIO", ""))) or "")
+    # Si vuelve a ACTIVO, no se debe seguir arrastrando una fecha de cese antigua
+    # porque bloquearía la marcación de presencialidad.
+    fecha_cese = "" if estado == "ACTIVO" else str(parse_fecha(row.get("FECHA DE CESE", row.get("FECHA CESE", ""))) or "")
     return {
         "RAZON SOCIAL": limpiar_texto(row.get("RAZON SOCIAL", "")),
         "SUPERVISOR": limpiar_texto(row.get("SUPERVISOR A CARGO", row.get("SUPERVISOR", ""))),
@@ -327,9 +347,9 @@ def construir_payload_base(row: pd.Series) -> dict:
         "PROVINCIA": limpiar_texto(row.get("PROVINCIA", "")),
         "DNI": normalizar_dni(row.get("DNI", "")),
         "NOMBRE": nombre_completo(row),
-        "ESTADO": limpiar_texto(row.get("ESTADO", "")).upper(),
-        "FECHA_ALTA": str(parse_fecha(row.get("FECHA DE CREACION USUARIO", row.get("FECHA_CREACION_USUARIO", ""))) or ""),
-        "FECHA_CESE": str(parse_fecha(row.get("FECHA DE CESE", row.get("FECHA CESE", ""))) or ""),
+        "ESTADO": estado,
+        "FECHA_ALTA": fecha_alta,
+        "FECHA_CESE": fecha_cese,
         "MES": mes_actual(),
         "PERIODO": periodo_actual(),
     }
@@ -353,7 +373,9 @@ def sincronizar_mes(hoja_asistencia, hoja_colaboradores) -> tuple[int, int]:
     if not df_asistencia.empty:
         df_mes = df_asistencia[df_asistencia["PERIODO"].astype(str).eq(periodo)].copy()
         for _, r in df_mes.iterrows():
-            existentes[normalizar_dni(r.get("DNI", ""))] = int(r.get("ROW_SHEET"))
+            key_reg = clave_asistencia(r.get("DNI", ""), r.get("FECHA_ALTA", ""))
+            if key_reg.strip("|"):
+                existentes[key_reg] = int(r.get("ROW_SHEET"))
 
     nuevas = []
     updates = []
@@ -364,16 +386,16 @@ def sincronizar_mes(hoja_asistencia, hoja_colaboradores) -> tuple[int, int]:
         if not dni:
             continue
 
-        if dni not in existentes:
+        key_reg = clave_asistencia(dni, payload.get("FECHA_ALTA", ""))
+
+        if key_reg not in existentes:
             fila = {col: "" for col in COLUMNAS_ASISTENCIA}
             fila.update(payload)
             # La fila nueva se arma según el orden REAL de cabeceras de la hoja.
-            # Esto evita descuadres si la hoja Asistencia ya existía y se agregaron
-            # RAZON SOCIAL / FECHA_ALTA / FECHA_CESE al final.
             headers_orden = [limpiar_texto(h).upper() for h in headers]
             nuevas.append([fila.get(col, "") for col in headers_orden])
         else:
-            row_sheet = existentes[dni]
+            row_sheet = existentes[key_reg]
             # Actualiza datos base del mes sin tocar días ya marcados.
             for col, valor in payload.items():
                 if col in mapa_col:
@@ -398,9 +420,11 @@ def sincronizar_mes(hoja_asistencia, hoja_colaboradores) -> tuple[int, int]:
 
 def registrar_alta_en_asistencia(hoja_asistencia, campos: dict) -> str:
     """
-    Agrega SOLO el alta recién registrada al periodo actual de Presencialidad.
-    Evita ejecutar Sincronizar mes completo desde el formulario de Alta, porque
-    eso lee toda la base y hacía que el formulario se frizara.
+    Agrega o actualiza SOLO el alta recién registrada al periodo actual de Presencialidad.
+
+    Llave usada: DNI + FECHA_ALTA. Esto evita el problema de reingresos:
+    si el mismo DNI tuvo una baja y vuelve a ingresar en el mismo mes, se crea
+    una nueva fila para la nueva alta en lugar de bloquearse por DNI repetido.
     """
     if not validar_o_crear_cabecera(hoja_asistencia):
         return "Presencialidad pendiente: recrea la cabecera o presiona Sincronizar mes."
@@ -413,20 +437,11 @@ def registrar_alta_en_asistencia(hoja_asistencia, campos: dict) -> str:
     headers = [limpiar_texto(x).upper() for x in valores[0]]
     periodo = periodo_actual()
     dni = normalizar_dni(campos.get("DNI", ""))
+    fecha_alta = str(parse_fecha(campos.get("FECHA DE CREACION USUARIO", "")) or "")
+    key_nueva = clave_asistencia(dni, fecha_alta)
+
     if not dni:
         return "Presencialidad pendiente: DNI vacío."
-
-    # Revisión rápida contra el periodo actual para no duplicar DNI.
-    try:
-        idx_dni = headers.index("DNI")
-        idx_periodo = headers.index("PERIODO")
-        for fila in valores[1:]:
-            dni_existente = normalizar_dni(fila[idx_dni] if len(fila) > idx_dni else "")
-            periodo_existente = limpiar_texto(fila[idx_periodo] if len(fila) > idx_periodo else "")
-            if dni_existente == dni and periodo_existente == periodo:
-                return "Presencialidad ya tenía este DNI en el periodo actual; no se duplicó."
-    except Exception:
-        pass
 
     fila_base = {col: "" for col in COLUMNAS_ASISTENCIA}
     fila_base.update({
@@ -442,12 +457,39 @@ def registrar_alta_en_asistencia(hoja_asistencia, campos: dict) -> str:
             limpiar_texto(campos.get("APELLIDO MATERNO", "")),
         ]).strip(),
         "ESTADO": "ACTIVO",
-        "FECHA_ALTA": str(parse_fecha(campos.get("FECHA DE CREACION USUARIO", "")) or ""),
+        "FECHA_ALTA": fecha_alta,
         "FECHA_CESE": "",
         "MES": mes_actual(),
         "PERIODO": periodo,
     })
+
+    mapa_col = {limpiar_texto(col).upper(): idx + 1 for idx, col in enumerate(headers)}
+
+    # Si ya existe la misma alta exacta, se actualizan datos base y no se duplica.
+    try:
+        idx_dni = headers.index("DNI")
+        idx_periodo = headers.index("PERIODO")
+        idx_alta = headers.index("FECHA_ALTA")
+        for pos, fila in enumerate(valores[1:], start=2):
+            dni_existente = normalizar_dni(fila[idx_dni] if len(fila) > idx_dni else "")
+            periodo_existente = limpiar_texto(fila[idx_periodo] if len(fila) > idx_periodo else "")
+            alta_existente = fila[idx_alta] if len(fila) > idx_alta else ""
+            if periodo_existente == periodo and clave_asistencia(dni_existente, alta_existente) == key_nueva:
+                updates = []
+                for col, valor in fila_base.items():
+                    if col in mapa_col:
+                        updates.append({"range": f"{letra_columna(mapa_col[col])}{pos}", "values": [[valor]]})
+                if updates:
+                    hoja_asistencia.batch_update(updates, value_input_option="USER_ENTERED")
+                for k in [KEY_DF_TOTAL, KEY_DF_ORIGINAL, KEY_HEADERS, KEY_LOADED, KEY_LOAD_TS]:
+                    if k in st.session_state:
+                        del st.session_state[k]
+                return "Presencialidad actualizada; el DNI ya existía con la misma fecha de alta y no se duplicó."
+    except Exception:
+        pass
+
     hoja_asistencia.append_row([fila_base.get(h, "") for h in headers], value_input_option="USER_ENTERED")
+
     # Limpia cache local para que al entrar/cambiar a Presencialidad se vea actualizado.
     for k in [KEY_DF_TOTAL, KEY_DF_ORIGINAL, KEY_HEADERS, KEY_LOADED, KEY_LOAD_TS]:
         if k in st.session_state:
