@@ -80,6 +80,23 @@ MOTIVOS = [
 # =========================
 # TABLA
 # =========================
+def _opciones_filtro(df: pd.DataFrame, columna: str) -> list[str]:
+    if df.empty or columna not in df.columns:
+        return ["TODOS"]
+    valores = (
+        df[columna].astype(str).str.strip()
+        .replace(["", "None", "NONE", "nan", "NaN", "NULL", "null"], pd.NA)
+        .dropna().unique().tolist()
+    )
+    return ["TODOS"] + sorted([v for v in valores if str(v).strip()])
+
+
+def _aplicar_select(df: pd.DataFrame, columna: str, valor: str) -> pd.DataFrame:
+    if valor == "TODOS" or columna not in df.columns:
+        return df
+    return df[df[columna].astype(str).str.strip().eq(valor)].copy()
+
+
 def mostrar_tabla(hoja, razon_usuario=None):
     data = hoja.get_all_records()
     if not data:
@@ -92,7 +109,47 @@ def mostrar_tabla(hoja, razon_usuario=None):
     if rol != "backoffice" and razon_usuario and "RAZON SOCIAL" in df.columns:
         df = df[df["RAZON SOCIAL"].astype(str).str.strip().eq(razon_usuario)]
 
-    st.dataframe(df, use_container_width=True)
+    st.caption("Filtros rápidos sobre la matriz cargada. No vuelve a leer Drive mientras filtras dentro de esta vista.")
+    f1, f2, f3, f4 = st.columns([1.3, 1, 1, 1])
+    with f1:
+        buscar = st.text_input("Buscar DNI / nombre / apellido", key="matriz_buscar_texto").strip()
+    with f2:
+        filtro_estado = st.selectbox("Estado", _opciones_filtro(df, "ESTADO"), key="matriz_filtro_estado")
+    with f3:
+        filtro_razon = st.selectbox("Razón social", _opciones_filtro(df, "RAZON SOCIAL"), key="matriz_filtro_razon")
+    with f4:
+        filtro_canal = st.selectbox("Canal", _opciones_filtro(df, "CANAL"), key="matriz_filtro_canal")
+
+    f5, f6, f7 = st.columns(3)
+    with f5:
+        filtro_region = st.selectbox("Región", _opciones_filtro(df, "REGION"), key="matriz_filtro_region")
+    with f6:
+        filtro_dep = st.selectbox("Departamento", _opciones_filtro(df, "DEPARTAMENTO"), key="matriz_filtro_dep")
+    with f7:
+        filtro_prov = st.selectbox("Provincia", _opciones_filtro(df, "PROVINCIA"), key="matriz_filtro_prov")
+
+    df_vista = df.copy()
+    for columna, valor in [
+        ("ESTADO", filtro_estado),
+        ("RAZON SOCIAL", filtro_razon),
+        ("CANAL", filtro_canal),
+        ("REGION", filtro_region),
+        ("DEPARTAMENTO", filtro_dep),
+        ("PROVINCIA", filtro_prov),
+    ]:
+        df_vista = _aplicar_select(df_vista, columna, valor)
+
+    if buscar:
+        cols_busqueda = [c for c in ["DNI", "NOMBRES", "NOMBRE", "APELLIDO PATERNO", "APELLIDO MATERNO", "CORREO (USUARIO SGC/PRONTO)"] if c in df_vista.columns]
+        if cols_busqueda:
+            patron = buscar.upper()
+            mask = pd.Series(False, index=df_vista.index)
+            for c in cols_busqueda:
+                mask = mask | df_vista[c].astype(str).str.upper().str.contains(patron, na=False, regex=False)
+            df_vista = df_vista[mask].copy()
+
+    st.caption(f"Registros mostrados: **{len(df_vista)}** de **{len(df)}**")
+    st.dataframe(df_vista, use_container_width=True, height=520)
     return df
 
 

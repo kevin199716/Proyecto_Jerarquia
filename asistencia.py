@@ -7,7 +7,7 @@ Cambios aplicados:
   4. Sincroniza activos y también inactivos con cese dentro del mes para respetar historia.
   5. Solo permite editar el día actual. No permite modificar días anteriores ni futuros.
   6. Si un colaborador está inactivo, solo permite marcar hasta su fecha de cese.
-  7. Marcajes permitidos: A, F, DM y S.
+  7. Marcajes permitidos: A, A-BM, A-VAC, NA-SA y NA-CA.
   8. Si la hoja tiene cabecera descuadrada, NO agrega columnas al final: obliga a recrear estructura para evitar mazamorra.
 """
 
@@ -63,6 +63,15 @@ CACHE_TTL = 600
 # Mantener la vista amplia original. Solo pagina si realmente supera este límite.
 MAX_FILAS_EDITOR = 200
 
+MARCAS_PRESENCIALIDAD = ["", "A", "A-BM", "A-VAC", "NA-SA", "NA-CA"]
+LEYENDA_MARCAS = {
+    "A": "Asistió",
+    "A-BM": "No Asistió por Baja Médica",
+    "A-VAC": "No Asistió por Vacaciones",
+    "NA-SA": "No Asistió - Sin aviso",
+    "NA-CA": "No Asistió - Con aviso",
+}
+
 # =====================================================
 # UTILIDADES
 # =====================================================
@@ -81,7 +90,7 @@ def limpiar_texto(valor) -> str:
 
 def limpiar_marca(valor) -> str:
     v = limpiar_texto(valor).upper()
-    return v if v in ("A", "F", "DM", "S") else ""
+    return v if v in ("A", "A-BM", "A-VAC", "NA-SA", "NA-CA") else ""
 
 
 def normalizar_dni(valor) -> str:
@@ -186,11 +195,11 @@ def fila_editable_hoy(row: pd.Series) -> bool:
 
     if alta and hoy < alta:
         return False
+    if estado != "ACTIVO":
+        return False
     if cese and hoy > cese:
         return False
-    if estado == "INACTIVO" and cese and hoy <= cese:
-        return True
-    return estado == "ACTIVO"
+    return True
 
 
 # =====================================================
@@ -541,13 +550,14 @@ def aplicar_filtro(df: pd.DataFrame, columna: str, valor: str) -> pd.DataFrame:
     return df[df[columna].astype(str).str.strip().eq(valor)].copy()
 
 
-def filtrar_df(df: pd.DataFrame, razon: str, supervisor: str, coordinador: str, departamento: str, provincia: str) -> pd.DataFrame:
+def filtrar_df(df: pd.DataFrame, razon: str, supervisor: str, coordinador: str, departamento: str, provincia: str, estado: str = "TODOS") -> pd.DataFrame:
     r = df.copy()
     r = aplicar_filtro(r, "RAZON SOCIAL", razon)
     r = aplicar_filtro(r, "SUPERVISOR", supervisor)
     r = aplicar_filtro(r, "COORDINADOR", coordinador)
     r = aplicar_filtro(r, "DEPARTAMENTO", departamento)
     r = aplicar_filtro(r, "PROVINCIA", provincia)
+    r = aplicar_filtro(r, "ESTADO", estado)
     return r
 
 
@@ -558,14 +568,15 @@ def estilo_asistencia(valor: str) -> str:
     v = limpiar_marca(valor)
     if v == "A":
         return "background-color:#D4EDDA;color:#155724;font-weight:bold;text-align:center;"
-    if v == "F":
-        return "background-color:#F8D7DA;color:#721C24;font-weight:bold;text-align:center;"
-    if v == "DM":
+    if v == "A-BM":
         return "background-color:#FFF3CD;color:#7A5A00;font-weight:bold;text-align:center;"
-    if v == "S":
+    if v == "A-VAC":
         return "background-color:#E8D8FF;color:#4B0067;font-weight:bold;text-align:center;"
+    if v == "NA-SA":
+        return "background-color:#F8D7DA;color:#721C24;font-weight:bold;text-align:center;"
+    if v == "NA-CA":
+        return "background-color:#FFE5CC;color:#8A3D00;font-weight:bold;text-align:center;"
     return "text-align:center;"
-
 
 def mostrar_espejo_mes(df: pd.DataFrame, dias_validos: list[int]) -> None:
     if df.empty:
@@ -729,13 +740,14 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
     op_coordinador = lista_opciones(df_mes, "COORDINADOR")
     op_departamento = lista_opciones(df_mes, "DEPARTAMENTO")
     op_provincia = lista_opciones(df_mes, "PROVINCIA")
+    op_estado = lista_opciones(df_mes, "ESTADO")
 
     def _valor_guardado(clave, opciones):
         valor = st.session_state.get(clave, "TODOS")
         return valor if valor in opciones else "TODOS"
 
     with st.form("form_filtros_presencialidad"):
-        f1, f2, f3, f4, f5 = st.columns(5)
+        f1, f2, f3, f4, f5, f6 = st.columns(6)
         with f1:
             tmp_razon = st.selectbox("Razón Social", op_razon, index=op_razon.index(_valor_guardado("asis_filtro_razon", op_razon)), key="asis_tmp_razon")
         with f2:
@@ -746,6 +758,8 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
             tmp_dep = st.selectbox("Departamento", op_departamento, index=op_departamento.index(_valor_guardado("asis_filtro_dep", op_departamento)), key="asis_tmp_dep")
         with f5:
             tmp_prov = st.selectbox("Provincia", op_provincia, index=op_provincia.index(_valor_guardado("asis_filtro_prov", op_provincia)), key="asis_tmp_prov")
+        with f6:
+            tmp_estado = st.selectbox("Estado", op_estado, index=op_estado.index(_valor_guardado("asis_filtro_estado", op_estado)), key="asis_tmp_estado")
 
         aplicar_filtros = st.form_submit_button("🔎 Aplicar filtros", use_container_width=True)
 
@@ -755,14 +769,16 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
         st.session_state["asis_filtro_coord"] = tmp_coord
         st.session_state["asis_filtro_dep"] = tmp_dep
         st.session_state["asis_filtro_prov"] = tmp_prov
+        st.session_state["asis_filtro_estado"] = tmp_estado
 
     filtro_razon = _valor_guardado("asis_filtro_razon", op_razon)
     filtro_supervisor = _valor_guardado("asis_filtro_supervisor", op_supervisor)
     filtro_coord = _valor_guardado("asis_filtro_coord", op_coordinador)
     filtro_dep = _valor_guardado("asis_filtro_dep", op_departamento)
     filtro_prov = _valor_guardado("asis_filtro_prov", op_provincia)
+    filtro_estado = _valor_guardado("asis_filtro_estado", op_estado)
 
-    df_filtrado = filtrar_df(df_mes, filtro_razon, filtro_supervisor, filtro_coord, filtro_dep, filtro_prov)
+    df_filtrado = filtrar_df(df_mes, filtro_razon, filtro_supervisor, filtro_coord, filtro_dep, filtro_prov, filtro_estado)
 
     if df_filtrado.empty:
         st.warning("No hay registros con los filtros seleccionados.")
@@ -794,7 +810,8 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
             st.caption(f"Mostrando filas {inicio + 1}–{min(inicio + MAX_FILAS_EDITOR, total_filtrado)} de {total_filtrado}")
 
         st.markdown("<span class='wow-section-title'>✏️ Registrar presencialidad de hoy</span>", unsafe_allow_html=True)
-        st.caption(f"Solo está habilitada la columna **{col_hoy}**. Registra **A** = Asistió · **F** = Faltó · **DM** = Descanso médico · **S** = Seguimiento/Suspensión.")
+        st.info("**Motivos de validación:** A = Asistió · A-BM = No Asistió por Baja Médica · A-VAC = No Asistió por Vacaciones · NA-SA = No Asistió - Sin aviso · NA-CA = No Asistió - Con aviso")
+        st.caption(f"Solo está habilitada la columna **{col_hoy}** para personal ACTIVO. Los INACTIVOS quedan visibles en el espejo histórico, pero no se pueden marcar.")
 
         columnas_editor = COLUMNAS_FIJAS_EDITOR + [col_hoy, "ROW_SHEET"]
         for col in columnas_editor:
@@ -809,7 +826,7 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
         # que aparece a veces cuando se oculta una columna usada para guardar.
         column_config = {
             "ROW_SHEET": st.column_config.NumberColumn("FILA", width="small", disabled=True),
-            col_hoy: st.column_config.SelectboxColumn(col_hoy, options=["", "A", "F", "DM", "S"], width="small"),
+            col_hoy: st.column_config.SelectboxColumn(col_hoy, options=MARCAS_PRESENCIALIDAD, width="small"),
         }
 
         editado = st.data_editor(
@@ -857,7 +874,7 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
     # Espejo mensual completo: muestra todo el mes y mantiene histórico.
     df_total_actual = st.session_state[KEY_DF_TOTAL].copy()
     df_mes_actual = df_total_actual[df_total_actual["PERIODO"].astype(str).eq(periodo)].copy()
-    df_espejo = filtrar_df(df_mes_actual, filtro_razon, filtro_supervisor, filtro_coord, filtro_dep, filtro_prov)
+    df_espejo = filtrar_df(df_mes_actual, filtro_razon, filtro_supervisor, filtro_coord, filtro_dep, filtro_prov, filtro_estado)
 
     ver_espejo = st.checkbox("📊 Ver espejo mensual completo", value=False, key="asis_ver_espejo")
     if ver_espejo:

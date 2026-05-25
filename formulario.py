@@ -205,6 +205,9 @@ def buscar_dni_por_nombre(df: pd.DataFrame, columna_nombre: str, columna_dni: st
 # VALIDACIONES DE NEGOCIO
 # =========================
 def validar_dni_unico_historico(df_colab: pd.DataFrame, dni_limpio: str, fecha_alta) -> tuple[bool, str]:
+    fecha_alta = parse_fecha(fecha_alta)
+    if fecha_alta is None:
+        return False, "❌ La FECHA DE CREACION USUARIO no es válida."
     if df_colab.empty or "DNI" not in df_colab.columns:
         return True, ""
 
@@ -274,14 +277,19 @@ def validar_dni_unico_historico(df_colab: pd.DataFrame, dni_limpio: str, fecha_a
 def validar_formulario(campos: dict, df_colab: pd.DataFrame) -> list[str]:
     errores = []
 
+    canal_val = limpiar_texto(campos.get("CANAL", "")).upper()
     requeridos = [
         "RAZON SOCIAL", "CANAL", "SUB CANAL", "REGION", "CARGO (ROL)",
         "NOMBRES", "APELLIDO PATERNO", "CELULAR",
         "TIPO DE DOC", "DNI", "CORREO", "TIPO DE CONTRATO",
         "FECHA DE CREACION USUARIO", "CONTRATO FIRMADO",
-        "DEPARTAMENTO", "PROVINCIA", "SUPERVISOR A CARGO", "DNI SUPERVISOR",
-        "COORDINADOR", "DNI COORDINADOR",
+        "DEPARTAMENTO", "PROVINCIA",
     ]
+
+    if canal_val == "VENTAS DIRECTAS":
+        requeridos += ["SUPERVISOR", "CAPACITADOR", "ORIGEN_INGRESO", "FUENTE_INGRESO"]
+    else:
+        requeridos += ["SUPERVISOR A CARGO", "DNI SUPERVISOR", "COORDINADOR", "DNI COORDINADOR"]
 
     for c in requeridos:
         if limpiar_texto(campos.get(c, "")) == "":
@@ -319,6 +327,14 @@ def validar_formulario(campos: dict, df_colab: pd.DataFrame) -> list[str]:
     if firmado != "SI":
         errores.append("❌ CONTRATO FIRMADO debe quedar en SI para registrar el alta.")
 
+    if canal_val == "VENTAS DIRECTAS":
+        for c in ["SUPERVISOR", "CAPACITADOR", "ORIGEN_INGRESO", "FUENTE_INGRESO"]:
+            if limpiar_texto(campos.get(c, "")) == "":
+                errores.append(f"❌ Campo obligatorio pendiente para Ventas Directas: {c}")
+    elif canal_val == "VENTAS INDIRECTAS":
+        if limpiar_texto(campos.get("TIPO_GESTION", "")).upper() != "CAMPO":
+            errores.append("❌ Para VENTAS INDIRECTAS, TIPO_GESTION debe ser CAMPO.")
+
     fecha_alta = campos.get("FECHA DE CREACION USUARIO")
     if fecha_alta and dni_limpio:
         ok, msg = validar_dni_unico_historico(df_colab, dni_limpio, fecha_alta)
@@ -340,12 +356,16 @@ def valor_por_columna(headers: list[str], campos: dict) -> list[str]:
         "EMAIL": "CORREO (USUARIO SGC/PRONTO)",
         "FECHA ALTA REGISTRO": "FECHA_ALTA_REGISTRO",
         "USUARIO ALTA": "USUARIO_ALTA",
+        "TIPO GESTION": "TIPO_GESTION",
+        "TIPO_GESTIÓN": "TIPO_GESTION",
+        "ORIGEN INGRESO": "ORIGEN_INGRESO",
+        "FUENTE INGRESO": "FUENTE_INGRESO",
     }
 
     row = []
     for h in headers:
         col = aliases.get(h, h)
-        row.append(campos.get(col, ""))
+        row.append(limpiar_texto(campos.get(col, "")))
     return row
 
 
@@ -387,13 +407,21 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
         "NOGALES HIGH SAC",
         "MULTIPLE FORCE SAC",
         "KONECTA SAC",
+        "WOW TEL",
     ]
 
     departamentos = lista_limpia(df_ubi, "DEPARTAMENTO")
     supervisores = lista_limpia(df_ubi, "SUPERVISOR A CARGO FINAL")
     coordinadores = lista_limpia(df_ubi, "COORDINADOR FINAL")
 
-    st.caption("La provincia depende del departamento. Supervisor, coordinador y DNI se leen desde la misma hoja ubicaciones, sin cambiar la lógica original.")
+    # Listas adicionales para canal VENTAS DIRECTAS (mismo worksheet ubicaciones).
+    # Si la columna no existe, queda lista vacía y se muestra alerta controlada.
+    supervisores_directo = lista_limpia(df_ubi, "SUPERVISOR")
+    capacitadores = lista_limpia(df_ubi, "CAPACITADOR")
+    origenes_ingreso = lista_limpia(df_ubi, "ORIGEN_INGRESO")
+    fuentes_ingreso = lista_limpia(df_ubi, "FUENTE_INGRESO")
+
+    st.caption("La provincia depende del departamento. Supervisor, coordinador y DNI se leen desde la misma hoja ubicaciones. Para ventas directas se habilitan los campos adicionales desde ubicaciones.")
 
     col_izq, col_der = st.columns(2)
 
@@ -415,8 +443,14 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             razon = razon_usuario
             st.text_input("RAZÓN SOCIAL", value=razon, disabled=True, key=k("razon_dealer"))
 
-        canal = st.selectbox("CANAL", ["VENTAS INDIRECTAS"], key=k("canal"))
-        subcanal = st.selectbox("SUB CANAL", ["VENTAS INDIRECTAS", "OUTBOUND"], key=k("subcanal"))
+        canal = st.selectbox("CANAL", ["VENTAS INDIRECTAS", "VENTAS DIRECTAS"], key=k("canal"))
+        if canal == "VENTAS DIRECTAS":
+            subcanal = st.selectbox("SUB CANAL", ["VENTAS DIRECTAS"], key=k("subcanal"))
+            tipo_gestion = ""
+        else:
+            subcanal = st.selectbox("SUB CANAL", ["VENTAS INDIRECTAS", "OUTBOUND"], key=k("subcanal"))
+            tipo_gestion = "CAMPO"
+        st.text_input("TIPO GESTIÓN", value=tipo_gestion, disabled=True, key=k("tipo_gestion_visible"))
         region = st.selectbox("REGIÓN", ["", "CENTRAL", "NORORIENTE", "SUR"], key=k("region"))
         cargo = st.selectbox(
             "CARGO (ROL)",
@@ -441,6 +475,17 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
         )
         contrato_firmado = st.selectbox("CONTRATO FIRMADO", ["SI"], index=0, key=k("contrato_firmado"))
 
+        supervisor_directo = ""
+        capacitador = ""
+        origen_ingreso = ""
+        fuente_ingreso = ""
+        if canal == "VENTAS DIRECTAS":
+            st.markdown("**Datos adicionales Ventas Directas**")
+            supervisor_directo = st.selectbox("SUPERVISOR", [""] + supervisores_directo, key=k("supervisor_directo"))
+            capacitador = st.selectbox("CAPACITADOR", [""] + capacitadores, key=k("capacitador"))
+            origen_ingreso = st.selectbox("ORIGEN INGRESO", [""] + origenes_ingreso, key=k("origen_ingreso"))
+            fuente_ingreso = st.selectbox("FUENTE INGRESO", [""] + fuentes_ingreso, key=k("fuente_ingreso"))
+
     st.divider()
     st.markdown("**Ubicación y jerarquía**")
     col_u1, col_u2 = st.columns(2)
@@ -460,9 +505,15 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
         st.text_input("DNI COORDINADOR", value=dni_coordinador, disabled=True, key=k("dni_coordinador"))
 
     with col_u2:
-        supervisor = st.selectbox("SUPERVISOR A CARGO", [""] + supervisores, key=k("supervisor"))
-        dni_supervisor = buscar_dni_por_nombre(df_ubi, "SUPERVISOR A CARGO FINAL", "DNI SUPERVISOR", supervisor)
-        st.text_input("DNI SUPERVISOR", value=dni_supervisor, disabled=True, key=k("dni_supervisor"))
+        if canal == "VENTAS DIRECTAS":
+            supervisor = supervisor_directo
+            dni_supervisor = ""
+            st.text_input("SUPERVISOR A CARGO", value=supervisor, disabled=True, key=k("supervisor_directo_ref"))
+            st.text_input("DNI SUPERVISOR", value=dni_supervisor, disabled=True, key=k("dni_supervisor"))
+        else:
+            supervisor = st.selectbox("SUPERVISOR A CARGO", [""] + supervisores, key=k("supervisor"))
+            dni_supervisor = buscar_dni_por_nombre(df_ubi, "SUPERVISOR A CARGO FINAL", "DNI SUPERVISOR", supervisor)
+            st.text_input("DNI SUPERVISOR", value=dni_supervisor, disabled=True, key=k("dni_supervisor"))
 
     st.markdown("")
     submit = st.button("Guardar Alta", key=k("btn_guardar_alta"))
@@ -486,14 +537,22 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             # FECHA MOV se actualiza únicamente en BAJAS.
             "FECHA MOV": "",
             "RAZON SOCIAL": razon,
-            "CANAL": canal,
-            "SUB CANAL": subcanal,
-            "REGION": region,
+            "CANAL": limpiar_texto(canal),
+            "SUB CANAL": limpiar_texto(subcanal),
+            "TIPO_GESTION": limpiar_texto(tipo_gestion),
+            "TIPO GESTION": limpiar_texto(tipo_gestion),
+            "REGION": limpiar_texto(region),
             "DEPARTAMENTO": departamento,
             "PROVINCIA": provincia,
-            "SUPERVISOR A CARGO": supervisor,
-            "DNI SUPERVISOR": dni_supervisor,
-            "COORDINADOR": coordinador,
+            "SUPERVISOR A CARGO": limpiar_texto(supervisor),
+            "SUPERVISOR": limpiar_texto(supervisor),
+            "DNI SUPERVISOR": limpiar_texto(dni_supervisor),
+            "CAPACITADOR": limpiar_texto(capacitador),
+            "ORIGEN_INGRESO": limpiar_texto(origen_ingreso),
+            "ORIGEN INGRESO": limpiar_texto(origen_ingreso),
+            "FUENTE_INGRESO": limpiar_texto(fuente_ingreso),
+            "FUENTE INGRESO": limpiar_texto(fuente_ingreso),
+            "COORDINADOR": limpiar_texto(coordinador),
             "DNI COORDINADOR": dni_coordinador,
             "CARGO (ROL)": cargo,
             "NOMBRES": limpiar_texto(nombres).upper(),
