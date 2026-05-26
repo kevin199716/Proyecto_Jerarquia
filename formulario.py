@@ -442,7 +442,7 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
     origenes_ingreso = lista_limpia(df_ubi, "ORIGEN_INGRESO")
     fuentes_ingreso = lista_limpia(df_ubi, "FUENTE_INGRESO")
 
-    st.caption("WOW TEL se gestiona como VENTAS DIRECTAS. Los demás socios se gestionan como VENTAS INDIRECTAS. Para directas solo se habilitan sus campos adicionales; la jerarquía indirecta se oculta visualmente.")
+    st.caption("WOW TEL se gestiona como VENTAS DIRECTAS. Los demás socios se gestionan como VENTAS INDIRECTAS. En indirectas se mantiene la lógica original de cargos Dealer; en directas el cargo va limpio sin Dealer.")
 
     col_izq, col_der = st.columns(2)
 
@@ -485,15 +485,29 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
         # TIPO_GESTION no se muestra en pantalla.
         # Regla: VENTAS INDIRECTAS viaja como CAMPO; VENTAS DIRECTAS viaja vacío.
         region = st.selectbox("REGIÓN", ["", "CENTRAL", "NORORIENTE", "SUR"], key=k("region"))
-        cargo = st.selectbox(
-            "CARGO (ROL)",
-            [
+        # CARGO (ROL) depende del canal:
+        # - VENTAS INDIRECTAS conserva la lógica original con "- Dealer".
+        # - VENTAS DIRECTAS usa el rol limpio, sin "- Dealer".
+        if canal == "VENTAS DIRECTAS":
+            opciones_cargo = [
                 "",
                 "Agente BO D2D",
                 "Promotor D2D",
                 "Supervisor D2D",
                 "Coordinador D2D",
-            ],
+            ]
+        else:
+            opciones_cargo = [
+                "",
+                "Agente BO D2D - Dealer",
+                "Promotor D2D - Dealer",
+                "Supervisor D2D - Dealer",
+                "Coordinador D2D - Dealer",
+            ]
+
+        cargo = st.selectbox(
+            "CARGO (ROL)",
+            opciones_cargo,
             key=k("cargo"),
         )
         tipo_contrato = st.selectbox("TIPO DE CONTRATO", ["PLANILLA", "MEDIA PLANILLA"], key=k("tipo_contrato"))
