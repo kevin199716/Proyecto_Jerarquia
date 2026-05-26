@@ -174,6 +174,28 @@ def obtener_headers(hoja_colaboradores) -> list[str]:
     return [str(h).strip().upper() for h in valores[0]]
 
 
+def asegurar_columnas_colaboradores(hoja_colaboradores, columnas_requeridas: list[str]) -> list[str]:
+    """
+    Agrega al final de la cabecera solo las columnas nuevas que no existan.
+    No reordena ni toca columnas existentes para no chancar la matriz actual.
+    Se ejecuta únicamente al guardar alta, no durante el llenado del formulario.
+    """
+    headers = obtener_headers(hoja_colaboradores)
+    if not headers:
+        return []
+
+    headers_set = {h.strip().upper() for h in headers}
+    col_actual = len(headers)
+    for col in columnas_requeridas:
+        col_up = str(col).strip().upper()
+        if col_up and col_up not in headers_set:
+            col_actual += 1
+            hoja_colaboradores.update_cell(1, col_actual, col_up)
+            headers.append(col_up)
+            headers_set.add(col_up)
+    return headers
+
+
 # =========================
 # LISTAS DESDE UBICACIONES
 # =========================
@@ -283,13 +305,12 @@ def validar_formulario(campos: dict, df_colab: pd.DataFrame) -> list[str]:
         "NOMBRES", "APELLIDO PATERNO", "CELULAR",
         "TIPO DE DOC", "DNI", "CORREO", "TIPO DE CONTRATO",
         "FECHA DE CREACION USUARIO", "CONTRATO FIRMADO",
-        "DEPARTAMENTO", "PROVINCIA",
     ]
 
     if canal_val == "VENTAS DIRECTAS":
         requeridos += ["SUPERVISOR", "CAPACITADOR", "ORIGEN_INGRESO", "FUENTE_INGRESO"]
     else:
-        requeridos += ["SUPERVISOR A CARGO", "DNI SUPERVISOR", "COORDINADOR", "DNI COORDINADOR"]
+        requeridos += ["DEPARTAMENTO", "PROVINCIA", "SUPERVISOR A CARGO", "DNI SUPERVISOR", "COORDINADOR", "DNI COORDINADOR"]
 
     for c in requeridos:
         if limpiar_texto(campos.get(c, "")) == "":
@@ -421,7 +442,7 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
     origenes_ingreso = lista_limpia(df_ubi, "ORIGEN_INGRESO")
     fuentes_ingreso = lista_limpia(df_ubi, "FUENTE_INGRESO")
 
-    st.caption("La provincia depende del departamento. Supervisor, coordinador y DNI se leen desde la misma hoja ubicaciones. Para ventas directas se habilitan los campos adicionales desde ubicaciones.")
+    st.caption("Para VENTAS INDIRECTAS se muestra ubicación y jerarquía tradicional. Para VENTAS DIRECTAS solo se habilitan sus campos adicionales; lo demás se oculta visualmente para evitar confusión.")
 
     col_izq, col_der = st.columns(2)
 
@@ -450,7 +471,8 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
         else:
             subcanal = st.selectbox("SUB CANAL", ["VENTAS INDIRECTAS", "OUTBOUND"], key=k("subcanal"))
             tipo_gestion = "CAMPO"
-        st.text_input("TIPO GESTIÓN", value=tipo_gestion, disabled=True, key=k("tipo_gestion_visible"))
+        # TIPO_GESTION no se muestra en pantalla.
+        # Regla: VENTAS INDIRECTAS viaja como CAMPO; VENTAS DIRECTAS viaja vacío.
         region = st.selectbox("REGIÓN", ["", "CENTRAL", "NORORIENTE", "SUR"], key=k("region"))
         cargo = st.selectbox(
             "CARGO (ROL)",
@@ -486,34 +508,42 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             origen_ingreso = st.selectbox("ORIGEN INGRESO", [""] + origenes_ingreso, key=k("origen_ingreso"))
             fuente_ingreso = st.selectbox("FUENTE INGRESO", [""] + fuentes_ingreso, key=k("fuente_ingreso"))
 
-    st.divider()
-    st.markdown("**Ubicación y jerarquía**")
-    col_u1, col_u2 = st.columns(2)
+    # =====================================================
+    # UBICACIÓN / JERARQUÍA
+    # =====================================================
+    departamento = ""
+    provincia = ""
+    coordinador = ""
+    dni_coordinador = ""
 
-    with col_u1:
-        departamento = st.selectbox("DEPARTAMENTO", [""] + departamentos, key=k("departamento"))
+    if canal == "VENTAS INDIRECTAS":
+        st.divider()
+        st.markdown("**Ubicación y jerarquía**")
+        col_u1, col_u2 = st.columns(2)
 
-        provincias = []
-        if departamento and "DEPARTAMENTO" in df_ubi.columns and "PROVINCIA" in df_ubi.columns:
-            df_dep = df_ubi[serie_columna(df_ubi, "DEPARTAMENTO").eq(str(departamento).strip())]
-            provincias = lista_limpia(df_dep, "PROVINCIA")
+        with col_u1:
+            departamento = st.selectbox("DEPARTAMENTO", [""] + departamentos, key=k("departamento"))
 
-        provincia = st.selectbox("PROVINCIA", [""] + provincias, key=k("provincia"))
+            provincias = []
+            if departamento and "DEPARTAMENTO" in df_ubi.columns and "PROVINCIA" in df_ubi.columns:
+                df_dep = df_ubi[serie_columna(df_ubi, "DEPARTAMENTO").eq(str(departamento).strip())]
+                provincias = lista_limpia(df_dep, "PROVINCIA")
 
-        coordinador = st.selectbox("COORDINADOR", [""] + coordinadores, key=k("coordinador"))
-        dni_coordinador = buscar_dni_por_nombre(df_ubi, "COORDINADOR FINAL", "DNI COORDINADOR", coordinador)
-        st.text_input("DNI COORDINADOR", value=dni_coordinador, disabled=True, key=k("dni_coordinador"))
+            provincia = st.selectbox("PROVINCIA", [""] + provincias, key=k("provincia"))
 
-    with col_u2:
-        if canal == "VENTAS DIRECTAS":
-            supervisor = supervisor_directo
-            dni_supervisor = ""
-            st.text_input("SUPERVISOR A CARGO", value=supervisor, disabled=True, key=k("supervisor_directo_ref"))
-            st.text_input("DNI SUPERVISOR", value=dni_supervisor, disabled=True, key=k("dni_supervisor"))
-        else:
+            coordinador = st.selectbox("COORDINADOR", [""] + coordinadores, key=k("coordinador"))
+            dni_coordinador = buscar_dni_por_nombre(df_ubi, "COORDINADOR FINAL", "DNI COORDINADOR", coordinador)
+            st.text_input("DNI COORDINADOR", value=dni_coordinador, disabled=True, key=k("dni_coordinador"))
+
+        with col_u2:
             supervisor = st.selectbox("SUPERVISOR A CARGO", [""] + supervisores, key=k("supervisor"))
             dni_supervisor = buscar_dni_por_nombre(df_ubi, "SUPERVISOR A CARGO FINAL", "DNI SUPERVISOR", supervisor)
             st.text_input("DNI SUPERVISOR", value=dni_supervisor, disabled=True, key=k("dni_supervisor"))
+    else:
+        # Para VENTAS DIRECTAS se oculta completamente la jerarquía D2D indirecta.
+        # El supervisor válido es el de Datos adicionales Ventas Directas.
+        supervisor = supervisor_directo
+        dni_supervisor = ""
 
     st.markdown("")
     submit = st.button("Guardar Alta", key=k("btn_guardar_alta"))
@@ -589,7 +619,14 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             return
 
         try:
-            headers = obtener_headers(hoja_colaboradores)
+            columnas_nuevas = [
+                "TIPO_GESTION",
+                "SUPERVISOR",
+                "CAPACITADOR",
+                "ORIGEN_INGRESO",
+                "FUENTE_INGRESO",
+            ]
+            headers = asegurar_columnas_colaboradores(hoja_colaboradores, columnas_nuevas)
             if not headers:
                 st.error("❌ La hoja colaboradores no tiene cabecera. No se puede registrar.")
                 return

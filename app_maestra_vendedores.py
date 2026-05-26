@@ -130,16 +130,25 @@ def mostrar_matriz_jerarquia(titulo="Estado actual de la jerarquía", icono="�
         st.error(f"No se pudo cargar la matriz de jerarquía: {e}")
         return None
 
+
+
+def boton_matriz_jerarquia(key: str):
+    """Muestra/oculta la matriz sin perderla al usar filtros internos."""
+    estado_key = f"{key}_visible"
+    if estado_key not in st.session_state:
+        st.session_state[estado_key] = False
+    label = "📕 Ocultar matriz de jerarquía" if st.session_state[estado_key] else "📋 Ver matriz de jerarquía"
+    if st.button(label, key=key):
+        st.session_state[estado_key] = not st.session_state[estado_key]
+    if st.session_state[estado_key]:
+        mostrar_matriz_jerarquia()
 # =====================================================
 # BACKOFFICE
 # =====================================================
 if rol == "backoffice":
     if pagina == "Alta":
         mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia)
-        # IMPORTANTE: no cargar la matriz automáticamente en Alta.
-        # Evita congelamientos: cada cambio de input hacía leer toda la hoja colaboradores.
-        if st.button("📋 Ver matriz de jerarquía", key="btn_ver_matriz_alta_backoffice"):
-            mostrar_matriz_jerarquia()
+        boton_matriz_jerarquia("btn_ver_matriz_alta_backoffice")
 
     elif pagina == "Bajas":
         df = mostrar_matriz_jerarquia()
@@ -149,9 +158,7 @@ if rol == "backoffice":
 
     elif pagina == "Presencialidad Dealer":
         mostrar_asistencia(hoja_asistencia, hoja_colaboradores, razon=razon)
-        # No cargar la matriz automáticamente: Presencialidad ya usa su propio caché.
-        if st.button("📋 Ver matriz de jerarquía", key="btn_ver_matriz_pres_backoffice"):
-            mostrar_matriz_jerarquia()
+        boton_matriz_jerarquia("btn_ver_matriz_pres_backoffice")
 
 # =====================================================
 # DEALER
@@ -161,10 +168,7 @@ elif rol == "dealer":
 
     if pagina == "Alta":
         mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia)
-        # IMPORTANTE: no cargar la matriz automáticamente en Alta.
-        # Evita congelamientos: cada cambio de input hacía leer toda la hoja colaboradores.
-        if st.button("📋 Ver matriz de jerarquía", key="btn_ver_matriz_alta_dealer"):
-            mostrar_matriz_jerarquia()
+        boton_matriz_jerarquia("btn_ver_matriz_alta_dealer")
 
     elif pagina == "Bajas":
         df = mostrar_matriz_jerarquia()
@@ -174,8 +178,7 @@ elif rol == "dealer":
 
     elif pagina == "Presencialidad Dealer":
         mostrar_asistencia(hoja_asistencia, hoja_colaboradores, razon=razon)
-        if st.button("📋 Ver matriz de jerarquía", key="btn_ver_matriz_pres_dealer"):
-            mostrar_matriz_jerarquia()
+        boton_matriz_jerarquia("btn_ver_matriz_pres_dealer")
 
 # =====================================================
 # EDITOR
@@ -191,8 +194,7 @@ elif rol == "editor":
 
     elif pagina == "Presencialidad Dealer":
         mostrar_asistencia(hoja_asistencia, hoja_colaboradores, razon=razon)
-        if st.button("📋 Ver matriz de jerarquía", key="btn_ver_matriz_pres_editor"):
-            mostrar_matriz_jerarquia()
+        boton_matriz_jerarquia("btn_ver_matriz_pres_editor")
 
 # =====================================================
 # USUARIO SOLO PRESENCIALIDAD

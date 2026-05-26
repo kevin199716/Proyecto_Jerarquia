@@ -97,8 +97,17 @@ def _aplicar_select(df: pd.DataFrame, columna: str, valor: str) -> pd.DataFrame:
     return df[df[columna].astype(str).str.strip().eq(valor)].copy()
 
 
+@st.cache_data(ttl=180, show_spinner=False)
+def _leer_matriz_cached(_hoja):
+    return _hoja.get_all_records()
+
+
 def mostrar_tabla(hoja, razon_usuario=None):
-    data = hoja.get_all_records()
+    key_reload = f"matriz_reload_{st.session_state.get('rol', '')}_{str(razon_usuario or 'ALL').replace(' ', '_')}"
+    if st.button("♻️ Recargar matriz", key=key_reload):
+        _leer_matriz_cached.clear()
+
+    data = _leer_matriz_cached(hoja)
     if not data:
         st.info("No hay datos")
         return None

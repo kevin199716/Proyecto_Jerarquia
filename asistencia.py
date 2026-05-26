@@ -350,7 +350,7 @@ def construir_payload_base(row: pd.Series) -> dict:
     fecha_cese = "" if estado == "ACTIVO" else str(parse_fecha(row.get("FECHA DE CESE", row.get("FECHA CESE", ""))) or "")
     return {
         "RAZON SOCIAL": limpiar_texto(row.get("RAZON SOCIAL", "")),
-        "SUPERVISOR": limpiar_texto(row.get("SUPERVISOR A CARGO", row.get("SUPERVISOR", ""))),
+        "SUPERVISOR": primer_valor(row.get("SUPERVISOR A CARGO", ""), row.get("SUPERVISOR", "")),
         "COORDINADOR": limpiar_texto(row.get("COORDINADOR", "")),
         "DEPARTAMENTO": limpiar_texto(row.get("DEPARTAMENTO", "")),
         "PROVINCIA": limpiar_texto(row.get("PROVINCIA", "")),
@@ -455,7 +455,7 @@ def registrar_alta_en_asistencia(hoja_asistencia, campos: dict) -> str:
     fila_base = {col: "" for col in COLUMNAS_ASISTENCIA}
     fila_base.update({
         "RAZON SOCIAL": limpiar_texto(campos.get("RAZON SOCIAL", "")),
-        "SUPERVISOR": limpiar_texto(campos.get("SUPERVISOR A CARGO", campos.get("SUPERVISOR", ""))),
+        "SUPERVISOR": primer_valor(campos.get("SUPERVISOR A CARGO", ""), campos.get("SUPERVISOR", "")),
         "COORDINADOR": limpiar_texto(campos.get("COORDINADOR", "")),
         "DEPARTAMENTO": limpiar_texto(campos.get("DEPARTAMENTO", "")),
         "PROVINCIA": limpiar_texto(campos.get("PROVINCIA", "")),
