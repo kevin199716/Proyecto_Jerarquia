@@ -442,7 +442,7 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
     origenes_ingreso = lista_limpia(df_ubi, "ORIGEN_INGRESO")
     fuentes_ingreso = lista_limpia(df_ubi, "FUENTE_INGRESO")
 
-    st.caption("Para VENTAS INDIRECTAS se muestra ubicación y jerarquía tradicional. Para VENTAS DIRECTAS solo se habilitan sus campos adicionales; lo demás se oculta visualmente para evitar confusión.")
+    st.caption("WOW TEL se gestiona como VENTAS DIRECTAS. Los demás socios se gestionan como VENTAS INDIRECTAS. Para directas solo se habilitan sus campos adicionales; la jerarquía indirecta se oculta visualmente.")
 
     col_izq, col_der = st.columns(2)
 
@@ -464,7 +464,18 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             razon = razon_usuario
             st.text_input("RAZÓN SOCIAL", value=razon, disabled=True, key=k("razon_dealer"))
 
-        canal = st.selectbox("CANAL", ["VENTAS INDIRECTAS", "VENTAS DIRECTAS"], key=k("canal"))
+        # Regla comercial:
+        # - WOW TEL pertenece a VENTAS DIRECTAS. Apenas se selecciona, el canal queda DIRECTO.
+        # - Los demás socios pertenecen a VENTAS INDIRECTAS.
+        razon_norm = limpiar_texto(razon).upper()
+        if razon_norm == "WOW TEL":
+            canal_options = ["VENTAS DIRECTAS"]
+        elif razon_norm:
+            canal_options = ["VENTAS INDIRECTAS"]
+        else:
+            canal_options = ["VENTAS INDIRECTAS", "VENTAS DIRECTAS"]
+
+        canal = st.selectbox("CANAL", canal_options, key=k("canal"))
         if canal == "VENTAS DIRECTAS":
             subcanal = st.selectbox("SUB CANAL", ["VENTAS DIRECTAS"], key=k("subcanal"))
             tipo_gestion = ""
@@ -478,10 +489,10 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             "CARGO (ROL)",
             [
                 "",
-                "Agente BO D2D - Dealer",
-                "Promotor D2D - Dealer",
-                "Supervisor D2D - Dealer",
-                "Coordinador D2D - Dealer",
+                "Agente BO D2D",
+                "Promotor D2D",
+                "Supervisor D2D",
+                "Coordinador D2D",
             ],
             key=k("cargo"),
         )

@@ -47,9 +47,36 @@ def normalizar_dni(valor) -> str:
     return dni
 
 
+def limpiar_numero_texto(valor, zfill_dni=False) -> str:
+    """Convierte DNI/celulares/IDs a texto para evitar formato con comas en st.dataframe."""
+    v = limpiar_texto(valor).replace(".0", "").replace(",", "")
+    if v == "":
+        return ""
+    # Si vino como 76043772.0 o 76,043,772, deja solo dígitos.
+    import re
+    digitos = re.sub(r"\D", "", v)
+    if digitos:
+        if zfill_dni and len(digitos) < 8:
+            digitos = digitos.zfill(8)
+        return digitos
+    return v.strip()
+
+
 def normalizar_columnas(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
     df.columns = df.columns.astype(str).str.strip().str.upper()
+    return df
+
+
+def forzar_columnas_texto(df: pd.DataFrame) -> pd.DataFrame:
+    """Evita que DNI/CELULAR/ID se muestren con separador de miles en la matriz."""
+    df = df.copy()
+    for c in df.columns:
+        cu = str(c).upper()
+        if "DNI" in cu:
+            df[c] = df[c].apply(lambda x: limpiar_numero_texto(x, zfill_dni=True)).astype(str)
+        elif "CELULAR" in cu or cu.startswith("ID") or "ID " in cu or "(SGC/PRONTO)" in cu:
+            df[c] = df[c].apply(lambda x: limpiar_numero_texto(x, zfill_dni=False)).astype(str)
     return df
 
 
@@ -113,6 +140,7 @@ def mostrar_tabla(hoja, razon_usuario=None):
         return None
 
     df = normalizar_columnas(pd.DataFrame(data)).fillna("")
+    df = forzar_columnas_texto(df)
     rol = st.session_state.get("rol", "")
 
     if rol != "backoffice" and razon_usuario and "RAZON SOCIAL" in df.columns:
@@ -158,7 +186,12 @@ def mostrar_tabla(hoja, razon_usuario=None):
             df_vista = df_vista[mask].copy()
 
     st.caption(f"Registros mostrados: **{len(df_vista)}** de **{len(df)}**")
-    st.dataframe(df_vista, use_container_width=True, height=520)
+    cols_texto = {
+        c: st.column_config.TextColumn(c)
+        for c in df_vista.columns
+        if "DNI" in str(c).upper() or "CELULAR" in str(c).upper() or str(c).upper().startswith("ID")
+    }
+    st.dataframe(df_vista, use_container_width=True, height=520, column_config=cols_texto)
     return df
 
 
