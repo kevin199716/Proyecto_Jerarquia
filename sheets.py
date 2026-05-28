@@ -7,6 +7,16 @@ from google.oauth2.service_account import Credentials
 from googleapiclient.discovery import build
 from googleapiclient.http import MediaIoBaseUpload
 
+# ==============================================================================
+# CONFIGURACIÓN DE DRIVE
+# ==============================================================================
+# IMPORTANTE: Las Cuentas de Servicio de Google tienen cuota de almacenamiento CERO.
+# Para poder subir archivos, debes crear una Unidad Compartida (Shared Drive) en tu
+# Google Drive corporativo (de @wowperu.pe), añadir al correo de la Cuenta de Servicio
+# como miembro con permisos de "Administrador de contenido", crear una carpeta
+# llamada "Sustentos_Bajas_Medicas" adentro, y pegar su ID aquí abajo:
+ID_CARPETA_SUSTENTOS = ""
+
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
     "https://www.googleapis.com/auth/drive"
@@ -59,29 +69,44 @@ def conectar_google_drive():
 
 
 def obtener_o_crear_carpeta_sustentos(drive_service) -> str:
-    """Busca la carpeta 'Sustentos_Bajas_Medicas' en Drive. Si no existe, la crea."""
+    """Retorna el ID de la carpeta de sustentos. Si ID_CARPETA_SUSTENTOS está configurado, lo usa directamente.
+    De lo contrario, busca la carpeta 'Sustentos_Bajas_Medicas' en todas las unidades (incluyendo compartidas).
+    """
+    if ID_CARPETA_SUSTENTOS:
+        return ID_CARPETA_SUSTENTOS
+
     nombre_carpeta = "Sustentos_Bajas_Medicas"
     try:
-        # Buscar si ya existe la carpeta
+        # Buscar si ya existe la carpeta en cualquier unidad compartida
         query = f"name = '{nombre_carpeta}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
-        resultados = drive_service.files().list(q=query, fields="files(id, name)").execute()
+        resultados = drive_service.files().list(
+            q=query, 
+            fields="files(id, name)",
+            supportsAllDrives=True,
+            includeItemsFromAllDrives=True
+        ).execute()
         archivos = resultados.get("files", [])
         
         if archivos:
             return archivos[0]["id"]
         
-        # Si no existe, la creamos
+        # Si no existe, la creamos (intentar crearla en la raíz de la cuenta de servicio si no se configuró ID_CARPETA_SUSTENTOS)
         metadata_carpeta = {
             "name": nombre_carpeta,
             "mimeType": "application/vnd.google-apps.folder"
         }
-        carpeta = drive_service.files().create(body=metadata_carpeta, fields="id").execute()
+        carpeta = drive_service.files().create(
+            body=metadata_carpeta, 
+            fields="id",
+            supportsAllDrives=True
+        ).execute()
         
         # Darle permisos de lectura a cualquiera con el link para que RRHH pueda verla
         drive_service.permissions().create(
             fileId=carpeta["id"],
             body={"type": "anyone", "role": "reader"},
-            fields="id"
+            fields="id",
+            supportsAllDrives=True
         ).execute()
         
         return carpeta["id"]
@@ -92,7 +117,7 @@ def obtener_o_crear_carpeta_sustentos(drive_service) -> str:
 
 def subir_archivo_drive(nombre_archivo: str, contenido_bytes: bytes, mime_type: str) -> str:
     """
-    Sube un archivo en memoria (bytes) a la carpeta 'Sustentos_Bajas_Medicas' en Google Drive.
+    Sube un archivo en memoria (bytes) a la carpeta de sustentos en Google Drive (soporta Unidades Compartidas).
     Retorna la URL pública para visualizar el archivo.
     """
     try:
@@ -111,7 +136,8 @@ def subir_archivo_drive(nombre_archivo: str, contenido_bytes: bytes, mime_type: 
         archivo = drive_service.files().create(
             body=metadata_archivo,
             media_body=media,
-            fields="id, webViewLink"
+            fields="id, webViewLink",
+            supportsAllDrives=True
         ).execute()
         
         file_id = archivo.get("id")
@@ -120,11 +146,16 @@ def subir_archivo_drive(nombre_archivo: str, contenido_bytes: bytes, mime_type: 
         drive_service.permissions().create(
             fileId=file_id,
             body={"type": "anyone", "role": "reader"},
-            fields="id"
+            fields="id",
+            supportsAllDrives=True
         ).execute()
         
         # Obtener el link de visualización actualizado
-        info = drive_service.files().get(fileId=file_id, fields="webViewLink").execute()
+        info = drive_service.files().get(
+            fileId=file_id, 
+            fields="webViewLink",
+            supportsAllDrives=True
+        ).execute()
         return info.get("webViewLink")
         
     except Exception as e:
