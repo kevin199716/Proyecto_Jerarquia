@@ -68,28 +68,22 @@ def conectar_google_drive():
 
 
 def subir_archivo_drive(nombre_archivo: str, contenido_bytes: bytes, mime_type: str) -> str:
-    """Sube un archivo a la carpeta de Drive compartida con la cuenta de servicio."""
-    if not ID_CARPETA_SUSTENTOS:
-        raise Exception("⚠️ Falta configurar ID_CARPETA_SUSTENTOS en Streamlit Secrets.")
+    """Sube el archivo a catbox.moe y retorna la URL pública permanente."""
+    import requests
     try:
-        creds = obtener_credenciales()
-        service = build("drive", "v3", credentials=creds)
-        media = MediaIoBaseUpload(io.BytesIO(contenido_bytes), mimetype=mime_type, resumable=False)
-        archivo = service.files().create(
-            body={"name": nombre_archivo, "parents": [ID_CARPETA_SUSTENTOS]},
-            media_body=media,
-            fields="id, webViewLink",
-            supportsAllDrives=True,
-        ).execute()
-        # Dar permiso de lectura con link para que RRHH pueda verlo
-        service.permissions().create(
-            fileId=archivo["id"],
-            body={"type": "anyone", "role": "reader"},
-            supportsAllDrives=True,
-        ).execute()
-        return archivo.get("webViewLink", "")
+        response = requests.post(
+            "https://catbox.moe/user/api.php",
+            data={"reqtype": "fileupload"},
+            files={"fileToUpload": (nombre_archivo, contenido_bytes, mime_type)},
+            timeout=60,
+        )
+        response.raise_for_status()
+        url = response.text.strip()
+        if not url.startswith("https://"):
+            raise Exception(f"Respuesta inesperada: {url}")
+        return url
     except Exception as e:
-        raise Exception(f"Error al subir el archivo '{nombre_archivo}' a Google Drive: {e}")
+        raise Exception(f"Error al subir el archivo '{nombre_archivo}': {e}")
 
 
 def obtener_o_crear_worksheet(nombre_hoja: str, nombre_worksheet: str, columnas_defecto: list[str]):
