@@ -702,6 +702,16 @@ def mostrar_dialogo_sustento(dni, nombre, row_sheet, col_hoy, df_editor):
                 "nombre": nombre,
                 "row_sheet": row_sheet
             }
+            
+            # Forzar la marcación "A-BM" en el caché del DataFrame actual para evitar que se pierda en el rerun
+            if KEY_DF_TOTAL in st.session_state:
+                df_total = st.session_state[KEY_DF_TOTAL].copy()
+                periodo = periodo_actual()
+                mask = (df_total["DNI"].astype(str) == str(dni)) & (df_total["PERIODO"].astype(str) == str(periodo))
+                if mask.any():
+                    df_total.loc[mask, col_hoy] = "A-BM"
+                    st.session_state[KEY_DF_TOTAL] = df_total.copy()
+                    
             st.success("✅ Sustento cargado y validado en memoria. Se subirá a Drive al guardar la asistencia.")
             time.sleep(1.2)
             st.rerun()
@@ -911,7 +921,6 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                         
                         if dni not in st.session_state.get("sustentos_pendientes", {}):
                             mostrar_dialogo_sustento(dni, nombre, row_sheet, col_hoy, df_editor)
-                            st.stop()  # Detener el render principal para dar foco al modal
 
         disabled_cols = [col for col in df_editor.columns if col != col_hoy]
         # Mantengo ROW_SHEET visible como FILA técnica para evitar el error React #185
@@ -1037,6 +1046,58 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
         mostrar_espejo_mes(df_espejo, dias_validos)
     else:
         st.caption("Espejo mensual oculto para mejorar rendimiento. Actívalo solo cuando necesites revisar el mes completo.")
+
+    st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
+    ver_sustentos = st.checkbox("📋 Ver log de sustentos de Bajas Médicas", value=False, key="asis_ver_sustentos")
+    if ver_sustentos:
+        st.markdown("<span class='wow-section-title'>📋 Registro de Sustentos de Bajas Médicas</span>", unsafe_allow_html=True)
+        with st.spinner("Cargando sustentos desde Google Sheets..."):
+            try:
+                columnas_defecto = [
+                    "PERIODO",
+                    "FECHA_ASISTENCIA",
+                    "DNI",
+                    "NOMBRE",
+                    "RAZON SOCIAL",
+                    "MOTIVO",
+                    "LINK_DOCUMENTO",
+                    "FECHA_SUBIDA",
+                    "USUARIO_REGISTRO"
+                ]
+                # Obtenemos o creamos la hoja
+                hoja_sustentos = obtener_o_crear_worksheet("maestra_vendedores", "Sustentos_Bajas", columnas_defecto)
+                # Leemos todos los registros
+                datos_sustentos = hoja_sustentos.get_all_records()
+                if not datos_sustentos:
+                    st.info("ℹ️ No hay sustentos de bajas médicas registrados en este periodo.")
+                else:
+                    df_sustentos = pd.DataFrame(datos_sustentos)
+                    # Filtrar por periodo actual para mostrar solo lo relevante
+                    if "PERIODO" in df_sustentos.columns:
+                        df_sustentos = df_sustentos[df_sustentos["PERIODO"].astype(str) == periodo]
+                    
+                    if df_sustentos.empty:
+                        st.info("ℹ️ No hay sustentos de bajas médicas registrados para el periodo actual.")
+                    else:
+                        # Ordenar por fecha de subida descendente (más recientes primero)
+                        if "FECHA_SUBIDA" in df_sustentos.columns:
+                            df_sustentos = df_sustentos.sort_values(by="FECHA_SUBIDA", ascending=False)
+                            
+                        # Configurar columna de link como LinkColumn para que sea directamente cliqueable
+                        st.dataframe(
+                            df_sustentos,
+                            use_container_width=True,
+                            hide_index=True,
+                            column_config={
+                                "LINK_DOCUMENTO": st.column_config.LinkColumn("Link de Documento", width="medium"),
+                                "FECHA_ASISTENCIA": st.column_config.Column("Fecha Asistencia", width="small"),
+                                "DNI": st.column_config.Column("DNI", width="small"),
+                                "NOMBRE": st.column_config.Column("Colaborador", width="medium"),
+                                "FECHA_SUBIDA": st.column_config.Column("Fecha Subida", width="medium"),
+                            }
+                        )
+            except Exception as e:
+                st.error(f"Error al cargar log de sustentos: {e}")
 
     if registro_mod is not None:
         st.divider()
