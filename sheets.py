@@ -9,13 +9,12 @@ from googleapiclient.http import MediaIoBaseUpload
 
 # ==============================================================================
 # CONFIGURACIÓN DE DRIVE
+# Comparte la carpeta de destino con el email de la cuenta de servicio
+# (campo "client_email" en tus credenciales) dándole rol "Editor".
+# Luego copia el ID de esa carpeta desde la URL de Google Drive y
+# ponlo en Streamlit Secrets como: ID_CARPETA_SUSTENTOS = "..."
 # ==============================================================================
-# IMPORTANTE: Las Cuentas de Servicio de Google tienen cuota de almacenamiento CERO.
-# Para poder subir archivos, debes crear una Unidad Compartida (Shared Drive) en tu
-# Google Drive corporativo (de @wowperu.pe), añadir al correo de la Cuenta de Servicio
-# como miembro con permisos de "Administrador de contenido", crear una carpeta
-# llamada "Sustentos_Bajas_Medicas" adentro, y pegar su ID aquí abajo:
-ID_CARPETA_SUSTENTOS = "1nQBObQhWpfFIa-BUZrGWszLo4RJ7FCQN"
+ID_CARPETA_SUSTENTOS = os.getenv("ID_CARPETA_SUSTENTOS", "1nQBObQhWpfFIa-BUZrGWszLo4RJ7FCQN")
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
@@ -58,7 +57,7 @@ def conectar_google_sheets(nombre_hoja: str, nombre_worksheet: str):
 
 
 def conectar_google_drive():
-    """Establece conexión con la API de Google Drive v3."""
+    """Establece conexión con la API de Google Drive v3 (mantenido por compatibilidad)."""
     try:
         creds = obtener_credenciales()
         service = build('drive', 'v3', credentials=creds)
@@ -68,96 +67,27 @@ def conectar_google_drive():
         st.stop()
 
 
-def obtener_o_crear_carpeta_sustentos(drive_service) -> str:
-    """Retorna el ID de la carpeta de sustentos. Si ID_CARPETA_SUSTENTOS está configurado, lo usa directamente.
-    De lo contrario, busca la carpeta 'Sustentos_Bajas_Medicas' en todas las unidades (incluyendo compartidas).
-    """
-    if ID_CARPETA_SUSTENTOS:
-        return ID_CARPETA_SUSTENTOS
-
-    nombre_carpeta = "Sustentos_Bajas_Medicas"
-    try:
-        # Buscar si ya existe la carpeta en cualquier unidad compartida
-        query = f"name = '{nombre_carpeta}' and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
-        resultados = drive_service.files().list(
-            q=query, 
-            fields="files(id, name)",
-            supportsAllDrives=True,
-            includeItemsFromAllDrives=True
-        ).execute()
-        archivos = resultados.get("files", [])
-        
-        if archivos:
-            return archivos[0]["id"]
-        
-        # Si no existe, la creamos (intentar crearla en la raíz de la cuenta de servicio si no se configuró ID_CARPETA_SUSTENTOS)
-        metadata_carpeta = {
-            "name": nombre_carpeta,
-            "mimeType": "application/vnd.google-apps.folder"
-        }
-        carpeta = drive_service.files().create(
-            body=metadata_carpeta, 
-            fields="id",
-            supportsAllDrives=True
-        ).execute()
-        
-        # Darle permisos de lectura a cualquiera con el link para que RRHH pueda verla
-        drive_service.permissions().create(
-            fileId=carpeta["id"],
-            body={"type": "anyone", "role": "reader"},
-            fields="id",
-            supportsAllDrives=True
-        ).execute()
-        
-        return carpeta["id"]
-    except Exception as e:
-        st.error(f"⚠️ Error al gestionar la carpeta de sustentos en Drive: {e}")
-        raise e
-
-
 def subir_archivo_drive(nombre_archivo: str, contenido_bytes: bytes, mime_type: str) -> str:
-    """
-    Sube un archivo en memoria (bytes) a la carpeta de sustentos en Google Drive (soporta Unidades Compartidas).
-    Retorna la URL pública para visualizar el archivo.
-    """
+    """Sube un archivo a la carpeta de Drive compartida con la cuenta de servicio."""
+    if not ID_CARPETA_SUSTENTOS:
+        raise Exception("⚠️ Falta configurar ID_CARPETA_SUSTENTOS en Streamlit Secrets.")
     try:
-        drive_service = conectar_google_drive()
-        id_carpeta = obtener_o_crear_carpeta_sustentos(drive_service)
-        
-        metadata_archivo = {
-            "name": nombre_archivo,
-            "parents": [id_carpeta]
-        }
-        
-        # Subir el flujo de bytes
-        fh = io.BytesIO(contenido_bytes)
-        media = MediaIoBaseUpload(fh, mimetype=mime_type, resumable=True)
-        
-        archivo = drive_service.files().create(
-            body=metadata_archivo,
+        creds = obtener_credenciales()
+        service = build("drive", "v3", credentials=creds)
+        media = MediaIoBaseUpload(io.BytesIO(contenido_bytes), mimetype=mime_type, resumable=False)
+        archivo = service.files().create(
+            body={"name": nombre_archivo, "parents": [ID_CARPETA_SUSTENTOS]},
             media_body=media,
             fields="id, webViewLink",
-            supportsAllDrives=True
+            supportsAllDrives=True,
         ).execute()
-        
-        file_id = archivo.get("id")
-        
-        # Habilitar permisos de visualización pública ("cualquiera con el link puede leer")
-        drive_service.permissions().create(
-            fileId=file_id,
+        # Dar permiso de lectura con link para que RRHH pueda verlo
+        service.permissions().create(
+            fileId=archivo["id"],
             body={"type": "anyone", "role": "reader"},
-            fields="id",
-            supportsAllDrives=True
+            supportsAllDrives=True,
         ).execute()
-        
-        # Obtener el link de visualización actualizado
-        info = drive_service.files().get(
-            fileId=file_id, 
-            fields="webViewLink",
-            supportsAllDrives=True
-        ).execute()
-        return info.get("webViewLink")
-        
+        return archivo.get("webViewLink", "")
     except Exception as e:
         raise Exception(f"Error al subir el archivo '{nombre_archivo}' a Google Drive: {e}")
 
