@@ -15,7 +15,7 @@ from googleapiclient.http import MediaIoBaseUpload
 # Google Drive corporativo (de @wowperu.pe), añadir al correo de la Cuenta de Servicio
 # como miembro con permisos de "Administrador de contenido", crear una carpeta
 # llamada "Sustentos_Bajas_Medicas" adentro, y pegar su ID aquí abajo:
-ID_CARPETA_SUSTENTOS = ""
+ID_CARPETA_SUSTENTOS = "1nQBObQhWpfFIa-BUZrGWszLo4RJ7FCQN"
 
 SCOPES = [
     "https://www.googleapis.com/auth/spreadsheets",
