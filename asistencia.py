@@ -13,10 +13,13 @@ Cambios aplicados:
 
 import calendar
 import time
+import pytz
 from datetime import datetime, date
 
 import pandas as pd
 import streamlit as st
+from sheets import subir_archivo_drive, obtener_o_crear_worksheet
+
 
 # =====================================================
 # CONSTANTES
@@ -664,6 +667,63 @@ def actualizar_cache_con_editado(df_editado: pd.DataFrame, col_hoy: str) -> None
 
 
 # =====================================================
+# MODAL DE CARGA DE SUSTENTO OBLIGATORIO (A-BM)
+# =====================================================
+@st.dialog("📋 Carga de Sustento Obligatorio: Baja Médica")
+def mostrar_dialogo_sustento(dni, nombre, row_sheet, col_hoy, df_editor):
+    st.write(f"Colaborador: **{nombre}** (DNI: {dni})")
+    st.warning("⚠️ Para registrar **A-BM (Baja Médica)**, es obligatorio subir el sustento o certificado médico correspondiente.")
+    
+    archivo = st.file_uploader(
+        "Subir certificado médico (PDF o Imagen)",
+        type=["pdf", "png", "jpg", "jpeg"],
+        key=f"file_uploader_{dni}"
+    )
+    
+    st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
+    col_c1, col_c2 = st.columns(2)
+    with col_c1:
+        guardar = st.button("✅ Subir y Validar", use_container_width=True, key=f"btn_val_sustento_{dni}")
+    with col_c2:
+        cancelar = st.button("❌ Cancelar y Revertir", use_container_width=True, key=f"btn_canc_sustento_{dni}")
+        
+    if guardar:
+        if not archivo:
+            st.error("❌ Debes seleccionar y subir un archivo válido para registrar la baja médica.")
+        else:
+            if "sustentos_pendientes" not in st.session_state:
+                st.session_state["sustentos_pendientes"] = {}
+                
+            st.session_state["sustentos_pendientes"][dni] = {
+                "nombre_archivo": archivo.name,
+                "contenido_bytes": archivo.read(),
+                "mime_type": archivo.type,
+                "dni": dni,
+                "nombre": nombre,
+                "row_sheet": row_sheet
+            }
+            st.success("✅ Sustento cargado y validado en memoria. Se subirá a Drive al guardar la asistencia.")
+            time.sleep(1.2)
+            st.rerun()
+            
+    if cancelar:
+        # Revertir la selección de A-BM en el data editor
+        if "editor_presencialidad_dia_actual" in st.session_state:
+            edited_rows = st.session_state["editor_presencialidad_dia_actual"].get("edited_rows", {})
+            for r_str in list(edited_rows.keys()):
+                r_idx = int(r_str)
+                if r_idx < len(df_editor):
+                    row_dni = df_editor.iloc[r_idx]["DNI"]
+                    if row_dni == dni:
+                        # Revertimos a vacío
+                        edited_rows[r_str][col_hoy] = ""
+                        
+        st.warning("Marcación revertida.")
+        time.sleep(1.2)
+        st.rerun()
+
+
+# =====================================================
 # MAIN
 # =====================================================
 def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, razon=None):
@@ -821,6 +881,38 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
         df_editor = df_editor_base[columnas_editor].copy().fillna("").replace({"None": "", "nan": ""})
         df_editor[col_hoy] = df_editor[col_hoy].apply(limpiar_marca)
 
+        # =====================================================
+        # DETECCIÓN EN TIEMPO REAL: marca A-BM sin sustento
+        # =====================================================
+        cambios = st.session_state.get("editor_presencialidad_dia_actual", {}).get("edited_rows", {})
+        if cambios:
+            # Limpiar sustentos huérfanos si cambiaron de A-BM a otra cosa
+            sustentos_cargados = st.session_state.get("sustentos_pendientes", {})
+            if sustentos_cargados:
+                dni_en_baja = set()
+                for r_str, cols in cambios.items():
+                    r_idx = int(r_str)
+                    if col_hoy in cols and cols[col_hoy] == "A-BM":
+                        if r_idx < len(df_editor):
+                            dni_en_baja.add(df_editor.iloc[r_idx]["DNI"])
+                for dni in list(sustentos_cargados.keys()):
+                    if dni not in dni_en_baja:
+                        del st.session_state["sustentos_pendientes"][dni]
+
+            # Verificar si hay alguna selección nueva de A-BM que requiera sustento
+            for r_str, cols in cambios.items():
+                r_idx = int(r_str)
+                if col_hoy in cols and cols[col_hoy] == "A-BM":
+                    if r_idx < len(df_editor):
+                        row_data = df_editor.iloc[r_idx]
+                        dni = row_data["DNI"]
+                        nombre = row_data["NOMBRE"]
+                        row_sheet = row_data["ROW_SHEET"]
+                        
+                        if dni not in st.session_state.get("sustentos_pendientes", {}):
+                            mostrar_dialogo_sustento(dni, nombre, row_sheet, col_hoy, df_editor)
+                            st.stop()  # Detener el render principal para dar foco al modal
+
         disabled_cols = [col for col in df_editor.columns if col != col_hoy]
         # Mantengo ROW_SHEET visible como FILA técnica para evitar el error React #185
         # que aparece a veces cuando se oculta una columna usada para guardar.
@@ -849,6 +941,69 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                     if df_editado.empty or "ROW_SHEET" not in df_editado.columns:
                         st.warning("No se pudo leer la tabla del editor. Recarga la página.")
                     else:
+                        # 1. Validación de seguridad final para marcas A-BM sin sustento
+                        cambios_actuales = st.session_state.get("editor_presencialidad_dia_actual", {}).get("edited_rows", {})
+                        for r_str, cols in cambios_actuales.items():
+                            r_idx = int(r_str)
+                            if col_hoy in cols and cols[col_hoy] == "A-BM":
+                                if r_idx < len(df_editor):
+                                    dni = df_editor.iloc[r_idx]["DNI"]
+                                    if dni not in st.session_state.get("sustentos_pendientes", {}):
+                                        st.error(f"❌ Falta el sustento médico obligatorio para {df_editor.iloc[r_idx]['NOMBRE']}.")
+                                        st.stop()
+
+                        # 2. Subida de certificados a Google Drive y registro de auditoría en Sheets
+                        sustentos = st.session_state.get("sustentos_pendientes", {})
+                        if sustentos:
+                            columnas_defecto = [
+                                "PERIODO",
+                                "FECHA_ASISTENCIA",
+                                "DNI",
+                                "NOMBRE",
+                                "RAZON SOCIAL",
+                                "MOTIVO",
+                                "LINK_DOCUMENTO",
+                                "FECHA_SUBIDA",
+                                "USUARIO_REGISTRO"
+                            ]
+                            hoja_sustentos = obtener_o_crear_worksheet("maestra_vendedores", "Sustentos_Bajas", columnas_defecto)
+                            
+                            filas_nuevas = []
+                            user_activo = st.session_state.get("usuario", "desconocido")
+                            tz_lima = pytz.timezone("America/Lima")
+                            timestamp_lima = datetime.now(tz_lima).strftime("%Y-%m-%d %H:%M:%S")
+                            
+                            for dni, datos in list(sustentos.items()):
+                                extension = "pdf" if datos["mime_type"] == "application/pdf" else "jpg"
+                                nombre_archivo_drive = f"sustento_{dni}_{hoy_actual()}.{extension}"
+                                
+                                link_drive = subir_archivo_drive(
+                                    nombre_archivo=nombre_archivo_drive,
+                                    contenido_bytes=datos["contenido_bytes"],
+                                    mime_type=datos["mime_type"]
+                                )
+                                
+                                row_vendedor = df_editor[df_editor["DNI"] == dni].iloc[0]
+                                razon_social = row_vendedor.get("RAZON SOCIAL", "")
+                                
+                                filas_nuevas.append([
+                                    periodo,
+                                    str(hoy_actual()),
+                                    dni,
+                                    datos["nombre"],
+                                    razon_social,
+                                    "A-BM (Baja Médica)",
+                                    link_drive,
+                                    timestamp_lima,
+                                    user_activo
+                                ])
+                            
+                            if filas_nuevas:
+                                hoja_sustentos.append_rows(filas_nuevas, value_input_option="USER_ENTERED")
+                            
+                            # Limpiar memoria de sustentos procesados
+                            st.session_state["sustentos_pendientes"] = {}
+
                         updates = preparar_updates(
                             df_editado=df_editado,
                             df_original=df_original,
