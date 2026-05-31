@@ -140,9 +140,9 @@ def _leer_ubicaciones_cached(_hoja_ubicaciones):
     if not valores:
         return pd.DataFrame()
 
-    headers = [str(h).strip().upper() for h in valores[0]]
+    headers_raw = [str(h).strip().upper() for h in valores[0]]
     data = valores[1:]
-    n = len(headers)
+    n = len(headers_raw)
     filas = []
     for fila in data:
         fila = list(fila)
@@ -150,13 +150,20 @@ def _leer_ubicaciones_cached(_hoja_ubicaciones):
             fila += [""] * (n - len(fila))
         filas.append(fila[:n])
 
-    df = pd.DataFrame(filas, columns=headers)
+    # IMPORTANTE:
+    # En la hoja ubicaciones existen dos columnas llamadas exactamente DNI FINAL:
+    #   SUPERVISOR A CARGO FINAL | DNI FINAL | COORDINADOR FINAL | DNI FINAL
+    # Pandas/gspread puede confundirse con cabeceras duplicadas. Por eso tomamos
+    # los DNI por posición ANTES de hacer únicas las columnas y luego creamos
+    # columnas canónicas: DNI SUPERVISOR y DNI COORDINADOR.
+    df_raw = pd.DataFrame(filas, columns=headers_raw)
+    posiciones_dni_final = [i for i, h in enumerate(headers_raw) if h == "DNI FINAL"]
+    dni_supervisor_vals = df_raw.iloc[:, posiciones_dni_final[0]].astype(str).str.strip() if len(posiciones_dni_final) >= 1 else ""
+    dni_coordinador_vals = df_raw.iloc[:, posiciones_dni_final[1]].astype(str).str.strip() if len(posiciones_dni_final) >= 2 else ""
 
-    # En ubicaciones hay dos columnas con el mismo nombre: DNI FINAL.
-    # La primera corresponde a supervisor y la segunda a coordinador.
     nuevas_columnas = []
     contador_dni = 0
-    for col in df.columns:
+    for col in headers_raw:
         col_up = str(col).strip().upper()
         if col_up == "DNI FINAL":
             contador_dni += 1
@@ -164,12 +171,17 @@ def _leer_ubicaciones_cached(_hoja_ubicaciones):
         else:
             nuevas_columnas.append(col_up)
 
-    df.columns = hacer_columnas_unicas(nuevas_columnas)
+    df = pd.DataFrame(filas, columns=hacer_columnas_unicas(nuevas_columnas))
     df = normalizar_columnas(df).fillna("")
-
-    # Limpieza segura: no usar df[c].str directo porque si una cabecera queda duplicada
-    # pandas devuelve DataFrame y rompe Render.
     df = df.astype(str).apply(lambda col: col.str.strip())
+
+    # Forzar columnas limpias para la búsqueda, aunque las cabeceras originales
+    # queden duplicadas o con sufijos automáticos.
+    if len(posiciones_dni_final) >= 1:
+        df["DNI SUPERVISOR"] = dni_supervisor_vals.values
+    if len(posiciones_dni_final) >= 2:
+        df["DNI COORDINADOR"] = dni_coordinador_vals.values
+
     return df
 
 
@@ -432,15 +444,35 @@ def normalizar_nombre_match(valor) -> str:
 
 
 def buscar_dni_por_nombre(df: pd.DataFrame, columna_nombre: str, columna_dni: str, nombre: str) -> str:
-    if not nombre or df.empty or columna_nombre not in df.columns or columna_dni not in df.columns:
+    if not nombre or df.empty or columna_nombre not in df.columns:
         return ""
+
+    # Si por algún sufijo de cabecera el nombre exacto no existe, busca una columna compatible.
+    if columna_dni not in df.columns:
+        posibles = [c for c in df.columns if str(c).upper().startswith(columna_dni)]
+        if not posibles:
+            return ""
+        columna_dni = posibles[0]
+
     objetivo = normalizar_nombre_match(nombre)
     serie_nombre = serie_columna(df, columna_nombre).apply(normalizar_nombre_match)
+
+    # Match exacto normalizado.
     base = df[serie_nombre.eq(objetivo)]
+
+    # Fallback por si el Drive tiene espacios dobles, tildes raras o caracteres invisibles.
+    if base.empty:
+        base = df[serie_nombre.apply(lambda x: x == objetivo or x in objetivo or objetivo in x)]
+
     if base.empty:
         return ""
-    valor = base.iloc[0].get(columna_dni, "")
-    return normalizar_dni(valor)
+
+    for _, row in base.iterrows():
+        valor = row.get(columna_dni, "")
+        dni = normalizar_dni(valor)
+        if dni:
+            return dni
+    return ""
 
 
 # =========================
