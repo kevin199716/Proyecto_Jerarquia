@@ -646,7 +646,7 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
     fuentes_ingreso = lista_limpia(df_ubi, "FUENTE_INGRESO")
 
     st.caption(
-        "Modo estable: primero aplica la configuración comercial. Luego llena el alta. "
+        "V24 MODO RÁPIDO: primero aplica configuración comercial. Luego llena el alta. "
         "Así los campos del formulario no recargan la pantalla por cada selección."
     )
 
@@ -753,7 +753,7 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             subcanal = st.selectbox("SUB CANAL", subcanal_options, key=k("subcanal"))
             region = st.selectbox("REGIÓN", ["", "CENTRAL", "NORORIENTE", "SUR"], key=k("region"))
 
-            if canal == "VENTAS_DIRECTAS":
+            if canal == "VENTAS DIRECTAS":
                 opciones_cargo = ["", "Agente BO D2D", "Promotor D2D", "Supervisor D2D", "Coordinador D2D"]
             else:
                 # Indirectas conserva Dealer.
