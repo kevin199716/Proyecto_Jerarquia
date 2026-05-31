@@ -1,4 +1,5 @@
 import re
+import unicodedata
 from datetime import datetime, timedelta
 
 import pandas as pd
@@ -70,33 +71,6 @@ def hacer_columnas_unicas(columnas: list[str]) -> list[str]:
     return salida
 
 
-def leer_records_sin_exigir_header_unico(hoja) -> list[dict]:
-    """Lee Google Sheets sin romper si la fila 1 tiene cabeceras repetidas.
-
-    gspread.get_all_records() falla con:
-    "the header row in the worksheet is not unique".
-    Para evitar que se caiga la app, leemos get_all_values() y hacemos únicas
-    las cabeceras duplicadas agregando _2, _3, etc. La primera cabecera mantiene
-    su nombre original, que es la que usa la lógica del sistema.
-    """
-    valores = hoja.get_all_values()
-    if not valores:
-        return []
-
-    headers_raw = [str(h).strip().upper() for h in valores[0]]
-    headers = hacer_columnas_unicas(headers_raw)
-    data = valores[1:]
-    n = len(headers)
-
-    registros = []
-    for fila in data:
-        fila = list(fila)
-        if len(fila) < n:
-            fila += [""] * (n - len(fila))
-        registros.append({headers[i]: fila[i] for i in range(n)})
-    return registros
-
-
 def serie_columna(df: pd.DataFrame, columna: str) -> pd.Series:
     """Devuelve siempre una Serie aunque la columna exista duplicada."""
     if df.empty or columna not in df.columns:
@@ -140,9 +114,22 @@ def _leer_ubicaciones_cached(_hoja_ubicaciones):
     if not valores:
         return pd.DataFrame()
 
+    # IMPORTANTE:
+    # En la hoja ubicaciones existen dos cabeceras iguales: DNI FINAL.
+    # No podemos depender de pandas con cabeceras duplicadas porque puede devolver DataFrame
+    # en lugar de Serie. Por eso primero tomamos los DNI por POSICIÓN REAL:
+    #   SUPERVISOR A CARGO FINAL -> primer DNI FINAL
+    #   COORDINADOR FINAL        -> segundo DNI FINAL
     headers_raw = [str(h).strip().upper() for h in valores[0]]
     data = valores[1:]
     n = len(headers_raw)
+
+    idx_sup_nombre = headers_raw.index("SUPERVISOR A CARGO FINAL") if "SUPERVISOR A CARGO FINAL" in headers_raw else None
+    idx_coord_nombre = headers_raw.index("COORDINADOR FINAL") if "COORDINADOR FINAL" in headers_raw else None
+    idx_dni_finales = [i for i, h in enumerate(headers_raw) if h == "DNI FINAL"]
+    idx_dni_sup = idx_dni_finales[0] if len(idx_dni_finales) >= 1 else None
+    idx_dni_coord = idx_dni_finales[1] if len(idx_dni_finales) >= 2 else None
+
     filas = []
     for fila in data:
         fila = list(fila)
@@ -150,39 +137,28 @@ def _leer_ubicaciones_cached(_hoja_ubicaciones):
             fila += [""] * (n - len(fila))
         filas.append(fila[:n])
 
-    # IMPORTANTE:
-    # En la hoja ubicaciones existen dos columnas llamadas exactamente DNI FINAL:
-    #   SUPERVISOR A CARGO FINAL | DNI FINAL | COORDINADOR FINAL | DNI FINAL
-    # Pandas/gspread puede confundirse con cabeceras duplicadas. Por eso tomamos
-    # los DNI por posición ANTES de hacer únicas las columnas y luego creamos
-    # columnas canónicas: DNI SUPERVISOR y DNI COORDINADOR.
-    df_raw = pd.DataFrame(filas, columns=headers_raw)
-    posiciones_dni_final = [i for i, h in enumerate(headers_raw) if h == "DNI FINAL"]
-    dni_supervisor_vals = df_raw.iloc[:, posiciones_dni_final[0]].astype(str).str.strip() if len(posiciones_dni_final) >= 1 else ""
-    dni_coordinador_vals = df_raw.iloc[:, posiciones_dni_final[1]].astype(str).str.strip() if len(posiciones_dni_final) >= 2 else ""
-
-    nuevas_columnas = []
-    contador_dni = 0
-    for col in headers_raw:
-        col_up = str(col).strip().upper()
-        if col_up == "DNI FINAL":
-            contador_dni += 1
-            nuevas_columnas.append("DNI SUPERVISOR" if contador_dni == 1 else "DNI COORDINADOR")
-        else:
-            nuevas_columnas.append(col_up)
-
-    df = pd.DataFrame(filas, columns=hacer_columnas_unicas(nuevas_columnas))
-    df = normalizar_columnas(df).fillna("")
+    columnas_unicas = hacer_columnas_unicas(headers_raw)
+    df = pd.DataFrame(filas, columns=columnas_unicas).fillna("")
+    df = normalizar_columnas(df)
     df = df.astype(str).apply(lambda col: col.str.strip())
 
-    # Forzar columnas limpias para la búsqueda, aunque las cabeceras originales
-    # queden duplicadas o con sufijos automáticos.
-    if len(posiciones_dni_final) >= 1:
-        df["DNI SUPERVISOR"] = dni_supervisor_vals.values
-    if len(posiciones_dni_final) >= 2:
-        df["DNI COORDINADOR"] = dni_coordinador_vals.values
+    # Sobrescribimos/creamos las columnas limpias que usará el formulario.
+    # Así no importa si en Sheets ambas cabeceras dicen DNI FINAL.
+    def tomar_columna_por_indice(idx):
+        if idx is None:
+            return [""] * len(filas)
+        return [limpiar_texto(f[idx] if idx < len(f) else "") for f in filas]
 
-    return df
+    if idx_sup_nombre is not None:
+        df["SUPERVISOR A CARGO FINAL"] = tomar_columna_por_indice(idx_sup_nombre)
+    if idx_dni_sup is not None:
+        df["DNI SUPERVISOR"] = [normalizar_dni(v) for v in tomar_columna_por_indice(idx_dni_sup)]
+    if idx_coord_nombre is not None:
+        df["COORDINADOR FINAL"] = tomar_columna_por_indice(idx_coord_nombre)
+    if idx_dni_coord is not None:
+        df["DNI COORDINADOR"] = [normalizar_dni(v) for v in tomar_columna_por_indice(idx_dni_coord)]
+
+    return df.fillna("")
 
 
 def leer_ubicaciones(hoja_ubicaciones, forzar=False):
@@ -193,7 +169,7 @@ def leer_ubicaciones(hoja_ubicaciones, forzar=False):
 
 @st.cache_data(ttl=300, show_spinner=False)
 def _leer_colaboradores_cached(_hoja_colaboradores):
-    data = leer_records_sin_exigir_header_unico(_hoja_colaboradores)
+    data = _hoja_colaboradores.get_all_records()
     df = pd.DataFrame(data)
     if df.empty:
         return pd.DataFrame()
@@ -207,215 +183,32 @@ def leer_colaboradores(hoja_colaboradores, forzar=False):
 
 
 def obtener_headers(hoja_colaboradores) -> list[str]:
-    """Lee solo la fila de cabeceras. No lee toda la hoja para evitar frizado."""
-    try:
-        headers = hoja_colaboradores.row_values(1)
-    except Exception:
-        valores = hoja_colaboradores.get_all_values()
-        headers = valores[0] if valores else []
-    return [str(h).strip().upper() for h in headers]
-
-
-def _primera_columna_libre(headers: list[str]) -> int:
-    """Devuelve la primera columna libre después del último encabezado real."""
-    ultimo = 0
-    for i, h in enumerate(headers, start=1):
-        if str(h).strip():
-            ultimo = i
-    return ultimo + 1
+    valores = hoja_colaboradores.get_all_values()
+    if not valores:
+        return []
+    return [str(h).strip().upper() for h in valores[0]]
 
 
 def asegurar_columnas_colaboradores(hoja_colaboradores, columnas_requeridas: list[str]) -> list[str]:
     """
-    Garantiza columnas nuevas SIN usar insert_cols / delete_columns.
-
-    Motivo: en Google Sheets, insertar o mover columnas usa insertDimension.
-    Si el libro está cerca del límite de 10 millones de celdas, eso genera:
-    Invalid requests[0].insertDimension: above the limit of 10000000 cells.
-
-    Por eso esta versión solo escribe cabeceras en columnas vacías ya existentes.
-    No aumenta dimensiones ni mueve toda la hoja, así no se friza ni rompe el alta.
+    Agrega al final de la cabecera solo las columnas nuevas que no existan.
+    No reordena ni toca columnas existentes para no chancar la matriz actual.
+    Se ejecuta únicamente al guardar alta, no durante el llenado del formulario.
     """
     headers = obtener_headers(hoja_colaboradores)
     if not headers:
         return []
 
-    headers_up = [str(h).strip().upper() for h in headers]
-    existentes = set([h for h in headers_up if h])
-    faltantes = [str(c).strip().upper() for c in columnas_requeridas if str(c).strip().upper() not in existentes]
-
-    if not faltantes:
-        return headers_up
-
-    # Usar columnas vacías existentes; NO insertar nuevas columnas.
-    try:
-        total_cols = int(getattr(hoja_colaboradores, "col_count", len(headers_up)))
-    except Exception:
-        total_cols = len(headers_up)
-
-    col_libre = _primera_columna_libre(headers_up)
-    for col in faltantes:
-        if col_libre > total_cols:
-            raise Exception(
-                "No hay columnas libres en la hoja para crear las cabeceras nuevas sin superar el límite de Google Sheets. "
-                "Elimina columnas vacías sobrantes del libro o agrega manualmente estas cabeceras antes de columnas calculadas: "
-                + ", ".join(faltantes)
-            )
-        hoja_colaboradores.update_cell(1, col_libre, col)
-        # Asegurar que la lista local tenga esa posición.
-        while len(headers_up) < col_libre:
-            headers_up.append("")
-        headers_up[col_libre - 1] = col
-        col_libre += 1
-
-    return obtener_headers(hoja_colaboradores)
-
-
-def agregar_fila_colaboradores_seguro(hoja_colaboradores, headers: list[str], fila: list[str], cantidad_registros_actual: int) -> int:
-    """
-    Escribe la fila en la siguiente fila disponible sin usar append_row cuando existe
-    capacidad dentro del grid. Esto evita que Google Sheets intente insertar filas
-    si el archivo está cerca del límite de celdas.
-    """
-    target_row = int(cantidad_registros_actual) + 2  # cabecera + registros existentes
-    last_col = max(1, len(headers))
-    # Alinear largo de fila con cabeceras.
-    fila = list(fila)
-    if len(fila) < last_col:
-        fila += [""] * (last_col - len(fila))
-    else:
-        fila = fila[:last_col]
-
-    try:
-        row_count = int(getattr(hoja_colaboradores, "row_count", 0))
-    except Exception:
-        row_count = 0
-
-    # Si la fila existe en el grid, actualizar rango directo. No inserta dimensiones.
-    if row_count and target_row <= row_count:
-        col_fin = letra_columna_local(last_col)
-        hoja_colaboradores.update(
-            f"A{target_row}:{col_fin}{target_row}",
-            [fila],
-            value_input_option="USER_ENTERED",
-        )
-        return target_row
-
-    # Fallback: solo si ya no hay filas vacías disponibles.
-    hoja_colaboradores.append_row(fila, value_input_option="USER_ENTERED")
-    return target_row
-
-
-def letra_columna_local(numero: int) -> str:
-    letras = ""
-    while numero:
-        numero, resto = divmod(numero - 1, 26)
-        letras = chr(65 + resto) + letras
-    return letras
-
-
-
-def _mapa_headers(headers: list[str]) -> dict:
-    """Mapa de cabecera -> posición 1-based, tomando la primera aparición."""
-    mapa = {}
-    for i, h in enumerate(headers, start=1):
-        hu = str(h).strip().upper()
-        if hu and hu not in mapa:
-            mapa[hu] = i
-    return mapa
-
-
-def _dict_fila_por_headers(headers: list[str], valores_fila: list[str]) -> dict:
-    """Convierte una fila a dict usando la primera aparición de cada cabecera."""
-    out = {}
-    for i, h in enumerate(headers):
-        hu = str(h).strip().upper()
-        if not hu or hu in out:
-            continue
-        out[hu] = valores_fila[i] if i < len(valores_fila) else ""
-    return out
-
-
-def validar_dni_unico_historico_sheet(hoja_colaboradores, headers: list[str], dni_limpio: str, fecha_alta) -> tuple[bool, str, int]:
-    """Validación rápida sin leer toda la matriz.
-
-    Antes se usaba get_all_values/get_all_records sobre toda la hoja colaboradores.
-    En una hoja grande eso frizeaba el formulario. Esta función lee solo:
-    1) la cabecera, 2) la columna DNI, 3) las pocas filas donde coincide el DNI.
-    Devuelve además la siguiente fila sugerida para escribir.
-    """
-    fecha_alta = parse_fecha(fecha_alta)
-    if fecha_alta is None:
-        return False, "❌ La FECHA DE CREACION USUARIO no es válida.", 2
-
-    mapa = _mapa_headers(headers)
-    col_dni = mapa.get("DNI")
-    if not col_dni:
-        return False, "❌ La hoja colaboradores no tiene columna DNI en la cabecera.", 2
-
-    try:
-        dni_col = hoja_colaboradores.col_values(col_dni)
-    except Exception as e:
-        return False, f"❌ No se pudo validar DNI en la hoja colaboradores: {e}", 2
-
-    # Siguiente fila según la columna DNI. No lee toda la hoja.
-    siguiente_fila = max(2, len(dni_col) + 1)
-
-    filas_match = []
-    for idx, valor in enumerate(dni_col[1:], start=2):
-        if normalizar_dni(valor) == dni_limpio:
-            filas_match.append(idx)
-
-    if not filas_match:
-        return True, "", siguiente_fila
-
-    registros = []
-    for row_num in filas_match:
-        try:
-            valores = hoja_colaboradores.row_values(row_num)
-        except Exception:
-            valores = []
-        reg = _dict_fila_por_headers(headers, valores)
-        reg["_ROW_SHEET"] = row_num
-        registros.append(reg)
-
-    activos = [r for r in registros if limpiar_texto(r.get("ESTADO", "")).upper() == "ACTIVO"]
-    if activos:
-        detalle = activos[0]
-        razon = limpiar_texto(detalle.get("RAZON SOCIAL", ""))
-        nombre = " ".join([
-            limpiar_texto(detalle.get("NOMBRES", detalle.get("NOMBRE", ""))),
-            limpiar_texto(detalle.get("APELLIDO PATERNO", "")),
-            limpiar_texto(detalle.get("APELLIDO MATERNO", "")),
-        ]).strip()
-        return False, (
-            f"❌ El DNI {dni_limpio} ya se encuentra ACTIVO en la base. "
-            f"No se puede registrar nuevamente, indistintamente del dealer. "
-            f"Registro activo: {razon} / {nombre}."
-        ), siguiente_fila
-
-    fechas_baja = []
-    columnas_baja_base = ["FECHA DE CESE", "FECHA CESE", "FECHA_BAJA_REGISTRO", "FECHA BAJA REGISTRO"]
-    for reg in registros:
-        estado_row = limpiar_texto(reg.get("ESTADO", "")).upper()
-        for col in columnas_baja_base:
-            f = parse_fecha(reg.get(col, ""))
-            if f:
-                fechas_baja.append(f)
-        if estado_row == "INACTIVO":
-            f_mov = parse_fecha(reg.get("FECHA MOV", ""))
-            if f_mov:
-                fechas_baja.append(f_mov)
-
-    if fechas_baja:
-        ultima_baja = max(fechas_baja)
-        if fecha_alta <= ultima_baja:
-            return False, (
-                f"❌ La fecha de alta ({fecha_alta}) debe ser MAYOR a la última baja/movimiento "
-                f"del DNI {dni_limpio}: {ultima_baja}. No puede ser igual ni menor."
-            ), siguiente_fila
-
-    return True, "", siguiente_fila
+    headers_set = {h.strip().upper() for h in headers}
+    col_actual = len(headers)
+    for col in columnas_requeridas:
+        col_up = str(col).strip().upper()
+        if col_up and col_up not in headers_set:
+            col_actual += 1
+            hoja_colaboradores.update_cell(1, col_actual, col_up)
+            headers.append(col_up)
+            headers_set.add(col_up)
+    return headers
 
 
 # =========================
@@ -435,44 +228,31 @@ def lista_limpia(df: pd.DataFrame, columna: str) -> list[str]:
 
 
 def normalizar_nombre_match(valor) -> str:
-    txt = limpiar_texto(valor).upper()
-    # Quitar tildes y normalizar espacios para que el DNI salga aunque haya diferencias mínimas.
-    reemplazos = str.maketrans("ÁÉÍÓÚÜÑ", "AEIOUUN")
-    txt = txt.translate(reemplazos)
-    txt = re.sub(r"\s+", " ", txt).strip()
-    return txt
+    """Normaliza nombres para comparar sin tildes, mayúsculas ni espacios dobles."""
+    s = limpiar_texto(valor).upper()
+    s = unicodedata.normalize("NFKD", s)
+    s = "".join(ch for ch in s if not unicodedata.combining(ch))
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
 
 
 def buscar_dni_por_nombre(df: pd.DataFrame, columna_nombre: str, columna_dni: str, nombre: str) -> str:
-    if not nombre or df.empty or columna_nombre not in df.columns:
+    if not nombre or df.empty or columna_nombre not in df.columns or columna_dni not in df.columns:
         return ""
-
-    # Si por algún sufijo de cabecera el nombre exacto no existe, busca una columna compatible.
-    if columna_dni not in df.columns:
-        posibles = [c for c in df.columns if str(c).upper().startswith(columna_dni)]
-        if not posibles:
-            return ""
-        columna_dni = posibles[0]
 
     objetivo = normalizar_nombre_match(nombre)
     serie_nombre = serie_columna(df, columna_nombre).apply(normalizar_nombre_match)
-
-    # Match exacto normalizado.
     base = df[serie_nombre.eq(objetivo)]
 
-    # Fallback por si el Drive tiene espacios dobles, tildes raras o caracteres invisibles.
+    # Fallback por si viene un espacio/tilde raro desde Sheets.
     if base.empty:
-        base = df[serie_nombre.apply(lambda x: x == objetivo or x in objetivo or objetivo in x)]
+        base = df[serie_nombre.str.contains(re.escape(objetivo), na=False)]
 
     if base.empty:
         return ""
 
-    for _, row in base.iterrows():
-        valor = row.get(columna_dni, "")
-        dni = normalizar_dni(valor)
-        if dni:
-            return dni
-    return ""
+    valor = base.iloc[0].get(columna_dni, "")
+    return normalizar_dni(valor)
 
 
 # =========================
@@ -646,7 +426,6 @@ def valor_por_columna(headers: list[str], campos: dict) -> list[str]:
 # FORMULARIO
 # =========================
 def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=None):
-    # FORMULARIO_FINAL_ORDEN_ORIGINAL_DNI_FIX_UNICO_20260531
     st.markdown("<span class='wow-section-title'>📋 Alta de Vendedores</span>", unsafe_allow_html=True)
 
     msg_ok_pendiente = st.session_state.get("mensaje_ok")
@@ -662,10 +441,14 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
     rol = st.session_state.get("rol", "")
     razon_usuario = st.session_state.get("razon", "")
 
+    # Versión dinámica de llaves: cuando el alta se guarda correctamente,
+    # se incrementa y todos los campos vuelven limpios como si se abriera el módulo desde cero.
     version_form = int(st.session_state.get("alta_form_version", 0))
     k = lambda nombre: f"alta_v{version_form}_{nombre}"
 
+    # Solo ubicación se lee al cargar. Está cacheada 5 minutos para que el formulario no se frizee.
     df_ubi = leer_ubicaciones(hoja_ubicaciones)
+
     if df_ubi.empty:
         st.error("❌ No se pudo leer la hoja de ubicaciones.")
         return
@@ -684,16 +467,15 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
     supervisores = lista_limpia(df_ubi, "SUPERVISOR A CARGO FINAL")
     coordinadores = lista_limpia(df_ubi, "COORDINADOR FINAL")
 
+    # Listas adicionales para canal VENTAS DIRECTAS (mismo worksheet ubicaciones).
+    # Si la columna no existe, queda lista vacía y se muestra alerta controlada.
     supervisores_directo = lista_limpia(df_ubi, "SUPERVISOR")
     capacitadores = lista_limpia(df_ubi, "CAPACITADOR")
     origenes_ingreso = lista_limpia(df_ubi, "ORIGEN_INGRESO")
     fuentes_ingreso = lista_limpia(df_ubi, "FUENTE_INGRESO")
 
-    # =====================================================
-    # FORMULARIO EN EL ORDEN ORIGINAL SOLICITADO
-    # ARRIBA: Datos del colaborador | Datos comerciales
-    # ABAJO: Ubicación y jerarquía
-    # =====================================================
+    st.caption("WOW TEL se gestiona como VENTAS DIRECTAS. Los demás socios se gestionan como VENTAS INDIRECTAS. En indirectas se mantiene la lógica original de cargos Dealer; en directas el cargo va limpio sin Dealer.")
+
     col_izq, col_der = st.columns(2)
 
     with col_izq:
@@ -714,6 +496,9 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             razon = razon_usuario
             st.text_input("RAZÓN SOCIAL", value=razon, disabled=True, key=k("razon_dealer"))
 
+        # Regla comercial:
+        # - WOW TEL pertenece a VENTAS DIRECTAS. Apenas se selecciona, el canal queda DIRECTO.
+        # - Los demás socios pertenecen a VENTAS INDIRECTAS.
         razon_norm = limpiar_texto(razon).upper()
         if razon_norm == "WOW TEL":
             canal_options = ["VENTAS DIRECTAS"]
@@ -723,24 +508,40 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             canal_options = ["VENTAS INDIRECTAS", "VENTAS DIRECTAS"]
 
         canal = st.selectbox("CANAL", canal_options, key=k("canal"))
-
         if canal == "VENTAS DIRECTAS":
             subcanal = st.selectbox("SUB CANAL", ["VENTAS DIRECTAS"], key=k("subcanal"))
             tipo_gestion = ""
         else:
             subcanal = st.selectbox("SUB CANAL", ["VENTAS INDIRECTAS", "OUTBOUND"], key=k("subcanal"))
             tipo_gestion = "CAMPO"
-
+        # TIPO_GESTION no se muestra en pantalla.
+        # Regla: VENTAS INDIRECTAS viaja como CAMPO; VENTAS DIRECTAS viaja vacío.
         region = st.selectbox("REGIÓN", ["", "CENTRAL", "NORORIENTE", "SUR"], key=k("region"))
-
-        if canal == "VENTAS_DIRECTAS":
-            opciones_cargo = ["", "Agente BO D2D", "Promotor D2D", "Supervisor D2D", "Coordinador D2D"]
-        elif canal == "VENTAS DIRECTAS":
-            opciones_cargo = ["", "Agente BO D2D", "Promotor D2D", "Supervisor D2D", "Coordinador D2D"]
+        # CARGO (ROL) depende del canal:
+        # - VENTAS INDIRECTAS conserva la lógica original con "- Dealer".
+        # - VENTAS DIRECTAS usa el rol limpio, sin "- Dealer".
+        if canal == "VENTAS DIRECTAS":
+            opciones_cargo = [
+                "",
+                "Agente BO D2D",
+                "Promotor D2D",
+                "Supervisor D2D",
+                "Coordinador D2D",
+            ]
         else:
-            opciones_cargo = ["", "Agente BO D2D - Dealer", "Promotor D2D - Dealer", "Supervisor D2D - Dealer", "Coordinador D2D - Dealer"]
+            opciones_cargo = [
+                "",
+                "Agente BO D2D - Dealer",
+                "Promotor D2D - Dealer",
+                "Supervisor D2D - Dealer",
+                "Coordinador D2D - Dealer",
+            ]
 
-        cargo = st.selectbox("CARGO (ROL)", opciones_cargo, key=k("cargo"))
+        cargo = st.selectbox(
+            "CARGO (ROL)",
+            opciones_cargo,
+            key=k("cargo"),
+        )
         tipo_contrato = st.selectbox("TIPO DE CONTRATO", ["PLANILLA", "MEDIA PLANILLA"], key=k("tipo_contrato"))
         hoy_alta = datetime.now(zona_peru).date()
         fecha_creacion = st.date_input(
@@ -749,14 +550,9 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             min_value=hoy_alta - timedelta(days=1),
             max_value=hoy_alta + timedelta(days=1),
             key=k("fecha_creacion"),
-            help="Solo permite ayer, hoy o mañana.",
+            help="Solo permite ayer, hoy o mañana."
         )
         contrato_firmado = st.selectbox("CONTRATO FIRMADO", ["SI"], index=0, key=k("contrato_firmado"))
-
-        # TIPO_GESTION solo se muestra para indirectas y viaja como CAMPO.
-        # Para directas NO aparece y viaja vacío.
-        if canal == "VENTAS INDIRECTAS":
-            st.text_input("TIPO_GESTION", value="CAMPO", disabled=True, key=k("tipo_gestion_visible"))
 
         supervisor_directo = ""
         capacitador = ""
@@ -770,19 +566,18 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             fuente_ingreso = st.selectbox("FUENTE INGRESO", [""] + fuentes_ingreso, key=k("fuente_ingreso"))
 
     # =====================================================
-    # UBICACIÓN / JERARQUÍA INDIRECTA ABAJO
+    # UBICACIÓN / JERARQUÍA
     # =====================================================
     departamento = ""
     provincia = ""
     coordinador = ""
     dni_coordinador = ""
-    supervisor = ""
-    dni_supervisor = ""
 
     if canal == "VENTAS INDIRECTAS":
         st.divider()
         st.markdown("**Ubicación y jerarquía**")
         col_u1, col_u2 = st.columns(2)
+
         with col_u1:
             departamento = st.selectbox("DEPARTAMENTO", [""] + departamentos, key=k("departamento"))
 
@@ -792,30 +587,30 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
                 provincias = lista_limpia(df_dep, "PROVINCIA")
 
             provincia = st.selectbox("PROVINCIA", [""] + provincias, key=k("provincia"))
+
             coordinador = st.selectbox("COORDINADOR", [""] + coordinadores, key=k("coordinador"))
             dni_coordinador = buscar_dni_por_nombre(df_ubi, "COORDINADOR FINAL", "DNI COORDINADOR", coordinador)
             st.text_input("DNI COORDINADOR", value=dni_coordinador, disabled=True, key=k("dni_coordinador"))
+
         with col_u2:
             supervisor = st.selectbox("SUPERVISOR A CARGO", [""] + supervisores, key=k("supervisor"))
             dni_supervisor = buscar_dni_por_nombre(df_ubi, "SUPERVISOR A CARGO FINAL", "DNI SUPERVISOR", supervisor)
             st.text_input("DNI SUPERVISOR", value=dni_supervisor, disabled=True, key=k("dni_supervisor"))
-
-    if canal == "VENTAS DIRECTAS":
-        supervisor_indirecto = ""
-        supervisor = ""
-        dni_supervisor = ""
-        departamento = ""
-        provincia = ""
-        coordinador = ""
-        dni_coordinador = ""
     else:
-        supervisor_indirecto = supervisor
+        # Para VENTAS DIRECTAS se oculta completamente la jerarquía D2D indirecta.
+        # El supervisor válido es el de Datos adicionales Ventas Directas.
+        supervisor = supervisor_directo
+        dni_supervisor = ""
 
-    submit = st.button("Guardar Alta", key=k("guardar_alta"))
+    st.markdown("")
+    submit = st.button("Guardar Alta", key=k("btn_guardar_alta"))
 
+    # Mensaje también cerca del botón porque el navegador suele quedarse abajo luego del guardado.
     if msg_ok_pendiente:
+        st.success(msg_ok_pendiente if isinstance(msg_ok_pendiente, str) else "✅ Alta registrada correctamente")
         st.session_state.pop("mensaje_ok", None)
     if msg_warning_pendiente:
+        st.warning(msg_warning_pendiente)
         st.session_state.pop("mensaje_sync_warning", None)
 
     if submit:
@@ -825,40 +620,42 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
         marca_alta = ahora_peru_fecha_hora()
 
         campos = {
+            # En ALTA no se marca FECHA MOV.
+            # FECHA MOV se actualiza únicamente en BAJAS.
             "FECHA MOV": "",
-            "RAZON SOCIAL": limpiar_texto(razon),
+            "RAZON SOCIAL": razon,
             "CANAL": limpiar_texto(canal),
             "SUB CANAL": limpiar_texto(subcanal),
             "TIPO_GESTION": limpiar_texto(tipo_gestion),
             "TIPO GESTION": limpiar_texto(tipo_gestion),
             "REGION": limpiar_texto(region),
-            "DEPARTAMENTO": limpiar_texto(departamento),
-            "PROVINCIA": limpiar_texto(provincia),
-            "SUPERVISOR A CARGO": limpiar_texto(supervisor_indirecto),
+            "DEPARTAMENTO": departamento,
+            "PROVINCIA": provincia,
+            "SUPERVISOR A CARGO": limpiar_texto(supervisor),
+            "SUPERVISOR": limpiar_texto(supervisor),
             "DNI SUPERVISOR": limpiar_texto(dni_supervisor),
-            "COORDINADOR": limpiar_texto(coordinador),
-            "DNI COORDINADOR": limpiar_texto(dni_coordinador),
-            "SUPERVISOR": limpiar_texto(supervisor_directo) if canal == "VENTAS DIRECTAS" else "",
             "CAPACITADOR": limpiar_texto(capacitador),
             "ORIGEN_INGRESO": limpiar_texto(origen_ingreso),
             "ORIGEN INGRESO": limpiar_texto(origen_ingreso),
             "FUENTE_INGRESO": limpiar_texto(fuente_ingreso),
             "FUENTE INGRESO": limpiar_texto(fuente_ingreso),
-            "CARGO (ROL)": limpiar_texto(cargo),
+            "COORDINADOR": limpiar_texto(coordinador),
+            "DNI COORDINADOR": dni_coordinador,
+            "CARGO (ROL)": cargo,
             "NOMBRES": limpiar_texto(nombres).upper(),
             "APELLIDO PATERNO": limpiar_texto(apellido_p).upper(),
             "APELLIDO MATERNO": limpiar_texto(apellido_m).upper(),
             "CELULAR": celular_limpio,
-            "TIPO DE DOC": limpiar_texto(tipo_doc),
+            "TIPO DE DOC": tipo_doc,
             "DNI": dni_limpio,
             "CORREO": correo_limpio,
             "CORREO (USUARIO SGC/PRONTO)": correo_limpio,
             "ESTADO": "ACTIVO",
-            "TIPO DE CONTRATO": limpiar_texto(tipo_contrato),
+            "TIPO DE CONTRATO": tipo_contrato,
             "FECHA DE CREACION USUARIO": str(fecha_creacion),
             "FECHA DE CESE": "",
             "MOTIVO": "",
-            "CONTRATO FIRMADO": limpiar_texto(contrato_firmado),
+            "CONTRATO FIRMADO": contrato_firmado,
             "FECHA_ALTA_REGISTRO": marca_alta,
             "FECHA ALTA REGISTRO": marca_alta,
             "FECHA_BAJA_REGISTRO": "",
@@ -869,52 +666,49 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             "USUARIO BAJA": "",
         }
 
-        with st.spinner("Validando DNI y registrando alta…"):
-            try:
-                columnas_nuevas = ["TIPO_GESTION", "SUPERVISOR", "CAPACITADOR", "ORIGEN_INGRESO", "FUENTE_INGRESO"]
-                headers = asegurar_columnas_colaboradores(hoja_colaboradores, columnas_nuevas)
-                if not headers:
-                    st.error("❌ La hoja colaboradores no tiene cabecera. No se puede registrar.")
-                    return
+        # Colaboradores se lee SOLO al guardar para validar histórico/duplicados.
+        # Así no se congela el formulario mientras llenas campos.
+        df_colab = leer_colaboradores(hoja_colaboradores, forzar=True)
+        errores = validar_formulario(campos, df_colab)
+        if errores:
+            for err in errores:
+                st.error(err)
+            return
 
-                errores = validar_formulario(campos, pd.DataFrame())
-                ok_dni, msg_dni, siguiente_fila = validar_dni_unico_historico_sheet(
-                    hoja_colaboradores=hoja_colaboradores,
-                    headers=headers,
-                    dni_limpio=dni_limpio,
-                    fecha_alta=fecha_creacion,
-                )
-                if not ok_dni:
-                    errores.append(msg_dni)
+        try:
+            columnas_nuevas = [
+                "TIPO_GESTION",
+                "SUPERVISOR",
+                "CAPACITADOR",
+                "ORIGEN_INGRESO",
+                "FUENTE_INGRESO",
+            ]
+            headers = asegurar_columnas_colaboradores(hoja_colaboradores, columnas_nuevas)
+            if not headers:
+                st.error("❌ La hoja colaboradores no tiene cabecera. No se puede registrar.")
+                return
 
-                if errores:
-                    for err in errores:
-                        st.error(err)
-                    return
+            fila = valor_por_columna(headers, campos)
+            hoja_colaboradores.append_row(fila, value_input_option="USER_ENTERED")
+            leer_colaboradores(hoja_colaboradores, forzar=True)
 
-                fila = valor_por_columna(headers, campos)
-                agregar_fila_colaboradores_seguro(
-                    hoja_colaboradores=hoja_colaboradores,
-                    headers=headers,
-                    fila=fila,
-                    cantidad_registros_actual=max(0, siguiente_fila - 2),
-                )
-
-                _leer_colaboradores_cached.clear()
-
-                if hoja_asistencia is not None:
-                    try:
-                        from asistencia import registrar_alta_en_asistencia
-                        estado_pres = registrar_alta_en_asistencia(hoja_asistencia, campos)
-                        st.session_state["mensaje_ok"] = f"✅ Alta registrada correctamente. {estado_pres}"
-                    except Exception as e_sync:
-                        st.session_state["mensaje_ok"] = "✅ Alta registrada correctamente. Para verlo en Presencialidad Dealer, presiona Sincronizar mes."
-                        st.session_state["mensaje_sync_warning"] = f"⚠️ No se pudo actualizar presencialidad en automático: {e_sync}"
-                else:
+            if hoja_asistencia is not None:
+                try:
+                    # No se ejecuta Sincronizar mes completo aquí porque eso lee toda la base
+                    # y hacía lento el alta. Solo se intenta agregar este DNI al periodo actual
+                    # de Presencialidad, sin tocar marcajes existentes.
+                    from asistencia import registrar_alta_en_asistencia
+                    estado_pres = registrar_alta_en_asistencia(hoja_asistencia, campos)
+                    st.session_state["mensaje_ok"] = f"✅ Alta registrada correctamente. {estado_pres}"
+                except Exception as e_sync:
                     st.session_state["mensaje_ok"] = "✅ Alta registrada correctamente. Para verlo en Presencialidad Dealer, presiona Sincronizar mes."
+                    st.session_state["mensaje_sync_warning"] = f"⚠️ No se pudo actualizar presencialidad en automático: {e_sync}"
+            else:
+                st.session_state["mensaje_ok"] = "✅ Alta registrada correctamente. Para verlo en Presencialidad Dealer, presiona Sincronizar mes."
 
-                st.session_state["alta_form_version"] = int(st.session_state.get("alta_form_version", 0)) + 1
-                limpiar_form()
-                st.rerun()
-            except Exception as e:
-                st.error(f"❌ Error al registrar el alta: {e}")
+            # Fuerza que el próximo render use llaves nuevas y todos los campos queden en blanco.
+            st.session_state["alta_form_version"] = int(st.session_state.get("alta_form_version", 0)) + 1
+            limpiar_form()
+            st.rerun()
+        except Exception as e:
+            st.error(f"❌ Error al registrar el alta: {e}")
