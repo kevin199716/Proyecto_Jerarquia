@@ -174,26 +174,105 @@ def obtener_headers(hoja_colaboradores) -> list[str]:
     return [str(h).strip().upper() for h in valores[0]]
 
 
+def _buscar_posicion_insercion_formulario(headers: list[str]) -> int:
+    """
+    Posición 1-based donde deben quedar los campos propios del formulario,
+    antes de columnas calculadas/auditoría/soporte del Drive.
+    """
+    headers_up = [str(h).strip().upper() for h in headers]
+
+    # Primero intentamos insertar antes de columnas calculadas o de auditoría.
+    candidatos_antes = [
+        "FECHA_ALTA_REGISTRO",
+        "FECHA ALTA REGISTRO",
+        "FECHA_BAJA_REGISTRO",
+        "FECHA BAJA REGISTRO",
+        "USUARIO_ALTA",
+        "USUARIO ALTA",
+        "USUARIO_BAJA",
+        "USUARIO BAJA",
+        "REACTIVACIONES",
+        "USUARIO ZYTRUST",
+        "ID (SGC/PRONTO)",
+        "NUEVO_GERENTE",
+        "ESTADO_USUARIO",
+        "ZONA_1",
+    ]
+    posiciones = [headers_up.index(c) + 1 for c in candidatos_antes if c in headers_up]
+    if posiciones:
+        return min(posiciones)
+
+    # Si no existen esas columnas, va después de CONTRATO FIRMADO.
+    for c in ["CONTRATO FIRMADO", "CONTRATO_FIRMADO"]:
+        if c in headers_up:
+            return headers_up.index(c) + 2
+
+    # Último recurso: al final de las columnas actuales.
+    return len(headers_up) + 1
+
+
+def _mover_o_crear_columna(hoja_colaboradores, columna: str, posicion_destino: int) -> None:
+    """
+    Crea o mueve una columna conservando sus datos.
+    Evita que TIPO_GESTION/SUPERVISOR/CAPACITADOR/etc. queden al final,
+    después de columnas calculadas del Drive.
+    """
+    valores = hoja_colaboradores.get_all_values()
+    if not valores:
+        return
+
+    headers = [str(h).strip().upper() for h in valores[0]]
+    col = str(columna).strip().upper()
+
+    if col not in headers:
+        # Inserta una columna completa con la cabecera en la posición correcta.
+        hoja_colaboradores.insert_cols([[col]], col=posicion_destino, value_input_option="USER_ENTERED")
+        return
+
+    posicion_actual = headers.index(col) + 1
+
+    # Ya está en el lugar esperado.
+    if posicion_actual == posicion_destino:
+        return
+
+    # Si la columna está antes de la zona destino, no la movemos para no tocar
+    # columnas históricas antiguas. Solo corregimos las que quedaron al final.
+    if posicion_actual < posicion_destino:
+        return
+
+    # Copia la columna completa, inserta en la nueva posición y elimina la vieja.
+    columna_valores = []
+    idx = posicion_actual - 1
+    for fila in valores:
+        columna_valores.append([fila[idx] if len(fila) > idx else ""])
+
+    hoja_colaboradores.insert_cols(columna_valores, col=posicion_destino, value_input_option="USER_ENTERED")
+
+    # Como insertamos antes de la columna original, la original se desplazó +1.
+    posicion_original_despues_insert = posicion_actual + 1
+    hoja_colaboradores.delete_columns(posicion_original_despues_insert)
+
+
 def asegurar_columnas_colaboradores(hoja_colaboradores, columnas_requeridas: list[str]) -> list[str]:
     """
-    Agrega al final de la cabecera solo las columnas nuevas que no existan.
-    No reordena ni toca columnas existentes para no chancar la matriz actual.
-    Se ejecuta únicamente al guardar alta, no durante el llenado del formulario.
+    Garantiza que las columnas nuevas del formulario queden dentro del bloque de datos
+    operativos, no al final después de columnas calculadas.
+
+    Orden objetivo:
+      ... CONTRATO FIRMADO | TIPO_GESTION | SUPERVISOR | CAPACITADOR |
+      ORIGEN_INGRESO | FUENTE_INGRESO | FECHA_ALTA_REGISTRO / columnas calculadas...
     """
     headers = obtener_headers(hoja_colaboradores)
     if not headers:
         return []
 
-    headers_set = {h.strip().upper() for h in headers}
-    col_actual = len(headers)
+    posicion = _buscar_posicion_insercion_formulario(headers)
     for col in columnas_requeridas:
-        col_up = str(col).strip().upper()
-        if col_up and col_up not in headers_set:
-            col_actual += 1
-            hoja_colaboradores.update_cell(1, col_actual, col_up)
-            headers.append(col_up)
-            headers_set.add(col_up)
-    return headers
+        _mover_o_crear_columna(hoja_colaboradores, col, posicion)
+        posicion += 1
+
+    # Devuelve cabecera final ya corregida para construir la fila por nombre.
+    return obtener_headers(hoja_colaboradores)
 
 
 # =========================

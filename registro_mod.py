@@ -1,90 +1,27 @@
-from datetime import datetime, timedelta
-
-import pandas as pd
-import pytz
 import streamlit as st
+import pandas as pd
+from datetime import datetime, timedelta
+import pytz
 
 # =========================
 # ZONA HORARIA PERÚ
 # =========================
 zona_peru = pytz.timezone("America/Lima")
 
-
-def ahora_peru_fecha_hora():
+def ahora_peru():
     return datetime.now(zona_peru).strftime("%Y-%m-%d %H:%M:%S")
 
 
-def hoy_peru_fecha():
-    return datetime.now(zona_peru).date()
-
-
 # =========================
-# UTILIDADES
+# LIMPIAR FECHA
 # =========================
-def limpiar_texto(valor) -> str:
-    if pd.isna(valor) if not isinstance(valor, str) else False:
-        return ""
-    s = str(valor).strip()
-    return "" if s.upper() in ("NONE", "NAN", "NULL") else s
-
-
 def limpiar_fecha(valor):
     try:
         if valor in ["", None]:
             return None
-        fecha = pd.to_datetime(valor, errors="coerce")
-        if pd.isna(fecha):
-            return None
-        return fecha.date()
-    except Exception:
+        return pd.to_datetime(valor).date()
+    except:
         return None
-
-
-def normalizar_dni(valor) -> str:
-    dni = limpiar_texto(valor).replace(".0", "")
-    if dni.isdigit() and len(dni) < 8:
-        dni = dni.zfill(8)
-    return dni
-
-
-def limpiar_numero_texto(valor, zfill_dni=False) -> str:
-    """Convierte DNI/celulares/IDs a texto para evitar formato con comas en st.dataframe."""
-    v = limpiar_texto(valor).replace(".0", "").replace(",", "")
-    if v == "":
-        return ""
-    # Si vino como 76043772.0 o 76,043,772, deja solo dígitos.
-    import re
-    digitos = re.sub(r"\D", "", v)
-    if digitos:
-        if zfill_dni and len(digitos) < 8:
-            digitos = digitos.zfill(8)
-        return digitos
-    return v.strip()
-
-
-def normalizar_columnas(df: pd.DataFrame) -> pd.DataFrame:
-    df = df.copy()
-    df.columns = df.columns.astype(str).str.strip().str.upper()
-    return df
-
-
-def forzar_columnas_texto(df: pd.DataFrame) -> pd.DataFrame:
-    """Evita que DNI/CELULAR/ID se muestren con separador de miles en la matriz."""
-    df = df.copy()
-    for c in df.columns:
-        cu = str(c).upper()
-        if "DNI" in cu:
-            df[c] = df[c].apply(lambda x: limpiar_numero_texto(x, zfill_dni=True)).astype(str)
-        elif "CELULAR" in cu or cu.startswith("ID") or "ID " in cu or "(SGC/PRONTO)" in cu:
-            df[c] = df[c].apply(lambda x: limpiar_numero_texto(x, zfill_dni=False)).astype(str)
-    return df
-
-
-def col_idx(df: pd.DataFrame, *nombres):
-    for n in nombres:
-        if n in df.columns:
-            return df.columns.get_loc(n) + 1
-    return None
 
 
 # =========================
@@ -100,98 +37,33 @@ MOTIVOS = [
     "Baja por politica de Actividad",
     "Abandono Laboral / Faltas Injustificadas",
     "Baja No asistio Campo",
-    "Baja por cierre de Operaciones",
+    "Baja por cierre de Operaciones"
 ]
 
 
 # =========================
-# TABLA
+# TABLA (FIX ADMIN)
 # =========================
-def _opciones_filtro(df: pd.DataFrame, columna: str) -> list[str]:
-    if df.empty or columna not in df.columns:
-        return ["TODOS"]
-    valores = (
-        df[columna].astype(str).str.strip()
-        .replace(["", "None", "NONE", "nan", "NaN", "NULL", "null"], pd.NA)
-        .dropna().unique().tolist()
-    )
-    return ["TODOS"] + sorted([v for v in valores if str(v).strip()])
-
-
-def _aplicar_select(df: pd.DataFrame, columna: str, valor: str) -> pd.DataFrame:
-    if valor == "TODOS" or columna not in df.columns:
-        return df
-    return df[df[columna].astype(str).str.strip().eq(valor)].copy()
-
-
-@st.cache_data(ttl=180, show_spinner=False)
-def _leer_matriz_cached(_hoja):
-    return _hoja.get_all_records()
-
-
 def mostrar_tabla(hoja, razon_usuario=None):
-    key_reload = f"matriz_reload_{st.session_state.get('rol', '')}_{str(razon_usuario or 'ALL').replace(' ', '_')}"
-    if st.button("♻️ Recargar matriz", key=key_reload):
-        _leer_matriz_cached.clear()
 
-    data = _leer_matriz_cached(hoja)
+    data = hoja.get_all_records()
+
     if not data:
         st.info("No hay datos")
         return None
 
-    df = normalizar_columnas(pd.DataFrame(data)).fillna("")
-    df = forzar_columnas_texto(df)
+    df = pd.DataFrame(data)
+
+    df.columns = df.columns.str.strip().str.upper()
+
     rol = st.session_state.get("rol", "")
 
-    if rol != "backoffice" and razon_usuario and "RAZON SOCIAL" in df.columns:
-        df = df[df["RAZON SOCIAL"].astype(str).str.strip().eq(razon_usuario)]
+    # 🔥 ADMIN VE TODO
+    if rol != "backoffice":
+        df = df[df["RAZON SOCIAL"] == razon_usuario]
 
-    st.caption("Filtros rápidos sobre la matriz cargada. No vuelve a leer Drive mientras filtras dentro de esta vista.")
-    f1, f2, f3, f4 = st.columns([1.3, 1, 1, 1])
-    with f1:
-        buscar = st.text_input("Buscar DNI / nombre / apellido", key="matriz_buscar_texto").strip()
-    with f2:
-        filtro_estado = st.selectbox("Estado", _opciones_filtro(df, "ESTADO"), key="matriz_filtro_estado")
-    with f3:
-        filtro_razon = st.selectbox("Razón social", _opciones_filtro(df, "RAZON SOCIAL"), key="matriz_filtro_razon")
-    with f4:
-        filtro_canal = st.selectbox("Canal", _opciones_filtro(df, "CANAL"), key="matriz_filtro_canal")
+    st.dataframe(df, use_container_width=True)
 
-    f5, f6, f7 = st.columns(3)
-    with f5:
-        filtro_region = st.selectbox("Región", _opciones_filtro(df, "REGION"), key="matriz_filtro_region")
-    with f6:
-        filtro_dep = st.selectbox("Departamento", _opciones_filtro(df, "DEPARTAMENTO"), key="matriz_filtro_dep")
-    with f7:
-        filtro_prov = st.selectbox("Provincia", _opciones_filtro(df, "PROVINCIA"), key="matriz_filtro_prov")
-
-    df_vista = df.copy()
-    for columna, valor in [
-        ("ESTADO", filtro_estado),
-        ("RAZON SOCIAL", filtro_razon),
-        ("CANAL", filtro_canal),
-        ("REGION", filtro_region),
-        ("DEPARTAMENTO", filtro_dep),
-        ("PROVINCIA", filtro_prov),
-    ]:
-        df_vista = _aplicar_select(df_vista, columna, valor)
-
-    if buscar:
-        cols_busqueda = [c for c in ["DNI", "NOMBRES", "NOMBRE", "APELLIDO PATERNO", "APELLIDO MATERNO", "CORREO (USUARIO SGC/PRONTO)"] if c in df_vista.columns]
-        if cols_busqueda:
-            patron = buscar.upper()
-            mask = pd.Series(False, index=df_vista.index)
-            for c in cols_busqueda:
-                mask = mask | df_vista[c].astype(str).str.upper().str.contains(patron, na=False, regex=False)
-            df_vista = df_vista[mask].copy()
-
-    st.caption(f"Registros mostrados: **{len(df_vista)}** de **{len(df)}**")
-    cols_texto = {
-        c: st.column_config.TextColumn(c)
-        for c in df_vista.columns
-        if "DNI" in str(c).upper() or "CELULAR" in str(c).upper() or str(c).upper().startswith("ID")
-    }
-    st.dataframe(df_vista, use_container_width=True, height=520, column_config=cols_texto)
     return df
 
 
@@ -199,166 +71,201 @@ def mostrar_tabla(hoja, razon_usuario=None):
 # DAR DE BAJA
 # =========================
 def dar_de_baja(df, hoja, razon_usuario=None):
+
     st.markdown("<span class='wow-section-title'>🔻 Dar de baja</span>", unsafe_allow_html=True)
 
-    df = normalizar_columnas(df).fillna("")
+    df.columns = df.columns.str.strip().str.upper()
+
     rol = st.session_state.get("rol", "")
+
     usuario_actual = st.session_state.get("usuario", "")
 
-    if rol != "backoffice" and razon_usuario and "RAZON SOCIAL" in df.columns:
-        df = df[df["RAZON SOCIAL"].astype(str).str.strip().eq(razon_usuario)]
+    # 🔥 ADMIN VE TODO
+    if rol != "backoffice":
+        df = df[df["RAZON SOCIAL"] == razon_usuario]
 
-    if "DNI" not in df.columns:
-        st.error("❌ La base no tiene columna DNI.")
-        return
+    dni = st.text_input("DNI", key="dni_baja")
 
-    dni = st.text_input("DNI", key="dni_baja").strip()
     if not dni:
         return
 
-    dni_limpio = normalizar_dni(dni)
-    df["DNI_NORM"] = df["DNI"].apply(normalizar_dni)
-    df_filtrado = df[df["DNI_NORM"].eq(dni_limpio)].copy()
+    df["DNI"] = df["DNI"].astype(str)
+
+    df_filtrado = df[df["DNI"] == dni]
 
     if df_filtrado.empty:
         st.error("❌ No encontrado")
         return
 
-    if "ESTADO" in df_filtrado.columns:
-        activos = df_filtrado[df_filtrado["ESTADO"].astype(str).str.strip().str.upper().eq("ACTIVO")].copy()
-    else:
-        activos = df_filtrado.copy()
+    # =========================
+    # SI HAY MÁS DE 1 REGISTRO
+    # =========================
+    if len(df_filtrado) > 1:
 
-    if activos.empty:
-        st.warning("⚠️ El DNI existe, pero no tiene registros activos para dar de baja.")
-        st.dataframe(df_filtrado.drop(columns=["DNI_NORM"], errors="ignore"), use_container_width=True)
-        return
+        opciones = df_filtrado.reset_index()
 
-    if len(activos) > 1:
-        opciones = activos.reset_index()
         seleccion = st.selectbox(
-            "Selecciona registro activo",
+            "Selecciona registro",
             opciones.index,
-            format_func=lambda i: (
-                f"{limpiar_texto(opciones.loc[i].get('RAZON SOCIAL', ''))} - "
-                f"{limpiar_texto(opciones.loc[i].get('CARGO (ROL)', ''))} - "
-                f"Alta: {limpiar_texto(opciones.loc[i].get('FECHA DE CREACION USUARIO', ''))}"
-            ),
+            format_func=lambda i:
+            f"{opciones.loc[i,'RAZON SOCIAL']} - {opciones.loc[i,'CARGO (ROL)']}"
         )
+
         fila = opciones.loc[seleccion]
-        index_global = int(fila["index"])
+
+        index_global = fila["index"]
+
     else:
-        fila = activos.iloc[0]
-        index_global = int(fila.name)
 
-    st.info(
-        "Registro seleccionado: "
-        f"{limpiar_texto(fila.get('RAZON SOCIAL', ''))} / "
-        f"{limpiar_texto(fila.get('NOMBRES', fila.get('NOMBRE', '')))} / "
-        f"Alta: {limpiar_texto(fila.get('FECHA DE CREACION USUARIO', ''))}"
-    )
+        fila = df_filtrado.iloc[0]
 
-    fecha_creacion = limpiar_fecha(fila.get("FECHA DE CREACION USUARIO"))
-    hoy = hoy_peru_fecha()
+        index_global = fila.name
+
+    # =========================
+    # FECHA CESE
+    # =========================
+    hoy = datetime.now().date()
+
+    fecha_minima = hoy - timedelta(days=3)
 
     fecha = st.date_input(
         "Fecha de cese",
         value=hoy,
-        min_value=hoy - timedelta(days=2),
-        max_value=hoy,
-        key="fecha_cese_baja",
-        help="Solo permite antier, ayer u hoy."
+        min_value=fecha_minima,
+        max_value=hoy
     )
 
-    motivo = st.selectbox("Motivo de baja", MOTIVOS, key="motivo_baja")
+    motivo = st.selectbox(
+        "Motivo de baja",
+        MOTIVOS
+    )
 
-    if st.button("Dar de baja", key="btn_dar_baja"):
-        if not motivo:
-            st.error("❌ Selecciona un motivo de baja.")
-            return
+    # =========================
+    # BOTÓN BAJA
+    # =========================
+    if st.button("Dar de baja"):
 
+        fecha_creacion = limpiar_fecha(
+            fila.get("FECHA DE CREACION USUARIO")
+        )
+
+        # 🔴 VALIDACIÓN
         if fecha_creacion and fecha < fecha_creacion:
-            st.error("❌ La fecha de cese no puede ser menor a la fecha de creación/alta.")
+            st.error("❌ Fecha menor a creación")
             return
 
-        try:
-            # FECHA MOV: solo fecha de movimiento/cese.
-            fecha_mov = str(fecha)
-            # FECHA_BAJA_REGISTRO: marcaje con fecha y hora.
-            marca_baja = ahora_peru_fecha_hora()
+        ahora = ahora_peru()
 
-            updates = []
-            row_sheet = index_global + 2
+        # 🔥 FECHA MOV
+        fecha_mov = datetime.now().strftime("%Y-%m-%d")
 
-            c_estado = col_idx(df, "ESTADO")
-            c_cese = col_idx(df, "FECHA DE CESE", "FECHA CESE")
-            c_motivo = col_idx(df, "MOTIVO")
-            c_fmov = col_idx(df, "FECHA MOV")
-            c_fbaja = col_idx(df, "FECHA_BAJA_REGISTRO", "FECHA BAJA REGISTRO")
-            c_usuario_baja = col_idx(df, "USUARIO_BAJA", "USUARIO BAJA")
+        # =========================
+        # ACTUALIZAR
+        # =========================
+        hoja.update_cell(
+            index_global+2,
+            df.columns.get_loc("ESTADO")+1,
+            "INACTIVO"
+        )
 
-            if c_estado:
-                updates.append({"range": f"{row_sheet}:{row_sheet}", "values": None})
-                hoja.update_cell(row_sheet, c_estado, "INACTIVO")
-            if c_cese:
-                hoja.update_cell(row_sheet, c_cese, str(fecha))
-            if c_motivo:
-                hoja.update_cell(row_sheet, c_motivo, motivo)
-            if c_fmov:
-                hoja.update_cell(row_sheet, c_fmov, fecha_mov)
-            if c_fbaja:
-                hoja.update_cell(row_sheet, c_fbaja, marca_baja)
-            if c_usuario_baja:
-                hoja.update_cell(row_sheet, c_usuario_baja, usuario_actual)
+        hoja.update_cell(
+            index_global+2,
+            df.columns.get_loc("FECHA DE CESE")+1,
+            str(fecha)
+        )
 
-            st.success("✅ Baja aplicada correctamente")
-            st.caption(f"FECHA MOV: {fecha_mov} | FECHA_BAJA_REGISTRO: {marca_baja}")
-        except Exception as e:
-            st.error(f"❌ Error al aplicar la baja: {e}")
+        hoja.update_cell(
+            index_global+2,
+            df.columns.get_loc("MOTIVO")+1,
+            motivo
+        )
+
+        # =========================
+        # FECHA MOV
+        # =========================
+        if "FECHA MOV" in df.columns:
+
+            hoja.update_cell(
+                index_global+2,
+                df.columns.get_loc("FECHA MOV")+1,
+                fecha_mov
+            )
+
+        # =========================
+        # FECHA BAJA REGISTRO
+        # =========================
+        if "FECHA_BAJA_REGISTRO" in df.columns:
+
+            hoja.update_cell(
+                index_global+2,
+                df.columns.get_loc("FECHA_BAJA_REGISTRO")+1,
+                ahora
+            )
+
+        # =========================
+        # USUARIO BAJA
+        # =========================
+        if "USUARIO_BAJA" in df.columns:
+
+            hoja.update_cell(
+                index_global+2,
+                df.columns.get_loc("USUARIO_BAJA")+1,
+                usuario_actual
+            )
+
+        st.success("✅ Baja aplicada correctamente")
 
 
 # =========================
-# EDITAR
+# EDITAR (SIN CAMBIOS)
 # =========================
 def editar_registro(df, hoja, hoja_ubi):
+
     st.markdown("<span class='wow-section-title'>✏️ Editar registro</span>", unsafe_allow_html=True)
 
-    df = normalizar_columnas(df).fillna("")
-    if "DNI" not in df.columns:
-        st.error("❌ La base no tiene columna DNI.")
-        return
+    df.columns = df.columns.str.strip().str.upper()
+
+    df["DNI"] = df["DNI"].astype(str)
 
     rol = st.session_state.get("rol", "")
+
     razon_usuario = st.session_state.get("razon", "")
 
-    if rol != "backoffice" and razon_usuario and "RAZON SOCIAL" in df.columns:
-        df = df[df["RAZON SOCIAL"].astype(str).str.strip().eq(razon_usuario)]
+    if rol != "backoffice":
+        df = df[df["RAZON SOCIAL"] == razon_usuario]
 
     dni = st.text_input("DNI a editar", key="dni_edit")
+
     if not dni:
         return
 
-    dni_limpio = normalizar_dni(dni)
-    df["DNI_NORM"] = df["DNI"].apply(normalizar_dni)
-    df_filtrado = df[df["DNI_NORM"].eq(dni_limpio)].copy()
+    df_filtrado = df[df["DNI"] == dni]
 
     if df_filtrado.empty:
         st.error("❌ No encontrado")
         return
 
     if len(df_filtrado) > 1:
+
         opciones = df_filtrado.reset_index()
+
         seleccion = st.selectbox(
             "Selecciona registro",
             opciones.index,
-            format_func=lambda i: f"{opciones.loc[i].get('RAZON SOCIAL', '')} - {opciones.loc[i].get('CARGO (ROL)', '')} - {opciones.loc[i].get('ESTADO', '')}",
+            format_func=lambda i:
+            f"{opciones.loc[i,'RAZON SOCIAL']} - {opciones.loc[i,'CARGO (ROL)']}"
         )
+
         fila = opciones.loc[seleccion]
+
         index_global = fila["index"]
+
     else:
+
         fila = df_filtrado.iloc[0]
+
         index_global = fila.name
 
     st.success("Registro seleccionado")
-    st.caption(f"Fila en Google Sheets: {int(index_global) + 2}")
-    st.info("La lógica completa de edición puede mantenerse como la tenías; este bloque solo corrige búsqueda por DNI normalizado.")
+
+    # 🔴 TU LÓGICA DE EDICIÓN SIGUE AQUÍ (NO SE TOCA)
