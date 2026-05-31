@@ -302,6 +302,110 @@ def letra_columna_local(numero: int) -> str:
     return letras
 
 
+
+def _mapa_headers(headers: list[str]) -> dict:
+    """Mapa de cabecera -> posición 1-based, tomando la primera aparición."""
+    mapa = {}
+    for i, h in enumerate(headers, start=1):
+        hu = str(h).strip().upper()
+        if hu and hu not in mapa:
+            mapa[hu] = i
+    return mapa
+
+
+def _dict_fila_por_headers(headers: list[str], valores_fila: list[str]) -> dict:
+    """Convierte una fila a dict usando la primera aparición de cada cabecera."""
+    out = {}
+    for i, h in enumerate(headers):
+        hu = str(h).strip().upper()
+        if not hu or hu in out:
+            continue
+        out[hu] = valores_fila[i] if i < len(valores_fila) else ""
+    return out
+
+
+def validar_dni_unico_historico_sheet(hoja_colaboradores, headers: list[str], dni_limpio: str, fecha_alta) -> tuple[bool, str, int]:
+    """Validación rápida sin leer toda la matriz.
+
+    Antes se usaba get_all_values/get_all_records sobre toda la hoja colaboradores.
+    En una hoja grande eso frizeaba el formulario. Esta función lee solo:
+    1) la cabecera, 2) la columna DNI, 3) las pocas filas donde coincide el DNI.
+    Devuelve además la siguiente fila sugerida para escribir.
+    """
+    fecha_alta = parse_fecha(fecha_alta)
+    if fecha_alta is None:
+        return False, "❌ La FECHA DE CREACION USUARIO no es válida.", 2
+
+    mapa = _mapa_headers(headers)
+    col_dni = mapa.get("DNI")
+    if not col_dni:
+        return False, "❌ La hoja colaboradores no tiene columna DNI en la cabecera.", 2
+
+    try:
+        dni_col = hoja_colaboradores.col_values(col_dni)
+    except Exception as e:
+        return False, f"❌ No se pudo validar DNI en la hoja colaboradores: {e}", 2
+
+    # Siguiente fila según la columna DNI. No lee toda la hoja.
+    siguiente_fila = max(2, len(dni_col) + 1)
+
+    filas_match = []
+    for idx, valor in enumerate(dni_col[1:], start=2):
+        if normalizar_dni(valor) == dni_limpio:
+            filas_match.append(idx)
+
+    if not filas_match:
+        return True, "", siguiente_fila
+
+    registros = []
+    for row_num in filas_match:
+        try:
+            valores = hoja_colaboradores.row_values(row_num)
+        except Exception:
+            valores = []
+        reg = _dict_fila_por_headers(headers, valores)
+        reg["_ROW_SHEET"] = row_num
+        registros.append(reg)
+
+    activos = [r for r in registros if limpiar_texto(r.get("ESTADO", "")).upper() == "ACTIVO"]
+    if activos:
+        detalle = activos[0]
+        razon = limpiar_texto(detalle.get("RAZON SOCIAL", ""))
+        nombre = " ".join([
+            limpiar_texto(detalle.get("NOMBRES", detalle.get("NOMBRE", ""))),
+            limpiar_texto(detalle.get("APELLIDO PATERNO", "")),
+            limpiar_texto(detalle.get("APELLIDO MATERNO", "")),
+        ]).strip()
+        return False, (
+            f"❌ El DNI {dni_limpio} ya se encuentra ACTIVO en la base. "
+            f"No se puede registrar nuevamente, indistintamente del dealer. "
+            f"Registro activo: {razon} / {nombre}."
+        ), siguiente_fila
+
+    fechas_baja = []
+    columnas_baja_base = ["FECHA DE CESE", "FECHA CESE", "FECHA_BAJA_REGISTRO", "FECHA BAJA REGISTRO"]
+    for reg in registros:
+        estado_row = limpiar_texto(reg.get("ESTADO", "")).upper()
+        for col in columnas_baja_base:
+            f = parse_fecha(reg.get(col, ""))
+            if f:
+                fechas_baja.append(f)
+        if estado_row == "INACTIVO":
+            f_mov = parse_fecha(reg.get("FECHA MOV", ""))
+            if f_mov:
+                fechas_baja.append(f_mov)
+
+    if fechas_baja:
+        ultima_baja = max(fechas_baja)
+        if fecha_alta <= ultima_baja:
+            return False, (
+                f"❌ La fecha de alta ({fecha_alta}) debe ser MAYOR a la última baja/movimiento "
+                f"del DNI {dni_limpio}: {ultima_baja}. No puede ser igual ni menor."
+            ), siguiente_fila
+
+    return True, "", siguiente_fila
+
+
 # =========================
 # LISTAS DESDE UBICACIONES
 # =========================
@@ -733,15 +837,9 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             "USUARIO BAJA": "",
         }
 
-        # Colaboradores se lee SOLO al guardar para validar histórico/duplicados.
+        # Validación rápida: NO leer toda la matriz colaboradores.
+        # Solo lee cabecera + columna DNI + filas coincidentes del DNI.
         with st.spinner("Validando DNI y registrando alta…"):
-            df_colab = leer_colaboradores(hoja_colaboradores, forzar=True)
-            errores = validar_formulario(campos, df_colab)
-            if errores:
-                for err in errores:
-                    st.error(err)
-                return
-
             try:
                 columnas_nuevas = ["TIPO_GESTION", "SUPERVISOR", "CAPACITADOR", "ORIGEN_INGRESO", "FUENTE_INGRESO"]
                 headers = asegurar_columnas_colaboradores(hoja_colaboradores, columnas_nuevas)
@@ -749,16 +847,31 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
                     st.error("❌ La hoja colaboradores no tiene cabecera. No se puede registrar.")
                     return
 
+                # Valida campos obligatorios/formato sin leer toda la base.
+                errores = validar_formulario(campos, pd.DataFrame())
+                ok_dni, msg_dni, siguiente_fila = validar_dni_unico_historico_sheet(
+                    hoja_colaboradores=hoja_colaboradores,
+                    headers=headers,
+                    dni_limpio=dni_limpio,
+                    fecha_alta=fecha_creacion,
+                )
+                if not ok_dni:
+                    errores.append(msg_dni)
+
+                if errores:
+                    for err in errores:
+                        st.error(err)
+                    return
+
                 fila = valor_por_columna(headers, campos)
                 agregar_fila_colaboradores_seguro(
                     hoja_colaboradores=hoja_colaboradores,
                     headers=headers,
                     fila=fila,
-                    cantidad_registros_actual=len(df_colab),
+                    cantidad_registros_actual=max(0, siguiente_fila - 2),
                 )
 
-                # No se fuerza una segunda lectura de toda la base luego de guardar.
-                # Esa segunda lectura era una de las causas del frizado posterior al registro.
+                # Limpia caché local. No se fuerza una segunda lectura de toda la base.
                 _leer_colaboradores_cached.clear()
 
                 if hoja_asistencia is not None:
