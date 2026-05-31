@@ -611,6 +611,7 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
 
     if msg_ok_pendiente:
         st.success(msg_ok_pendiente if isinstance(msg_ok_pendiente, str) else "✅ Alta registrada correctamente")
+
     if msg_warning_pendiente:
         st.warning(msg_warning_pendiente)
 
@@ -618,9 +619,12 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
     rol = st.session_state.get("rol", "")
     razon_usuario = st.session_state.get("razon", "")
 
+    # Versión dinámica de llaves: cuando el alta se guarda correctamente,
+    # se incrementa y todos los campos vuelven limpios como si se abriera el módulo desde cero.
     version_form = int(st.session_state.get("alta_form_version", 0))
     k = lambda nombre: f"alta_v{version_form}_{nombre}"
 
+    # Solo ubicación se lee al cargar. Está cacheada 5 minutos.
     df_ubi = leer_ubicaciones(hoja_ubicaciones)
     if df_ubi.empty:
         st.error("❌ No se pudo leer la hoja de ubicaciones.")
@@ -647,84 +651,45 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
 
     st.caption(
         "WOW TEL se gestiona como VENTAS DIRECTAS. Los demás socios se gestionan como VENTAS INDIRECTAS. "
-        "TIPO_GESTION solo aplica a indirectas como CAMPO; en directas viaja vacío."
+        "Para evitar frizado, los campos de texto se procesan recién al presionar Guardar Alta."
     )
 
     # =====================================================
-    # ORDEN VISUAL ORIGINAL SOLICITADO
-    # Arriba: datos del colaborador izquierda / datos comerciales derecha.
-    # Abajo: ubicación y jerarquía.
-    # No existe bloque previo de configuración.
+    # SELECTORES QUE CONTROLAN LA VISTA
     # =====================================================
-    col_izq, col_der = st.columns(2)
-
-    with col_izq:
-        st.markdown("**Datos del colaborador**")
-        nombres = st.text_input("NOMBRES", key=k("nombres"))
-        apellido_p = st.text_input("APELLIDO PATERNO", key=k("apellido_p"))
-        apellido_m = st.text_input("APELLIDO MATERNO", key=k("apellido_m"))
-        celular = st.text_input("CELULAR", max_chars=9, key=k("celular"))
-        tipo_doc = st.selectbox("TIPO DE DOC", ["DNI", "CPP", "CEX", "OTROS"], key=k("tipo_doc"))
-        dni = st.text_input("DNI", max_chars=8, key=k("dni"))
-        correo = st.text_input("CORREO (USUARIO SGC/PRONTO)", key=k("correo"))
-
-    with col_der:
-        st.markdown("**Datos comerciales**")
+    # Se dejan fuera del form únicamente los campos que deben cambiar visualmente la pantalla.
+    # Así no se recalcula toda la app por cada tecla que escribes en nombres/DNI/correo/celular.
+    col_top1, col_top2, col_top3 = st.columns(3)
+    with col_top1:
         if rol == "backoffice":
             razon = st.selectbox("RAZÓN SOCIAL", [""] + razones, key=k("razon"))
         else:
             razon = razon_usuario
             st.text_input("RAZÓN SOCIAL", value=razon, disabled=True, key=k("razon_dealer"))
 
-        razon_norm = limpiar_texto(razon).upper()
-        if razon_norm == "WOW TEL":
-            canal_options = ["VENTAS DIRECTAS"]
-        elif razon_norm:
-            canal_options = ["VENTAS INDIRECTAS"]
-        else:
-            canal_options = ["VENTAS INDIRECTAS", "VENTAS DIRECTAS"]
+    razon_norm = limpiar_texto(razon).upper()
+    if razon_norm == "WOW TEL":
+        canal_options = ["VENTAS DIRECTAS"]
+    elif razon_norm:
+        canal_options = ["VENTAS INDIRECTAS"]
+    else:
+        canal_options = ["VENTAS INDIRECTAS", "VENTAS DIRECTAS"]
 
+    with col_top2:
         canal = st.selectbox("CANAL", canal_options, key=k("canal"))
+
+    with col_top3:
         if canal == "VENTAS DIRECTAS":
             subcanal = st.selectbox("SUB CANAL", ["VENTAS DIRECTAS"], key=k("subcanal"))
             tipo_gestion = ""
         else:
             subcanal = st.selectbox("SUB CANAL", ["VENTAS INDIRECTAS", "OUTBOUND"], key=k("subcanal"))
             tipo_gestion = "CAMPO"
-
-        region = st.selectbox("REGIÓN", ["", "CENTRAL", "NORORIENTE", "SUR"], key=k("region"))
-
-        if canal == "VENTAS_DIRECTAS":
-            # seguridad; no debería ocurrir por el valor real, se deja por compatibilidad si viene con guion bajo
-            canal = "VENTAS DIRECTAS"
-
-        if canal == "VENTAS DIRECTAS":
-            opciones_cargo = ["", "Agente BO D2D", "Promotor D2D", "Supervisor D2D", "Coordinador D2D"]
-        else:
-            opciones_cargo = ["", "Agente BO D2D - Dealer", "Promotor D2D - Dealer", "Supervisor D2D - Dealer", "Coordinador D2D - Dealer"]
-
-        cargo = st.selectbox("CARGO (ROL)", opciones_cargo, key=k("cargo"))
-        tipo_contrato = st.selectbox("TIPO DE CONTRATO", ["PLANILLA", "MEDIA PLANILLA"], key=k("tipo_contrato"))
-        hoy_alta = datetime.now(zona_peru).date()
-        fecha_creacion = st.date_input(
-            "FECHA CREACIÓN USUARIO",
-            value=hoy_alta,
-            min_value=hoy_alta - timedelta(days=1),
-            max_value=hoy_alta + timedelta(days=1),
-            key=k("fecha_creacion"),
-            help="Solo permite ayer, hoy o mañana.",
-        )
-        contrato_firmado = st.selectbox("CONTRATO FIRMADO", ["SI"], index=0, key=k("contrato_firmado"))
-
-        # TIPO_GESTION solo se muestra para indirectas, dentro de datos comerciales y abajo.
-        if canal == "VENTAS INDIRECTAS":
             st.text_input("TIPO_GESTION", value="CAMPO", disabled=True, key=k("tipo_gestion_visible"))
 
-    supervisor_directo = ""
-    capacitador = ""
-    origen_ingreso = ""
-    fuente_ingreso = ""
-
+    # =====================================================
+    # UBICACIÓN / JERARQUÍA INDIRECTA
+    # =====================================================
     departamento = ""
     provincia = ""
     coordinador = ""
@@ -732,28 +697,18 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
     supervisor = ""
     dni_supervisor = ""
 
-    if canal == "VENTAS DIRECTAS":
-        st.divider()
-        st.markdown("**Datos adicionales Ventas Directas**")
-        col_d1, col_d2 = st.columns(2)
-        with col_d1:
-            supervisor_directo = st.selectbox("SUPERVISOR", [""] + supervisores_directo, key=k("supervisor_directo"))
-            origen_ingreso = st.selectbox("ORIGEN INGRESO", [""] + origenes_ingreso, key=k("origen_ingreso"))
-        with col_d2:
-            capacitador = st.selectbox("CAPACITADOR", [""] + capacitadores, key=k("capacitador"))
-            fuente_ingreso = st.selectbox("FUENTE INGRESO", [""] + fuentes_ingreso, key=k("fuente_ingreso"))
-        supervisor = supervisor_directo
-        dni_supervisor = ""
-    else:
+    if canal == "VENTAS INDIRECTAS":
         st.divider()
         st.markdown("**Ubicación y jerarquía**")
         col_u1, col_u2 = st.columns(2)
         with col_u1:
             departamento = st.selectbox("DEPARTAMENTO", [""] + departamentos, key=k("departamento"))
+
             provincias = []
             if departamento and "DEPARTAMENTO" in df_ubi.columns and "PROVINCIA" in df_ubi.columns:
                 df_dep = df_ubi[serie_columna(df_ubi, "DEPARTAMENTO").eq(str(departamento).strip())]
                 provincias = lista_limpia(df_dep, "PROVINCIA")
+
             provincia = st.selectbox("PROVINCIA", [""] + provincias, key=k("provincia"))
             coordinador = st.selectbox("COORDINADOR", [""] + coordinadores, key=k("coordinador"))
             dni_coordinador = buscar_dni_por_nombre(df_ubi, "COORDINADOR FINAL", "DNI COORDINADOR", coordinador)
@@ -763,9 +718,69 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             dni_supervisor = buscar_dni_por_nombre(df_ubi, "SUPERVISOR A CARGO FINAL", "DNI SUPERVISOR", supervisor)
             st.text_input("DNI SUPERVISOR", value=dni_supervisor, disabled=True, key=k("dni_supervisor"))
 
-    submit = st.button("Guardar Alta", key=k("btn_guardar_alta"))
+    # =====================================================
+    # FORMULARIO PRINCIPAL
+    # =====================================================
+    # Todo lo pesado y todos los textos van dentro de st.form.
+    # Esto evita que Streamlit ejecute todo el script por cada letra digitada.
+    with st.form(key=k("form_alta_principal"), clear_on_submit=False):
+        col_izq, col_der = st.columns(2)
 
-    # Limpia mensajes pendientes después de mostrarlos para no repetirlos en cada rerun.
+        with col_izq:
+            st.markdown("**Datos del colaborador**")
+            nombres = st.text_input("NOMBRES", key=k("nombres"))
+            apellido_p = st.text_input("APELLIDO PATERNO", key=k("apellido_p"))
+            apellido_m = st.text_input("APELLIDO MATERNO", key=k("apellido_m"))
+            celular = st.text_input("CELULAR", max_chars=9, key=k("celular"))
+            tipo_doc = st.selectbox("TIPO DE DOC", ["DNI", "CPP", "CEX", "OTROS"], key=k("tipo_doc"))
+            dni = st.text_input("DNI", max_chars=8, key=k("dni"))
+            correo = st.text_input("CORREO (USUARIO SGC/PRONTO)", key=k("correo"))
+
+        with col_der:
+            st.markdown("**Datos comerciales**")
+            region = st.selectbox("REGIÓN", ["", "CENTRAL", "NORORIENTE", "SUR"], key=k("region"))
+
+            if canal == "VENTAS DIRECTAS":
+                opciones_cargo = ["", "Agente BO D2D", "Promotor D2D", "Supervisor D2D", "Coordinador D2D"]
+            else:
+                opciones_cargo = ["", "Agente BO D2D - Dealer", "Promotor D2D - Dealer", "Supervisor D2D - Dealer", "Coordinador D2D - Dealer"]
+
+            cargo = st.selectbox("CARGO (ROL)", opciones_cargo, key=k("cargo"))
+            tipo_contrato = st.selectbox("TIPO DE CONTRATO", ["PLANILLA", "MEDIA PLANILLA"], key=k("tipo_contrato"))
+            hoy_alta = datetime.now(zona_peru).date()
+            fecha_creacion = st.date_input(
+                "FECHA CREACIÓN USUARIO",
+                value=hoy_alta,
+                min_value=hoy_alta - timedelta(days=1),
+                max_value=hoy_alta + timedelta(days=1),
+                key=k("fecha_creacion"),
+                help="Solo permite ayer, hoy o mañana.",
+            )
+            contrato_firmado = st.selectbox("CONTRATO FIRMADO", ["SI"], index=0, key=k("contrato_firmado"))
+
+            supervisor_directo = ""
+            capacitador = ""
+            origen_ingreso = ""
+            fuente_ingreso = ""
+            if canal == "VENTAS DIRECTAS":
+                st.markdown("**Datos adicionales Ventas Directas**")
+                supervisor_directo = st.selectbox("SUPERVISOR", [""] + supervisores_directo, key=k("supervisor_directo"))
+                capacitador = st.selectbox("CAPACITADOR", [""] + capacitadores, key=k("capacitador"))
+                origen_ingreso = st.selectbox("ORIGEN INGRESO", [""] + origenes_ingreso, key=k("origen_ingreso"))
+                fuente_ingreso = st.selectbox("FUENTE INGRESO", [""] + fuentes_ingreso, key=k("fuente_ingreso"))
+
+        submit = st.form_submit_button("Guardar Alta")
+
+    # Para VENTAS DIRECTAS se oculta completamente la jerarquía D2D indirecta.
+    # El supervisor válido es el de Datos adicionales Ventas Directas.
+    if canal == "VENTAS DIRECTAS":
+        supervisor = supervisor_directo
+        dni_supervisor = ""
+        departamento = ""
+        provincia = ""
+        coordinador = ""
+        dni_coordinador = ""
+
     if msg_ok_pendiente:
         st.session_state.pop("mensaje_ok", None)
     if msg_warning_pendiente:
@@ -822,15 +837,17 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             "USUARIO BAJA": "",
         }
 
+        # Validación rápida: NO leer toda la matriz colaboradores.
+        # Solo lee cabecera + columna DNI + filas coincidentes del DNI.
         with st.spinner("Validando DNI y registrando alta…"):
             try:
-                # No inserta ni mueve columnas; solo valida que existan cabeceras.
                 columnas_nuevas = ["TIPO_GESTION", "SUPERVISOR", "CAPACITADOR", "ORIGEN_INGRESO", "FUENTE_INGRESO"]
                 headers = asegurar_columnas_colaboradores(hoja_colaboradores, columnas_nuevas)
                 if not headers:
                     st.error("❌ La hoja colaboradores no tiene cabecera. No se puede registrar.")
                     return
 
+                # Valida campos obligatorios/formato sin leer toda la base.
                 errores = validar_formulario(campos, pd.DataFrame())
                 ok_dni, msg_dni, siguiente_fila = validar_dni_unico_historico_sheet(
                     hoja_colaboradores=hoja_colaboradores,
@@ -854,6 +871,7 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
                     cantidad_registros_actual=max(0, siguiente_fila - 2),
                 )
 
+                # Limpia caché local. No se fuerza una segunda lectura de toda la base.
                 _leer_colaboradores_cached.clear()
 
                 if hoja_asistencia is not None:
