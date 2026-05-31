@@ -168,111 +168,111 @@ def leer_colaboradores(hoja_colaboradores, forzar=False):
 
 
 def obtener_headers(hoja_colaboradores) -> list[str]:
-    valores = hoja_colaboradores.get_all_values()
-    if not valores:
-        return []
-    return [str(h).strip().upper() for h in valores[0]]
+    """Lee solo la fila de cabeceras. No lee toda la hoja para evitar frizado."""
+    try:
+        headers = hoja_colaboradores.row_values(1)
+    except Exception:
+        valores = hoja_colaboradores.get_all_values()
+        headers = valores[0] if valores else []
+    return [str(h).strip().upper() for h in headers]
 
 
-def _buscar_posicion_insercion_formulario(headers: list[str]) -> int:
-    """
-    Posición 1-based donde deben quedar los campos propios del formulario,
-    antes de columnas calculadas/auditoría/soporte del Drive.
-    """
-    headers_up = [str(h).strip().upper() for h in headers]
-
-    # Primero intentamos insertar antes de columnas calculadas o de auditoría.
-    candidatos_antes = [
-        "FECHA_ALTA_REGISTRO",
-        "FECHA ALTA REGISTRO",
-        "FECHA_BAJA_REGISTRO",
-        "FECHA BAJA REGISTRO",
-        "USUARIO_ALTA",
-        "USUARIO ALTA",
-        "USUARIO_BAJA",
-        "USUARIO BAJA",
-        "REACTIVACIONES",
-        "USUARIO ZYTRUST",
-        "ID (SGC/PRONTO)",
-        "NUEVO_GERENTE",
-        "ESTADO_USUARIO",
-        "ZONA_1",
-    ]
-    posiciones = [headers_up.index(c) + 1 for c in candidatos_antes if c in headers_up]
-    if posiciones:
-        return min(posiciones)
-
-    # Si no existen esas columnas, va después de CONTRATO FIRMADO.
-    for c in ["CONTRATO FIRMADO", "CONTRATO_FIRMADO"]:
-        if c in headers_up:
-            return headers_up.index(c) + 2
-
-    # Último recurso: al final de las columnas actuales.
-    return len(headers_up) + 1
-
-
-def _mover_o_crear_columna(hoja_colaboradores, columna: str, posicion_destino: int) -> None:
-    """
-    Crea o mueve una columna conservando sus datos.
-    Evita que TIPO_GESTION/SUPERVISOR/CAPACITADOR/etc. queden al final,
-    después de columnas calculadas del Drive.
-    """
-    valores = hoja_colaboradores.get_all_values()
-    if not valores:
-        return
-
-    headers = [str(h).strip().upper() for h in valores[0]]
-    col = str(columna).strip().upper()
-
-    if col not in headers:
-        # Inserta una columna completa con la cabecera en la posición correcta.
-        hoja_colaboradores.insert_cols([[col]], col=posicion_destino, value_input_option="USER_ENTERED")
-        return
-
-    posicion_actual = headers.index(col) + 1
-
-    # Ya está en el lugar esperado.
-    if posicion_actual == posicion_destino:
-        return
-
-    # Si la columna está antes de la zona destino, no la movemos para no tocar
-    # columnas históricas antiguas. Solo corregimos las que quedaron al final.
-    if posicion_actual < posicion_destino:
-        return
-
-    # Copia la columna completa, inserta en la nueva posición y elimina la vieja.
-    columna_valores = []
-    idx = posicion_actual - 1
-    for fila in valores:
-        columna_valores.append([fila[idx] if len(fila) > idx else ""])
-
-    hoja_colaboradores.insert_cols(columna_valores, col=posicion_destino, value_input_option="USER_ENTERED")
-
-    # Como insertamos antes de la columna original, la original se desplazó +1.
-    posicion_original_despues_insert = posicion_actual + 1
-    hoja_colaboradores.delete_columns(posicion_original_despues_insert)
+def _primera_columna_libre(headers: list[str]) -> int:
+    """Devuelve la primera columna libre después del último encabezado real."""
+    ultimo = 0
+    for i, h in enumerate(headers, start=1):
+        if str(h).strip():
+            ultimo = i
+    return ultimo + 1
 
 
 def asegurar_columnas_colaboradores(hoja_colaboradores, columnas_requeridas: list[str]) -> list[str]:
     """
-    Garantiza que las columnas nuevas del formulario queden dentro del bloque de datos
-    operativos, no al final después de columnas calculadas.
+    Garantiza columnas nuevas SIN usar insert_cols / delete_columns.
 
-    Orden objetivo:
-      ... CONTRATO FIRMADO | TIPO_GESTION | SUPERVISOR | CAPACITADOR |
-      ORIGEN_INGRESO | FUENTE_INGRESO | FECHA_ALTA_REGISTRO / columnas calculadas...
+    Motivo: en Google Sheets, insertar o mover columnas usa insertDimension.
+    Si el libro está cerca del límite de 10 millones de celdas, eso genera:
+    Invalid requests[0].insertDimension: above the limit of 10000000 cells.
+
+    Por eso esta versión solo escribe cabeceras en columnas vacías ya existentes.
+    No aumenta dimensiones ni mueve toda la hoja, así no se friza ni rompe el alta.
     """
     headers = obtener_headers(hoja_colaboradores)
     if not headers:
         return []
 
-    posicion = _buscar_posicion_insercion_formulario(headers)
-    for col in columnas_requeridas:
-        _mover_o_crear_columna(hoja_colaboradores, col, posicion)
-        posicion += 1
+    headers_up = [str(h).strip().upper() for h in headers]
+    existentes = set([h for h in headers_up if h])
+    faltantes = [str(c).strip().upper() for c in columnas_requeridas if str(c).strip().upper() not in existentes]
 
-    # Devuelve cabecera final ya corregida para construir la fila por nombre.
+    if not faltantes:
+        return headers_up
+
+    # Usar columnas vacías existentes; NO insertar nuevas columnas.
+    try:
+        total_cols = int(getattr(hoja_colaboradores, "col_count", len(headers_up)))
+    except Exception:
+        total_cols = len(headers_up)
+
+    col_libre = _primera_columna_libre(headers_up)
+    for col in faltantes:
+        if col_libre > total_cols:
+            raise Exception(
+                "No hay columnas libres en la hoja para crear las cabeceras nuevas sin superar el límite de Google Sheets. "
+                "Elimina columnas vacías sobrantes del libro o agrega manualmente estas cabeceras antes de columnas calculadas: "
+                + ", ".join(faltantes)
+            )
+        hoja_colaboradores.update_cell(1, col_libre, col)
+        # Asegurar que la lista local tenga esa posición.
+        while len(headers_up) < col_libre:
+            headers_up.append("")
+        headers_up[col_libre - 1] = col
+        col_libre += 1
+
     return obtener_headers(hoja_colaboradores)
+
+
+def agregar_fila_colaboradores_seguro(hoja_colaboradores, headers: list[str], fila: list[str], cantidad_registros_actual: int) -> int:
+    """
+    Escribe la fila en la siguiente fila disponible sin usar append_row cuando existe
+    capacidad dentro del grid. Esto evita que Google Sheets intente insertar filas
+    si el archivo está cerca del límite de celdas.
+    """
+    target_row = int(cantidad_registros_actual) + 2  # cabecera + registros existentes
+    last_col = max(1, len(headers))
+    # Alinear largo de fila con cabeceras.
+    fila = list(fila)
+    if len(fila) < last_col:
+        fila += [""] * (last_col - len(fila))
+    else:
+        fila = fila[:last_col]
+
+    try:
+        row_count = int(getattr(hoja_colaboradores, "row_count", 0))
+    except Exception:
+        row_count = 0
+
+    # Si la fila existe en el grid, actualizar rango directo. No inserta dimensiones.
+    if row_count and target_row <= row_count:
+        col_fin = letra_columna_local(last_col)
+        hoja_colaboradores.update(
+            f"A{target_row}:{col_fin}{target_row}",
+            [fila],
+            value_input_option="USER_ENTERED",
+        )
+        return target_row
+
+    # Fallback: solo si ya no hay filas vacías disponibles.
+    hoja_colaboradores.append_row(fila, value_input_option="USER_ENTERED")
+    return target_row
+
+
+def letra_columna_local(numero: int) -> str:
+    letras = ""
+    while numero:
+        numero, resto = divmod(numero - 1, 26)
+        letras = chr(65 + resto) + letras
+    return letras
 
 
 # =========================
@@ -736,7 +736,12 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
                 return
 
             fila = valor_por_columna(headers, campos)
-            hoja_colaboradores.append_row(fila, value_input_option="USER_ENTERED")
+            agregar_fila_colaboradores_seguro(
+                hoja_colaboradores=hoja_colaboradores,
+                headers=headers,
+                fila=fila,
+                cantidad_registros_actual=len(df_colab),
+            )
             leer_colaboradores(hoja_colaboradores, forzar=True)
 
             if hoja_asistencia is not None:
