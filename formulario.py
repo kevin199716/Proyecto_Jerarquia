@@ -70,6 +70,33 @@ def hacer_columnas_unicas(columnas: list[str]) -> list[str]:
     return salida
 
 
+def leer_records_sin_exigir_header_unico(hoja) -> list[dict]:
+    """Lee Google Sheets sin romper si la fila 1 tiene cabeceras repetidas.
+
+    gspread.get_all_records() falla con:
+    "the header row in the worksheet is not unique".
+    Para evitar que se caiga la app, leemos get_all_values() y hacemos únicas
+    las cabeceras duplicadas agregando _2, _3, etc. La primera cabecera mantiene
+    su nombre original, que es la que usa la lógica del sistema.
+    """
+    valores = hoja.get_all_values()
+    if not valores:
+        return []
+
+    headers_raw = [str(h).strip().upper() for h in valores[0]]
+    headers = hacer_columnas_unicas(headers_raw)
+    data = valores[1:]
+    n = len(headers)
+
+    registros = []
+    for fila in data:
+        fila = list(fila)
+        if len(fila) < n:
+            fila += [""] * (n - len(fila))
+        registros.append({headers[i]: fila[i] for i in range(n)})
+    return registros
+
+
 def serie_columna(df: pd.DataFrame, columna: str) -> pd.Series:
     """Devuelve siempre una Serie aunque la columna exista duplicada."""
     if df.empty or columna not in df.columns:
@@ -154,7 +181,7 @@ def leer_ubicaciones(hoja_ubicaciones, forzar=False):
 
 @st.cache_data(ttl=300, show_spinner=False)
 def _leer_colaboradores_cached(_hoja_colaboradores):
-    data = _hoja_colaboradores.get_all_records()
+    data = leer_records_sin_exigir_header_unico(_hoja_colaboradores)
     df = pd.DataFrame(data)
     if df.empty:
         return pd.DataFrame()
@@ -557,12 +584,14 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
         canal = st.selectbox("CANAL", canal_options, key=k("canal"))
         if canal == "VENTAS DIRECTAS":
             subcanal = st.selectbox("SUB CANAL", ["VENTAS DIRECTAS"], key=k("subcanal"))
+            # Directas: TIPO_GESTION no se muestra y viaja vacío.
             tipo_gestion = ""
         else:
             subcanal = st.selectbox("SUB CANAL", ["VENTAS INDIRECTAS", "OUTBOUND"], key=k("subcanal"))
+            # Indirectas: TIPO_GESTION sí figura en el formulario como CAMPO, bloqueado,
+            # y viaja a la única columna TIPO_GESTION del Drive.
             tipo_gestion = "CAMPO"
-        # TIPO_GESTION no se muestra en pantalla.
-        # Regla: VENTAS INDIRECTAS viaja como CAMPO; VENTAS DIRECTAS viaja vacío.
+            st.text_input("TIPO_GESTION", value="CAMPO", disabled=True, key=k("tipo_gestion_visible"))
         region = st.selectbox("REGIÓN", ["", "CENTRAL", "NORORIENTE", "SUR"], key=k("region"))
         # CARGO (ROL) depende del canal:
         # - VENTAS INDIRECTAS conserva la lógica original con "- Dealer".

@@ -98,6 +98,35 @@ def normalizar_columnas(df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
+def hacer_columnas_unicas(columnas: list[str]) -> list[str]:
+    salida = []
+    vistos = {}
+    for i, col in enumerate(columnas, start=1):
+        base = str(col).strip().upper() or f"COLUMNA_{i}"
+        if base not in vistos:
+            vistos[base] = 1
+            salida.append(base)
+        else:
+            vistos[base] += 1
+            salida.append(f"{base}_{vistos[base]}")
+    return salida
+
+
+def leer_records_sin_exigir_header_unico(hoja) -> list[dict]:
+    valores = hoja.get_all_values()
+    if not valores:
+        return []
+    headers = hacer_columnas_unicas([str(h).strip().upper() for h in valores[0]])
+    n = len(headers)
+    registros = []
+    for fila in valores[1:]:
+        fila = list(fila)
+        if len(fila) < n:
+            fila += [""] * (n - len(fila))
+        registros.append({headers[i]: fila[i] for i in range(n)})
+    return registros
+
+
 def limpiar_texto(valor) -> str:
     if pd.isna(valor) if not isinstance(valor, str) else False:
         return ""
@@ -304,7 +333,7 @@ def leer_asistencia_drive(hoja_asistencia) -> tuple[pd.DataFrame, list[str]]:
 
 def leer_colaboradores_drive(hoja_colaboradores) -> pd.DataFrame:
     try:
-        data = hoja_colaboradores.get_all_records()
+        data = leer_records_sin_exigir_header_unico(hoja_colaboradores)
     except Exception as e:
         st.error(f"Error leyendo colaboradores: {e}")
         return pd.DataFrame()

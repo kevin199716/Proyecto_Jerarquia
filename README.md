@@ -23,3 +23,8 @@ Para Render, configura:
 
 ## Orden de columnas
 Revisa `ORDEN_COLUMNAS_COLABORADORES.txt` antes de probar altas nuevas.
+
+
+## Fix V19
+- Lectura robusta de Google Sheets aunque exista una cabecera repetida en colaboradores.
+- Evita el error de gspread: `the header row in the worksheet is not unique`.
