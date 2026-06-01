@@ -1,4 +1,5 @@
 """
+FIX_DEALER_NO_BLANCO_RAZON_NORMALIZADA_20260601
 FIX_AUTO_UPSERT_SIN_BOTON_NO_DESTRUCTIVO_20260601
 asistencia.py — Presencialidad Dealer
 Cambios aplicados:
@@ -14,6 +15,8 @@ Cambios aplicados:
 
 import calendar
 import time
+import re
+import unicodedata
 import pytz
 from datetime import datetime, date
 
@@ -97,6 +100,47 @@ def limpiar_texto(valor) -> str:
         return ""
     s = str(valor).strip()
     return "" if s.upper() in ("NONE", "NAN", "NULL") else s
+
+
+def normalizar_comparacion(valor) -> str:
+    """Normaliza texto para comparar razón social, nombres y filtros sin romper visualmente.
+
+    Ejemplo:
+    INTERCONEXION 360 S.A.C. == INTERCONEXION 360 SAC
+    MULTIPLE  FORCE  SAC == MULTIPLE FORCE SAC
+    """
+    txt = limpiar_texto(valor).upper()
+    if not txt:
+        return ""
+    txt = unicodedata.normalize("NFKD", txt)
+    txt = "".join(ch for ch in txt if not unicodedata.combining(ch))
+    txt = re.sub(r"[^A-Z0-9]+", " ", txt)
+    txt = re.sub(r"\s+", " ", txt).strip()
+    return txt
+
+
+def filtrar_por_razon_usuario(df: pd.DataFrame, razon_usuario: str) -> pd.DataFrame:
+    """Filtro seguro para usuarios de socio/dealer.
+
+    No depende de puntos o dobles espacios en la razón social.
+    Si la razón es ALL, retorna todo.
+    """
+    razon_limpia = limpiar_texto(razon_usuario)
+    if df.empty or not razon_limpia or razon_limpia.upper() == "ALL" or "RAZON SOCIAL" not in df.columns:
+        return df.copy()
+
+    objetivo = normalizar_comparacion(razon_limpia)
+    if not objetivo:
+        return df.copy()
+
+    serie_norm = df["RAZON SOCIAL"].apply(normalizar_comparacion)
+    filtrado = df[serie_norm.eq(objetivo)].copy()
+
+    # Fallback: por si en Drive quedó con algún texto adicional o formato antiguo.
+    if filtrado.empty:
+        filtrado = df[serie_norm.str.contains(re.escape(objetivo), na=False) | serie_norm.apply(lambda x: objetivo in x if x else False)].copy()
+
+    return filtrado
 
 
 def primer_valor(*valores) -> str:
@@ -865,11 +909,25 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
     # Restricción por usuario: si el usuario tiene una razón social específica,
     # solo verá esa razón. Si razon = ALL, ve todo.
     razon_usuario = limpiar_texto(razon if razon is not None else st.session_state.get("razon", ""))
-    if razon_usuario and razon_usuario.upper() != "ALL" and "RAZON SOCIAL" in df_mes.columns:
-        df_mes = df_mes[df_mes["RAZON SOCIAL"].astype(str).str.strip().str.upper().eq(razon_usuario.upper())].copy()
+    df_mes_total_antes_filtro_usuario = df_mes.copy()
+    df_mes = filtrar_por_razon_usuario(df_mes, razon_usuario)
 
     if df_mes.empty:
-        st.warning("⚠️ No hay registros para el periodo seleccionado. La app intentó actualizar automáticamente desde colaboradores. Si sigue vacío, valida que existan colaboradores vigentes en ese mes.")
+        # No dejar pantalla en blanco: mostrar diagnóstico operativo claro.
+        if razon_usuario and razon_usuario.upper() != "ALL":
+            razones_disponibles = []
+            if "RAZON SOCIAL" in df_mes_total_antes_filtro_usuario.columns and not df_mes_total_antes_filtro_usuario.empty:
+                razones_disponibles = sorted([x for x in df_mes_total_antes_filtro_usuario["RAZON SOCIAL"].astype(str).str.strip().unique().tolist() if x])[:20]
+            st.warning(
+                f"⚠️ No hay registros visibles para la razón social del usuario: **{razon_usuario}** en el periodo **{periodo}**. "
+                "La app ya actualizó automáticamente desde colaboradores sin borrar histórico. "
+                "Valida que en usuarios.json la razón sea igual a la razón del Drive."
+            )
+            if razones_disponibles:
+                st.caption("Razones sociales encontradas en Asistencia para este periodo:")
+                st.code("\n".join(razones_disponibles), language="text")
+        else:
+            st.warning("⚠️ No hay registros para el periodo seleccionado. La app intentó actualizar automáticamente desde colaboradores. Si sigue vacío, valida que existan colaboradores vigentes en ese mes.")
         return
 
     # =====================================================
@@ -1111,6 +1169,7 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
     # Espejo mensual completo: muestra todo el mes y mantiene histórico.
     df_total_actual = st.session_state[KEY_DF_TOTAL].copy()
     df_mes_actual = df_total_actual[df_total_actual["PERIODO"].astype(str).eq(periodo)].copy()
+    df_mes_actual = filtrar_por_razon_usuario(df_mes_actual, razon_usuario)
     df_espejo = filtrar_df(df_mes_actual, filtro_razon, filtro_supervisor, filtro_coord, filtro_dep, filtro_prov, filtro_estado)
 
     ver_espejo = st.checkbox("📊 Ver espejo mensual completo", value=False, key="asis_ver_espejo")
