@@ -454,7 +454,7 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
     origenes_ingreso = lista_limpia(df_ubi, "ORIGEN_INGRESO")
     fuentes_ingreso = lista_limpia(df_ubi, "FUENTE_INGRESO")
 
-    st.caption("WOW TEL se gestiona con canales directos: D2D, ATC, RETAIL y CEX. Los demás socios se gestionan como VENTAS INDIRECTAS. En indirectas se mantiene la lógica original de cargos Dealer; en directos el cargo va limpio sin Dealer.")
+    st.caption("WOW TEL se gestiona con canales directos: D2D, ATC, RETAIL y CEX. En esos casos, CANAL viaja con la opción elegida y SUB CANAL viaja como VENTAS DIRECTAS. Los demás socios se gestionan como VENTAS INDIRECTAS.")
 
     col_izq, col_der = st.columns(2)
 
@@ -492,9 +492,9 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
         canal = st.selectbox("CANAL", canal_options, key=k("canal"))
         es_canal_directo = canal in CANALES_DIRECTOS
         if es_canal_directo:
-            # Para canales directos, el sub canal viaja igual al canal seleccionado.
-            # No se muestra CANALES DIRECTOS porque ya no debe figurar en el desplegable.
-            subcanal = canal
+            # Para D2D / ATC / RETAIL / CEX, el CANAL viaja con la opción elegida,
+            # pero el SUB CANAL siempre debe viajar como VENTAS DIRECTAS.
+            subcanal = "VENTAS DIRECTAS"
             st.text_input("SUB CANAL", value=subcanal, disabled=True, key=k("subcanal_directo_visible"))
             tipo_gestion = ""
         else:
