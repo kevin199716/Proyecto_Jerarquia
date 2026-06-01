@@ -255,6 +255,80 @@ def buscar_dni_por_nombre(df: pd.DataFrame, columna_nombre: str, columna_dni: st
     return normalizar_dni(valor)
 
 
+
+def obtener_dni_jerarquia(hoja_ubicaciones, df_ubi: pd.DataFrame, columna_nombre: str, columna_dni: str, nombre: str) -> tuple[str, pd.DataFrame]:
+    """Busca el DNI de supervisor/coordinador y, si no aparece por caché, refresca ubicaciones una vez."""
+    dni = buscar_dni_por_nombre(df_ubi, columna_nombre, columna_dni, nombre)
+    if dni:
+        return dni, df_ubi
+
+    if nombre:
+        try:
+            df_refrescado = leer_ubicaciones(hoja_ubicaciones, forzar=True)
+            dni = buscar_dni_por_nombre(df_refrescado, columna_nombre, columna_dni, nombre)
+            return dni, df_refrescado
+        except Exception:
+            return "", df_ubi
+
+    return "", df_ubi
+
+
+MOTIVOS_REINGRESO_BLOQUEADOS = ("FPD", "VN2", "VN3", "PRODUCTIVIDAD")
+
+
+def motivo_bloqueante_reingreso(motivo: str) -> str:
+    """Devuelve el motivo bloqueante detectado o vacío."""
+    m = normalizar_nombre_match(motivo)
+    if not m:
+        return ""
+    for patron in MOTIVOS_REINGRESO_BLOQUEADOS:
+        if patron in m:
+            return patron
+    return ""
+
+
+def revisar_motivo_reingreso(df_colab: pd.DataFrame, dni_limpio: str) -> tuple[bool, str]:
+    """
+    Regla de reingreso por motivo de baja:
+    - Si el histórico del DNI tiene baja con FPD, VN2, VN3 o PRODUCTIVIDAD: bloquea.
+    - Si tiene otro motivo de baja: alerta, pero no bloquea.
+    """
+    if df_colab.empty or "DNI" not in df_colab.columns or not dni_limpio:
+        return True, ""
+
+    df = df_colab.copy()
+    df["DNI_NORM"] = df["DNI"].apply(normalizar_dni)
+    encontrados = df[df["DNI_NORM"].eq(dni_limpio)].copy()
+    if encontrados.empty or "MOTIVO" not in encontrados.columns:
+        return True, ""
+
+    motivos = []
+    for _, row in encontrados.iterrows():
+        estado_row = limpiar_texto(row.get("ESTADO", "")).upper()
+        motivo = limpiar_texto(row.get("MOTIVO", ""))
+        if not motivo:
+            continue
+
+        bloqueante = motivo_bloqueante_reingreso(motivo)
+        if bloqueante:
+            return False, (
+                f"❌ Reingreso bloqueado. El DNI {dni_limpio} tiene histórico de baja con motivo "
+                f"{motivo}. No puede ingresar nuevamente."
+            )
+
+        if estado_row == "INACTIVO":
+            motivos.append(motivo)
+
+    if motivos:
+        ultimo = motivos[-1]
+        return True, (
+            f"⚠️ Reingreso con antecedente: el DNI {dni_limpio} tuvo una baja anterior con motivo: {ultimo}. "
+            f"No es bloqueante, pero debe validarse antes de continuar."
+        )
+
+    return True, ""
+
+
 # =========================
 # VALIDACIONES DE NEGOCIO
 # =========================
@@ -589,13 +663,27 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             provincia = st.selectbox("PROVINCIA", [""] + provincias, key=k("provincia"))
 
             coordinador = st.selectbox("COORDINADOR", [""] + coordinadores, key=k("coordinador"))
-            dni_coordinador = buscar_dni_por_nombre(df_ubi, "COORDINADOR FINAL", "DNI COORDINADOR", coordinador)
-            st.text_input("DNI COORDINADOR", value=dni_coordinador, disabled=True, key=k("dni_coordinador"))
+            dni_coordinador, df_ubi = obtener_dni_jerarquia(
+                hoja_ubicaciones, df_ubi, "COORDINADOR FINAL", "DNI COORDINADOR", coordinador
+            )
+            st.text_input(
+                "DNI COORDINADOR",
+                value=dni_coordinador,
+                disabled=True,
+                key=k(f"dni_coordinador_{normalizar_dni(dni_coordinador) or normalizar_nombre_match(coordinador)}"),
+            )
 
         with col_u2:
             supervisor = st.selectbox("SUPERVISOR A CARGO", [""] + supervisores, key=k("supervisor"))
-            dni_supervisor = buscar_dni_por_nombre(df_ubi, "SUPERVISOR A CARGO FINAL", "DNI SUPERVISOR", supervisor)
-            st.text_input("DNI SUPERVISOR", value=dni_supervisor, disabled=True, key=k("dni_supervisor"))
+            dni_supervisor, df_ubi = obtener_dni_jerarquia(
+                hoja_ubicaciones, df_ubi, "SUPERVISOR A CARGO FINAL", "DNI SUPERVISOR", supervisor
+            )
+            st.text_input(
+                "DNI SUPERVISOR",
+                value=dni_supervisor,
+                disabled=True,
+                key=k(f"dni_supervisor_{normalizar_dni(dni_supervisor) or normalizar_nombre_match(supervisor)}"),
+            )
     else:
         # Para VENTAS DIRECTAS se oculta completamente la jerarquía D2D indirecta.
         # El supervisor válido es el de Datos adicionales Ventas Directas.
@@ -670,10 +758,18 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
         # Así no se congela el formulario mientras llenas campos.
         df_colab = leer_colaboradores(hoja_colaboradores, forzar=True)
         errores = validar_formulario(campos, df_colab)
+
+        ok_motivo, msg_motivo = revisar_motivo_reingreso(df_colab, dni_limpio)
+        if not ok_motivo:
+            errores.append(msg_motivo)
+
         if errores:
             for err in errores:
                 st.error(err)
             return
+
+        if msg_motivo:
+            st.warning(msg_motivo)
 
         try:
             columnas_nuevas = [
