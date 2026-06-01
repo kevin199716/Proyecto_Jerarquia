@@ -1,4 +1,5 @@
 """
+FIX_VISTA_LIVE_SIN_SINCRONIZAR_NO_BORRA_20260601
 FIX_DEALER_NO_BLANCO_RAZON_NORMALIZADA_20260601
 FIX_AUTO_UPSERT_SIN_BOTON_NO_DESTRUCTIVO_20260601
 asistencia.py — Presencialidad Dealer
@@ -655,6 +656,164 @@ def cargar_cache_desde_drive(hoja_asistencia, forzar: bool = False) -> None:
 
 
 # =====================================================
+# VISTA LIVE SIN SINCRONIZAR NI BORRAR
+# =====================================================
+def construir_vista_live_sin_escribir(hoja_asistencia, hoja_colaboradores, periodo_ref: str):
+    """Construye la vista de Presencialidad desde colaboradores + Asistencia.
+
+    IMPORTANTE:
+    - No escribe en Google Sheets.
+    - No borra nada.
+    - No usa clear().
+    - Si aparecen altas/bajas/cambios en colaboradores, se ven al refrescar la página.
+    - Si el registro ya existe en Asistencia, conserva DIA_1..DIA_31.
+    - Si el registro aún no existe en Asistencia, aparece en pantalla con ROW_SHEET vacío;
+      si el usuario lo marca y guarda, recién se agrega esa fila puntual.
+    """
+    if not validar_o_crear_cabecera(hoja_asistencia):
+        return pd.DataFrame(columns=COLUMNAS_ASISTENCIA + ["ROW_SHEET"]), pd.DataFrame(columns=COLUMNAS_ASISTENCIA + ["ROW_SHEET"]), COLUMNAS_ASISTENCIA.copy()
+
+    df_asistencia, headers = leer_asistencia_drive(hoja_asistencia)
+    df_colab = leer_colaboradores_drive(hoja_colaboradores)
+    df_vigentes = obtener_promotores_vigentes_mes(df_colab, periodo_ref)
+
+    # Mapa de histórico existente de asistencia por DNI + FECHA_ALTA + PERIODO.
+    df_as_mes = df_asistencia[df_asistencia["PERIODO"].astype(str).eq(str(periodo_ref))].copy() if not df_asistencia.empty else pd.DataFrame(columns=COLUMNAS_ASISTENCIA + ["ROW_SHEET"])
+    existentes = {}
+    if not df_as_mes.empty:
+        for _, r in df_as_mes.iterrows():
+            key_reg = clave_asistencia(r.get("DNI", ""), r.get("FECHA_ALTA", ""))
+            if key_reg.strip("|"):
+                existentes[key_reg] = r.to_dict()
+
+    filas = []
+    vistos = set()
+
+    if not df_vigentes.empty:
+        for _, row in df_vigentes.iterrows():
+            payload = construir_payload_base(row, periodo_ref)
+            dni = payload.get("DNI", "")
+            if not dni:
+                continue
+            key_reg = clave_asistencia(dni, payload.get("FECHA_ALTA", ""))
+            vistos.add(key_reg)
+
+            if key_reg in existentes:
+                # Toma días y ROW_SHEET del histórico, pero refresca datos base desde colaboradores.
+                base = {col: existentes[key_reg].get(col, "") for col in COLUMNAS_ASISTENCIA}
+                base.update(payload)
+                base["ROW_SHEET"] = existentes[key_reg].get("ROW_SHEET", "")
+            else:
+                # Nueva alta/cambio visto en colaboradores, todavía no existe en Asistencia.
+                # Se muestra en vivo, sin prellenar/escribir 800 filas.
+                base = {col: "" for col in COLUMNAS_ASISTENCIA}
+                base.update(payload)
+                base["ROW_SHEET"] = ""
+            filas.append(base)
+
+    # Mantener registros históricos del periodo que ya están en Asistencia aunque ya no aparezcan en colaboradores.
+    # Esto protege el histórico y evita que desaparezcan filas antiguas.
+    if not df_as_mes.empty:
+        for _, r in df_as_mes.iterrows():
+            key_reg = clave_asistencia(r.get("DNI", ""), r.get("FECHA_ALTA", ""))
+            if key_reg and key_reg not in vistos:
+                filas.append(r.to_dict())
+
+    if filas:
+        df_live = pd.DataFrame(filas)
+    else:
+        df_live = pd.DataFrame(columns=COLUMNAS_ASISTENCIA + ["ROW_SHEET"])
+
+    for col in COLUMNAS_ASISTENCIA + ["ROW_SHEET"]:
+        if col not in df_live.columns:
+            df_live[col] = ""
+    df_live = df_live[COLUMNAS_ASISTENCIA + ["ROW_SHEET"]].copy().fillna("")
+    df_live["DNI"] = df_live["DNI"].apply(normalizar_dni)
+    for col in COLUMNAS_DIAS:
+        if col in df_live.columns:
+            df_live[col] = df_live[col].apply(limpiar_marca)
+
+    st.session_state[KEY_DF_TOTAL] = df_live.copy()
+    st.session_state[KEY_DF_ORIGINAL] = df_live.copy()
+    st.session_state[KEY_HEADERS] = headers
+    st.session_state[KEY_LOADED] = True
+    st.session_state[KEY_LOAD_TS] = time.time()
+    return df_live.copy(), df_live.copy(), headers
+
+
+def guardar_cambios_live(hoja_asistencia, df_editado: pd.DataFrame, df_original: pd.DataFrame, headers: list[str], col_hoy: str) -> tuple[int, int]:
+    """Guarda cambios del editor soportando filas nuevas que aún no existen en Asistencia.
+
+    Retorna: (celdas_actualizadas, filas_agregadas)
+    """
+    df_e = pd.DataFrame(df_editado).fillna("").copy()
+    df_o = pd.DataFrame(df_original).fillna("").copy()
+    if df_e.empty or col_hoy not in df_e.columns:
+        return 0, 0
+
+    headers_orden = [limpiar_texto(h).upper() for h in headers]
+    if not headers_orden:
+        headers_orden = COLUMNAS_ASISTENCIA.copy()
+    mapa_col = {col: idx + 1 for idx, col in enumerate(headers_orden)}
+    col_num = mapa_col.get(col_hoy)
+    if not col_num:
+        return 0, 0
+
+    # Index original por llave real, porque las filas nuevas no tienen ROW_SHEET.
+    def _key_row(r):
+        return clave_asistencia(r.get("DNI", ""), r.get("FECHA_ALTA", ""))
+
+    original_por_key = {}
+    for _, r in df_o.iterrows():
+        k = _key_row(r)
+        if k:
+            original_por_key[k] = r
+
+    updates = []
+    appends = []
+
+    for _, row in df_e.iterrows():
+        k = _key_row(row)
+        if not k:
+            continue
+        nuevo = limpiar_marca(row.get(col_hoy, ""))
+        original = original_por_key.get(k)
+        anterior = limpiar_marca(original.get(col_hoy, "")) if original is not None else ""
+        if nuevo == anterior:
+            continue
+
+        row_sheet_raw = limpiar_texto(row.get("ROW_SHEET", ""))
+        row_sheet = None
+        try:
+            if row_sheet_raw:
+                row_sheet = int(float(row_sheet_raw))
+        except Exception:
+            row_sheet = None
+
+        if row_sheet:
+            updates.append({"range": f"{letra_columna(col_num)}{row_sheet}", "values": [[nuevo]]})
+        else:
+            # Fila nueva vista en vivo desde colaboradores: se agrega una sola vez al guardar.
+            fila = {col: "" for col in COLUMNAS_ASISTENCIA}
+            for col in COLUMNAS_ASISTENCIA:
+                fila[col] = limpiar_texto(row.get(col, ""))
+            fila[col_hoy] = nuevo
+            appends.append([fila.get(col, "") for col in headers_orden])
+
+    if appends:
+        hoja_asistencia.append_rows(appends, value_input_option="USER_ENTERED")
+        time.sleep(0.15)
+
+    if updates:
+        for i in range(0, len(updates), 100):
+            hoja_asistencia.batch_update(updates[i:i + 100], value_input_option="USER_ENTERED")
+            if i + 100 < len(updates):
+                time.sleep(0.10)
+
+    return len(updates), len(appends)
+
+
+# =====================================================
 # FILTROS
 # =====================================================
 def lista_opciones(df: pd.DataFrame, columna: str) -> list[str]:
@@ -884,19 +1043,10 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
         "La información se actualiza al cargar/refrescar la página. A-BM permite sustento histórico."
     )
 
-    # AUTO-UPsert seguro: agrega faltantes y actualiza datos base sin tocar DIA_1..DIA_31.
-    # No usa clear(), no borra filas y no reemplaza marcas anteriores.
-    try:
-        sincronizar_mes(hoja_asistencia, hoja_colaboradores, periodo)
-    except Exception as e:
-        st.warning(f"No se pudo actualizar automáticamente la base de presencialidad: {e}")
-
-    # Forzar lectura real para que otro usuario vea cambios al refrescar la página.
-    cargar_cache_desde_drive(hoja_asistencia, forzar=True)
-
-    df_total = st.session_state[KEY_DF_TOTAL].copy()
-    df_original = st.session_state[KEY_DF_ORIGINAL].copy()
-    headers = st.session_state.get(KEY_HEADERS, COLUMNAS_ASISTENCIA)
+    # VISTA LIVE: lee colaboradores + asistencia y arma la pantalla sin escribir ni borrar.
+    # Si hay 20 altas o 50 bajas manuales en colaboradores, aparecen al refrescar la página.
+    # No prellena 800 filas en Asistencia; solo guarda la fila puntual cuando el usuario marca algo.
+    df_total, df_original, headers = construir_vista_live_sin_escribir(hoja_asistencia, hoja_colaboradores, periodo)
 
     for col in COLUMNAS_ASISTENCIA:
         if col not in df_total.columns:
@@ -1144,21 +1294,21 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                             # Limpiar memoria de sustentos procesados
                             st.session_state["sustentos_pendientes"] = {}
 
-                        updates = preparar_updates(
+                        actualizadas, agregadas = guardar_cambios_live(
+                            hoja_asistencia=hoja_asistencia,
                             df_editado=df_editado,
                             df_original=df_original,
                             headers=headers,
                             col_hoy=col_hoy,
                         )
-                        if not updates:
+                        if actualizadas == 0 and agregadas == 0:
                             st.info("ℹ️ No se detectaron cambios para guardar.")
                         else:
-                            for i in range(0, len(updates), 100):
-                                hoja_asistencia.batch_update(updates[i:i + 100], value_input_option="USER_ENTERED")
-                                if i + 100 < len(updates):
-                                    time.sleep(0.10)
-                            actualizar_cache_con_editado(df_editado, col_hoy)
-                            st.session_state["asis_guardado_msg"] = f"✅ Presencialidad guardada. Celdas actualizadas: {len(updates)}"
+                            # Recarga live para tomar ROW_SHEET real de filas nuevas y mostrar lo último.
+                            for k in [KEY_DF_TOTAL, KEY_DF_ORIGINAL, KEY_HEADERS, KEY_LOADED, KEY_LOAD_TS]:
+                                if k in st.session_state:
+                                    del st.session_state[k]
+                            st.session_state["asis_guardado_msg"] = f"✅ Presencialidad guardada. Celdas actualizadas: {actualizadas}. Filas nuevas agregadas: {agregadas}."
                             st.rerun()
                 except Exception as e:
                     st.error(f"❌ Error guardando presencialidad: {e}")
