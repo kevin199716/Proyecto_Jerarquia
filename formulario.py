@@ -1,5 +1,4 @@
 import re
-import unicodedata
 from datetime import datetime, timedelta
 
 import pandas as pd
@@ -45,6 +44,16 @@ def limpiar_texto(valor) -> str:
     s = str(valor).strip()
     return "" if s.upper() in ("NONE", "NAN", "NULL") else s
 
+
+
+
+def limpiar_razon_social(valor) -> str:
+    """Deja la razón social sin puntos para mostrar y guardar limpio.
+    Ejemplo: MALUTECH S.A.C. -> MALUTECH SAC
+    """
+    s = limpiar_texto(valor).upper().replace(".", "")
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
 
 def normalizar_columnas(df: pd.DataFrame) -> pd.DataFrame:
     df = df.copy()
@@ -114,22 +123,9 @@ def _leer_ubicaciones_cached(_hoja_ubicaciones):
     if not valores:
         return pd.DataFrame()
 
-    # IMPORTANTE:
-    # En la hoja ubicaciones existen dos cabeceras iguales: DNI FINAL.
-    # No podemos depender de pandas con cabeceras duplicadas porque puede devolver DataFrame
-    # en lugar de Serie. Por eso primero tomamos los DNI por POSICIÓN REAL:
-    #   SUPERVISOR A CARGO FINAL -> primer DNI FINAL
-    #   COORDINADOR FINAL        -> segundo DNI FINAL
-    headers_raw = [str(h).strip().upper() for h in valores[0]]
+    headers = [str(h).strip().upper() for h in valores[0]]
     data = valores[1:]
-    n = len(headers_raw)
-
-    idx_sup_nombre = headers_raw.index("SUPERVISOR A CARGO FINAL") if "SUPERVISOR A CARGO FINAL" in headers_raw else None
-    idx_coord_nombre = headers_raw.index("COORDINADOR FINAL") if "COORDINADOR FINAL" in headers_raw else None
-    idx_dni_finales = [i for i, h in enumerate(headers_raw) if h == "DNI FINAL"]
-    idx_dni_sup = idx_dni_finales[0] if len(idx_dni_finales) >= 1 else None
-    idx_dni_coord = idx_dni_finales[1] if len(idx_dni_finales) >= 2 else None
-
+    n = len(headers)
     filas = []
     for fila in data:
         fila = list(fila)
@@ -137,28 +133,27 @@ def _leer_ubicaciones_cached(_hoja_ubicaciones):
             fila += [""] * (n - len(fila))
         filas.append(fila[:n])
 
-    columnas_unicas = hacer_columnas_unicas(headers_raw)
-    df = pd.DataFrame(filas, columns=columnas_unicas).fillna("")
-    df = normalizar_columnas(df)
+    df = pd.DataFrame(filas, columns=headers)
+
+    # En ubicaciones hay dos columnas con el mismo nombre: DNI FINAL.
+    # La primera corresponde a supervisor y la segunda a coordinador.
+    nuevas_columnas = []
+    contador_dni = 0
+    for col in df.columns:
+        col_up = str(col).strip().upper()
+        if col_up == "DNI FINAL":
+            contador_dni += 1
+            nuevas_columnas.append("DNI SUPERVISOR" if contador_dni == 1 else "DNI COORDINADOR")
+        else:
+            nuevas_columnas.append(col_up)
+
+    df.columns = hacer_columnas_unicas(nuevas_columnas)
+    df = normalizar_columnas(df).fillna("")
+
+    # Limpieza segura: no usar df[c].str directo porque si una cabecera queda duplicada
+    # pandas devuelve DataFrame y rompe Render.
     df = df.astype(str).apply(lambda col: col.str.strip())
-
-    # Sobrescribimos/creamos las columnas limpias que usará el formulario.
-    # Así no importa si en Sheets ambas cabeceras dicen DNI FINAL.
-    def tomar_columna_por_indice(idx):
-        if idx is None:
-            return [""] * len(filas)
-        return [limpiar_texto(f[idx] if idx < len(f) else "") for f in filas]
-
-    if idx_sup_nombre is not None:
-        df["SUPERVISOR A CARGO FINAL"] = tomar_columna_por_indice(idx_sup_nombre)
-    if idx_dni_sup is not None:
-        df["DNI SUPERVISOR"] = [normalizar_dni(v) for v in tomar_columna_por_indice(idx_dni_sup)]
-    if idx_coord_nombre is not None:
-        df["COORDINADOR FINAL"] = tomar_columna_por_indice(idx_coord_nombre)
-    if idx_dni_coord is not None:
-        df["DNI COORDINADOR"] = [normalizar_dni(v) for v in tomar_columna_por_indice(idx_dni_coord)]
-
-    return df.fillna("")
+    return df
 
 
 def leer_ubicaciones(hoja_ubicaciones, forzar=False):
@@ -227,124 +222,15 @@ def lista_limpia(df: pd.DataFrame, columna: str) -> list[str]:
     )
 
 
-def normalizar_nombre_match(valor) -> str:
-    """Normaliza nombres para comparar sin tildes, mayúsculas ni espacios dobles."""
-    s = limpiar_texto(valor).upper()
-    s = unicodedata.normalize("NFKD", s)
-    s = "".join(ch for ch in s if not unicodedata.combining(ch))
-    s = re.sub(r"\s+", " ", s).strip()
-    return s
-
-
 def buscar_dni_por_nombre(df: pd.DataFrame, columna_nombre: str, columna_dni: str, nombre: str) -> str:
     if not nombre or df.empty or columna_nombre not in df.columns or columna_dni not in df.columns:
         return ""
-
-    objetivo = normalizar_nombre_match(nombre)
-    serie_nombre = serie_columna(df, columna_nombre).apply(normalizar_nombre_match)
-    base = df[serie_nombre.eq(objetivo)]
-
-    # Fallback por si viene un espacio/tilde raro desde Sheets.
-    if base.empty:
-        base = df[serie_nombre.str.contains(re.escape(objetivo), na=False)]
-
+    serie_nombre = serie_columna(df, columna_nombre)
+    base = df[serie_nombre.eq(str(nombre).strip())]
     if base.empty:
         return ""
-
     valor = base.iloc[0].get(columna_dni, "")
-    return normalizar_dni(valor)
-
-
-
-def obtener_dni_jerarquia(hoja_ubicaciones, df_ubi: pd.DataFrame, columna_nombre: str, columna_dni: str, nombre: str) -> tuple[str, pd.DataFrame]:
-    """Busca el DNI de supervisor/coordinador y, si no aparece por caché, refresca ubicaciones una vez."""
-    dni = buscar_dni_por_nombre(df_ubi, columna_nombre, columna_dni, nombre)
-    if dni:
-        return dni, df_ubi
-
-    if nombre:
-        try:
-            df_refrescado = leer_ubicaciones(hoja_ubicaciones, forzar=True)
-            dni = buscar_dni_por_nombre(df_refrescado, columna_nombre, columna_dni, nombre)
-            return dni, df_refrescado
-        except Exception:
-            return "", df_ubi
-
-    return "", df_ubi
-
-
-MOTIVOS_REINGRESO_BLOQUEADOS = (
-    "FPD",
-    "VN2",
-    "VN3",
-    "BN2",
-    "BN3",
-    "PRODUCTIVIDAD",
-    "VENTAS CERO",
-    "VENTAS 0",
-    "VENTA CERO",
-    "VENTA 0",
-    "BAJA CALIDAD",
-    "BAJA DE CALIDAD",
-)
-
-
-def motivo_bloqueante_reingreso(motivo: str) -> str:
-    """Devuelve el motivo bloqueante detectado o vacío."""
-    m = normalizar_nombre_match(motivo)
-    if not m:
-        return ""
-    for patron in MOTIVOS_REINGRESO_BLOQUEADOS:
-        if patron in m:
-            return patron
-    return ""
-
-
-def revisar_motivo_reingreso(df_colab: pd.DataFrame, dni_limpio: str) -> tuple[bool, str]:
-    """
-    Regla de reingreso por motivo de baja:
-    - Si el histórico del DNI tiene baja con FPD, VN2, VN3 o PRODUCTIVIDAD: bloquea.
-    - Si tiene otro motivo de baja: alerta, pero no bloquea.
-    """
-    if df_colab.empty or "DNI" not in df_colab.columns or not dni_limpio:
-        return True, ""
-
-    df = df_colab.copy()
-    df["DNI_NORM"] = df["DNI"].apply(normalizar_dni)
-    encontrados = df[df["DNI_NORM"].eq(dni_limpio)].copy()
-    if encontrados.empty or "MOTIVO" not in encontrados.columns:
-        return True, ""
-
-    motivos = []
-    for _, row in encontrados.iterrows():
-        estado_row = limpiar_texto(row.get("ESTADO", "")).upper()
-        motivo = limpiar_texto(row.get("MOTIVO", ""))
-        if not motivo:
-            continue
-
-        bloqueante = motivo_bloqueante_reingreso(motivo)
-        if bloqueante:
-            return False, (
-                f"❌ Reingreso bloqueado. El DNI {dni_limpio} tiene histórico de baja con motivo "
-                f"{motivo}. No puede ingresar nuevamente."
-            )
-
-        if estado_row == "INACTIVO":
-            motivos.append(motivo)
-
-    if motivos:
-        # Si tiene varios historiales, se muestran todos los motivos únicos para que el usuario sepa el antecedente.
-        motivos_unicos = []
-        for m in motivos:
-            if m not in motivos_unicos:
-                motivos_unicos.append(m)
-        detalle_motivos = " / ".join(motivos_unicos[-3:])
-        return True, (
-            f"⚠️ Reingreso con antecedente: el DNI {dni_limpio} registra baja previa con motivo: {detalle_motivos}. "
-            f"No es bloqueante, pero debes confirmar el registro volviendo a presionar Guardar Alta."
-        )
-
-    return True, ""
+    return limpiar_texto(valor).replace(".0", "")
 
 
 # =========================
@@ -531,7 +417,7 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
 
     usuario_actual = st.session_state.get("usuario", "")
     rol = st.session_state.get("rol", "")
-    razon_usuario = st.session_state.get("razon", "")
+    razon_usuario = limpiar_razon_social(st.session_state.get("razon", ""))
 
     # Versión dinámica de llaves: cuando el alta se guarda correctamente,
     # se incrementa y todos los campos vuelven limpios como si se abriera el módulo desde cero.
@@ -546,8 +432,6 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
         return
 
     razones = [
-        "MALUTECH S.A.C.",
-        "2CONNECT SERVICES S.A.C.",
         "INTERCONEXION 360 SAC",
         "NOGALES HIGH SAC",
         "MULTIPLE FORCE SAC",
@@ -587,6 +471,8 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
         else:
             razon = razon_usuario
             st.text_input("RAZÓN SOCIAL", value=razon, disabled=True, key=k("razon_dealer"))
+
+        razon = limpiar_razon_social(razon)
 
         # Regla comercial:
         # - WOW TEL pertenece a VENTAS DIRECTAS. Apenas se selecciona, el canal queda DIRECTO.
@@ -681,27 +567,13 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             provincia = st.selectbox("PROVINCIA", [""] + provincias, key=k("provincia"))
 
             coordinador = st.selectbox("COORDINADOR", [""] + coordinadores, key=k("coordinador"))
-            dni_coordinador, df_ubi = obtener_dni_jerarquia(
-                hoja_ubicaciones, df_ubi, "COORDINADOR FINAL", "DNI COORDINADOR", coordinador
-            )
-            st.text_input(
-                "DNI COORDINADOR",
-                value=dni_coordinador,
-                disabled=True,
-                key=k(f"dni_coordinador_{normalizar_dni(dni_coordinador) or normalizar_nombre_match(coordinador)}"),
-            )
+            dni_coordinador = buscar_dni_por_nombre(df_ubi, "COORDINADOR FINAL", "DNI COORDINADOR", coordinador)
+            st.text_input("DNI COORDINADOR", value=dni_coordinador, disabled=True, key=k("dni_coordinador"))
 
         with col_u2:
             supervisor = st.selectbox("SUPERVISOR A CARGO", [""] + supervisores, key=k("supervisor"))
-            dni_supervisor, df_ubi = obtener_dni_jerarquia(
-                hoja_ubicaciones, df_ubi, "SUPERVISOR A CARGO FINAL", "DNI SUPERVISOR", supervisor
-            )
-            st.text_input(
-                "DNI SUPERVISOR",
-                value=dni_supervisor,
-                disabled=True,
-                key=k(f"dni_supervisor_{normalizar_dni(dni_supervisor) or normalizar_nombre_match(supervisor)}"),
-            )
+            dni_supervisor = buscar_dni_por_nombre(df_ubi, "SUPERVISOR A CARGO FINAL", "DNI SUPERVISOR", supervisor)
+            st.text_input("DNI SUPERVISOR", value=dni_supervisor, disabled=True, key=k("dni_supervisor"))
     else:
         # Para VENTAS DIRECTAS se oculta completamente la jerarquía D2D indirecta.
         # El supervisor válido es el de Datos adicionales Ventas Directas.
@@ -776,25 +648,10 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
         # Así no se congela el formulario mientras llenas campos.
         df_colab = leer_colaboradores(hoja_colaboradores, forzar=True)
         errores = validar_formulario(campos, df_colab)
-
-        ok_motivo, msg_motivo = revisar_motivo_reingreso(df_colab, dni_limpio)
-        if not ok_motivo:
-            errores.append(msg_motivo)
-
         if errores:
             for err in errores:
                 st.error(err)
             return
-
-        if msg_motivo:
-            ack_key = f"{dni_limpio}|{normalizar_nombre_match(msg_motivo)}"
-            if st.session_state.get("alta_reingreso_ack") != ack_key:
-                st.session_state["alta_reingreso_ack"] = ack_key
-                st.warning(msg_motivo)
-                st.info("Si validaste el antecedente y deseas continuar, vuelve a presionar Guardar Alta. En este primer intento no se registró nada.")
-                return
-            else:
-                st.warning("⚠️ Antecedente de reingreso confirmado. Continuando con el registro.")
 
         try:
             columnas_nuevas = [
