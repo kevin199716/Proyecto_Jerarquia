@@ -81,13 +81,14 @@ render_sidebar_user(usuario=usuario, rol=rol, razon=razon)
 # Nombres visibles corregidos:
 # Registro      -> Alta
 # Asistencia    -> Presencialidad Dealer
-if rol in ("backoffice", "dealer"):
+if rol == "backoffice":
     opciones_menu = ["Alta", "Bajas", "Presencialidad Dealer"]
+elif rol == "dealer":
+    opciones_menu = ["Alta", "Bajas", "Presencialidad Dealer"]
+elif rol in ("presencialidad", "presencialidad_dealer"):
+    opciones_menu = ["Presencialidad Dealer"]
 elif rol == "editor":
     opciones_menu = ["Edición", "Presencialidad Dealer"]
-elif rol in ("presencialidad", "presencialidad_dealer", "asistencia"):
-    # Usuarios operativos: solo pueden ingresar al módulo Presencialidad Dealer.
-    opciones_menu = ["Presencialidad Dealer"]
 else:
     opciones_menu = []
 
@@ -130,25 +131,13 @@ def mostrar_matriz_jerarquia(titulo="Estado actual de la jerarquía", icono="�
         st.error(f"No se pudo cargar la matriz de jerarquía: {e}")
         return None
 
-
-
-def boton_matriz_jerarquia(key: str):
-    """Muestra/oculta la matriz sin perderla al usar filtros internos."""
-    estado_key = f"{key}_visible"
-    if estado_key not in st.session_state:
-        st.session_state[estado_key] = False
-    label = "📕 Ocultar matriz de jerarquía" if st.session_state[estado_key] else "📋 Ver matriz de jerarquía"
-    if st.button(label, key=key):
-        st.session_state[estado_key] = not st.session_state[estado_key]
-    if st.session_state[estado_key]:
-        mostrar_matriz_jerarquia()
 # =====================================================
 # BACKOFFICE
 # =====================================================
 if rol == "backoffice":
     if pagina == "Alta":
-        mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia)
-        boton_matriz_jerarquia("btn_ver_matriz_alta_backoffice")
+        mostrar_formulario(hoja_colaboradores, hoja_ubicaciones)
+        mostrar_matriz_jerarquia()
 
     elif pagina == "Bajas":
         df = mostrar_matriz_jerarquia()
@@ -157,8 +146,8 @@ if rol == "backoffice":
             registro.dar_de_baja(df, hoja_colaboradores, razon)
 
     elif pagina == "Presencialidad Dealer":
-        mostrar_asistencia(hoja_asistencia, hoja_colaboradores, razon=razon)
-        boton_matriz_jerarquia("btn_ver_matriz_pres_backoffice")
+        mostrar_asistencia(hoja_asistencia, hoja_colaboradores)
+        mostrar_matriz_jerarquia()
 
 # =====================================================
 # DEALER
@@ -167,8 +156,8 @@ elif rol == "dealer":
     wow_section(f"Socio: {razon}", "📌")
 
     if pagina == "Alta":
-        mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia)
-        boton_matriz_jerarquia("btn_ver_matriz_alta_dealer")
+        mostrar_formulario(hoja_colaboradores, hoja_ubicaciones)
+        mostrar_matriz_jerarquia()
 
     elif pagina == "Bajas":
         df = mostrar_matriz_jerarquia()
@@ -178,7 +167,17 @@ elif rol == "dealer":
 
     elif pagina == "Presencialidad Dealer":
         mostrar_asistencia(hoja_asistencia, hoja_colaboradores, razon=razon)
-        boton_matriz_jerarquia("btn_ver_matriz_pres_dealer")
+        mostrar_matriz_jerarquia()
+
+# =====================================================
+# USUARIO SOLO PRESENCIALIDAD
+# =====================================================
+elif rol in ("presencialidad", "presencialidad_dealer"):
+    wow_section(f"Presencialidad Dealer: {razon}", "🗓️")
+    if pagina == "Presencialidad Dealer":
+        mostrar_asistencia(hoja_asistencia, hoja_colaboradores, razon=razon)
+        # No se muestra Alta/Bajas ni matriz completa fuera del módulo.
+        mostrar_matriz_jerarquia()
 
 # =====================================================
 # EDITOR
@@ -193,15 +192,8 @@ elif rol == "editor":
             registro.editar_registro(df, hoja_colaboradores, hoja_ubicaciones)
 
     elif pagina == "Presencialidad Dealer":
-        mostrar_asistencia(hoja_asistencia, hoja_colaboradores, razon=razon)
-        boton_matriz_jerarquia("btn_ver_matriz_pres_editor")
-
-# =====================================================
-# USUARIO SOLO PRESENCIALIDAD
-# =====================================================
-elif rol in ("presencialidad", "presencialidad_dealer", "asistencia"):
-    if pagina == "Presencialidad Dealer":
-        mostrar_asistencia(hoja_asistencia, hoja_colaboradores, razon=razon)
+        mostrar_asistencia(hoja_asistencia, hoja_colaboradores)
+        mostrar_matriz_jerarquia()
 
 # =====================================================
 # SIN PERMISOS
