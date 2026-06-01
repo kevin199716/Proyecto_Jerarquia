@@ -1,6 +1,6 @@
 """
+FIX_AUTO_UPSERT_SIN_BOTON_NO_DESTRUCTIVO_20260601
 asistencia.py — Presencialidad Dealer
-FIX_ABM_PERIODO_FILTROS_DEALER_20260601
 Cambios aplicados:
   1. Módulo visible como Presencialidad Dealer desde app_maestra_vendedores.py.
   2. Filtros: Razón Social, Supervisor, Coordinador, Departamento y Provincia.
@@ -76,6 +76,13 @@ LEYENDA_MARCAS = {
     "NA-CA": "No Asistió - Con aviso",
 }
 
+ZONA_PERU = pytz.timezone("America/Lima")
+MARCAS_SOLO_BAJA_MEDICA = ["", "A-BM"]
+
+def ahora_lima() -> datetime:
+    return datetime.now(ZONA_PERU)
+
+
 # =====================================================
 # UTILIDADES
 # =====================================================
@@ -90,6 +97,14 @@ def limpiar_texto(valor) -> str:
         return ""
     s = str(valor).strip()
     return "" if s.upper() in ("NONE", "NAN", "NULL") else s
+
+
+def primer_valor(*valores) -> str:
+    for v in valores:
+        txt = limpiar_texto(v)
+        if txt:
+            return txt
+    return ""
 
 
 def limpiar_marca(valor) -> str:
@@ -131,64 +146,82 @@ def parse_fecha(valor):
         return None
 
 
-TZ_LIMA = pytz.timezone("America/Lima")
-
-def ahora_lima() -> datetime:
-    return datetime.now(TZ_LIMA)
-
 def periodo_actual() -> str:
     return ahora_lima().strftime("%Y-%m")
 
-def parse_periodo(periodo: str):
-    try:
-        y, m = str(periodo).split("-")
-        return int(y), int(m)
-    except Exception:
-        h = ahora_lima()
-        return h.year, h.month
 
-def mes_de_periodo(periodo: str) -> str:
-    _, m = parse_periodo(periodo)
-    return str(m)
+def mes_actual() -> str:
+    return str(ahora_lima().month)
+
 
 def hoy_actual() -> date:
     return ahora_lima().date()
 
+
 def dia_actual() -> int:
     return ahora_lima().day
 
+
+def parse_periodo(periodo: str) -> tuple[int, int]:
+    try:
+        anio, mes = str(periodo).split("-")
+        return int(anio), int(mes)
+    except Exception:
+        h = hoy_actual()
+        return h.year, h.month
+
+
+def fecha_desde_periodo_dia(periodo: str, dia: int) -> date:
+    anio, mes = parse_periodo(periodo)
+    ultimo = calendar.monthrange(anio, mes)[1]
+    dia = max(1, min(int(dia), ultimo))
+    return date(anio, mes, dia)
+
+
+def mes_desde_periodo(periodo: str) -> str:
+    _, mes = parse_periodo(periodo)
+    return str(mes)
+
+
 def dias_del_periodo(periodo: str) -> list[int]:
-    y, m = parse_periodo(periodo)
-    ultimo = calendar.monthrange(y, m)[1]
+    anio, mes = parse_periodo(periodo)
+    ultimo = calendar.monthrange(anio, mes)[1]
     return list(range(1, ultimo + 1))
+
 
 def dias_del_mes_actual() -> list[int]:
     return dias_del_periodo(periodo_actual())
 
+
 def primer_dia_periodo(periodo: str) -> date:
-    y, m = parse_periodo(periodo)
-    return date(y, m, 1)
+    anio, mes = parse_periodo(periodo)
+    return date(anio, mes, 1)
+
 
 def ultimo_dia_periodo(periodo: str) -> date:
-    y, m = parse_periodo(periodo)
-    return date(y, m, calendar.monthrange(y, m)[1])
+    anio, mes = parse_periodo(periodo)
+    return date(anio, mes, calendar.monthrange(anio, mes)[1])
+
 
 def primer_dia_mes_actual() -> date:
     return primer_dia_periodo(periodo_actual())
 
+
 def ultimo_dia_mes_actual() -> date:
     return ultimo_dia_periodo(periodo_actual())
 
-def fecha_desde_periodo_dia(periodo: str, dia: int) -> date:
-    y, m = parse_periodo(periodo)
-    return date(y, m, int(dia))
 
-def periodos_disponibles(df: pd.DataFrame) -> list[str]:
-    base = [periodo_actual()]
-    if df is not None and not df.empty and "PERIODO" in df.columns:
-        vals = (df["PERIODO"].astype(str).str.strip().replace("", pd.NA).dropna().unique().tolist())
-        base += vals
-    return sorted(set(base), reverse=True)
+def periodos_recientes(n: int = 4) -> list[str]:
+    h = hoy_actual()
+    out = []
+    y, m = h.year, h.month
+    for _ in range(n):
+        out.append(f"{y:04d}-{m:02d}")
+        m -= 1
+        if m == 0:
+            m = 12
+            y -= 1
+    return out
 
 
 def letra_columna(numero: int) -> str:
@@ -219,40 +252,36 @@ def nombre_completo(row: pd.Series) -> str:
     return " ".join([p for p in partes if p]).strip()
 
 
-def fila_editable_fecha(row: pd.Series, fecha_revision) -> bool:
-    """
-    FIX_FILA_EDITABLE_FECHA_20260601
-    Determina si una persona está vigente para el día seleccionado.
-    No depende del día actual: sirve para mayo, junio o cualquier periodo elegido.
-    """
-    fecha_revision = parse_fecha(fecha_revision)
-    if fecha_revision is None:
-        fecha_revision = hoy_actual()
-
+def fila_editable_hoy(row: pd.Series) -> bool:
+    hoy = hoy_actual()
     alta = parse_fecha(row.get("FECHA_ALTA"))
     cese = parse_fecha(row.get("FECHA_CESE"))
     estado = limpiar_texto(row.get("ESTADO", "")).upper()
 
-    if alta and fecha_revision < alta:
+    if alta and hoy < alta:
         return False
-
-    # Si tiene fecha de cese, solo se permite hasta el día de cese incluido.
-    if cese and fecha_revision > cese:
+    if estado != "ACTIVO":
         return False
+    if cese and hoy > cese:
+        return False
+    return True
 
-    # Activos siempre pueden marcar si la fecha está dentro de su vigencia.
+
+def fila_editable_fecha(row: pd.Series, fecha_edicion: date) -> bool:
+    alta = parse_fecha(row.get("FECHA_ALTA"))
+    cese = parse_fecha(row.get("FECHA_CESE"))
+    estado = limpiar_texto(row.get("ESTADO", "")).upper()
+
+    if alta and fecha_edicion < alta:
+        return False
+    if cese and fecha_edicion > cese:
+        return False
     if estado == "ACTIVO":
         return True
-
-    # Inactivos solo quedan visibles/editables hasta su fecha de cese; después ya no.
-    if estado == "INACTIVO" and cese and fecha_revision <= cese:
+    # Si ya está INACTIVO, solo deja corregir una baja médica dentro de su vigencia histórica.
+    if estado == "INACTIVO" and cese and fecha_edicion <= cese:
         return True
-
     return False
-
-
-def fila_editable_hoy(row: pd.Series) -> bool:
-    return fila_editable_fecha(row, hoy_actual())
 
 
 # =====================================================
@@ -357,7 +386,7 @@ def leer_colaboradores_drive(hoja_colaboradores) -> pd.DataFrame:
 # =====================================================
 # SINCRONIZACIÓN CON COLABORADORES
 # =====================================================
-def obtener_promotores_vigentes_mes(df_colab: pd.DataFrame, periodo: str | None = None) -> pd.DataFrame:
+def obtener_promotores_vigentes_mes(df_colab: pd.DataFrame, periodo_ref: str | None = None) -> pd.DataFrame:
     if df_colab.empty or "DNI" not in df_colab.columns:
         return pd.DataFrame()
 
@@ -368,9 +397,9 @@ def obtener_promotores_vigentes_mes(df_colab: pd.DataFrame, periodo: str | None 
     df["DNI"] = df["DNI"].apply(normalizar_dni)
     df = df[df["DNI"].ne("")].copy()
 
-    periodo = periodo or periodo_actual()
-    inicio_mes = primer_dia_periodo(periodo)
-    fin_mes = ultimo_dia_periodo(periodo)
+    periodo_ref = periodo_ref or periodo_actual()
+    inicio_mes = primer_dia_periodo(periodo_ref)
+    fin_mes = ultimo_dia_periodo(periodo_ref)
 
     filas = []
     for _, row in df.iterrows():
@@ -396,7 +425,8 @@ def obtener_promotores_vigentes_mes(df_colab: pd.DataFrame, periodo: str | None 
     return pd.DataFrame(filas)
 
 
-def construir_payload_base(row: pd.Series, periodo: str | None = None) -> dict:
+def construir_payload_base(row: pd.Series, periodo_ref: str | None = None) -> dict:
+    periodo_ref = periodo_ref or periodo_actual()
     estado = limpiar_texto(row.get("ESTADO", "")).upper()
     fecha_alta = str(parse_fecha(row.get("FECHA DE CREACION USUARIO", row.get("FECHA_CREACION_USUARIO", ""))) or "")
     # Si vuelve a ACTIVO, no se debe seguir arrastrando una fecha de cese antigua
@@ -413,16 +443,16 @@ def construir_payload_base(row: pd.Series, periodo: str | None = None) -> dict:
         "ESTADO": estado,
         "FECHA_ALTA": fecha_alta,
         "FECHA_CESE": fecha_cese,
-        "MES": mes_de_periodo(periodo),
-        "PERIODO": periodo,
+        "MES": mes_desde_periodo(periodo_ref),
+        "PERIODO": periodo_ref,
     }
 
 
-def sincronizar_mes(hoja_asistencia, hoja_colaboradores, periodo: str | None = None) -> tuple[int, int]:
+def sincronizar_mes(hoja_asistencia, hoja_colaboradores, periodo_ref: str | None = None) -> tuple[int, int]:
     if not validar_o_crear_cabecera(hoja_asistencia):
         return 0, 0
 
-    periodo = periodo or periodo_actual()
+    periodo = periodo_ref or periodo_actual()
     df_asistencia, headers = leer_asistencia_drive(hoja_asistencia)
     df_colab = leer_colaboradores_drive(hoja_colaboradores)
     df_vigentes = obtener_promotores_vigentes_mes(df_colab, periodo)
@@ -721,24 +751,22 @@ def actualizar_cache_con_editado(df_editado: pd.DataFrame, col_hoy: str) -> None
 # MODAL DE CARGA DE SUSTENTO OBLIGATORIO (A-BM)
 # =====================================================
 @st.dialog("📋 Carga de Sustento Obligatorio: Baja Médica")
-def mostrar_dialogo_sustento(dni, nombre, row_sheet, col_hoy, df_editor, periodo_sel=None):
+def mostrar_dialogo_sustento(dni, nombre, row_sheet, col_hoy, df_editor, periodo_sel, fecha_asistencia):
     st.write(f"Colaborador: **{nombre}** (DNI: {dni})")
     st.warning("⚠️ Para registrar **A-BM (Baja Médica)**, es obligatorio subir el sustento o certificado médico correspondiente.")
     
-    periodo_sel = periodo_sel or periodo_actual()
-    sustento_key = f"{dni}|{periodo_sel}|{col_hoy}"
     archivo = st.file_uploader(
         "Subir certificado médico (PDF o Imagen)",
         type=["pdf", "png", "jpg", "jpeg"],
-        key=f"file_uploader_{dni}_{periodo_sel}_{col_hoy}"
+        key=f"file_uploader_{dni}"
     )
     
     st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
     col_c1, col_c2 = st.columns(2)
     with col_c1:
-        guardar = st.button("✅ Subir y Validar", use_container_width=True, key=f"btn_val_sustento_{dni}_{periodo_sel}_{col_hoy}")
+        guardar = st.button("✅ Subir y Validar", use_container_width=True, key=f"btn_val_sustento_{dni}")
     with col_c2:
-        cancelar = st.button("❌ Cancelar y Revertir", use_container_width=True, key=f"btn_canc_sustento_{dni}_{periodo_sel}_{col_hoy}")
+        cancelar = st.button("❌ Cancelar y Revertir", use_container_width=True, key=f"btn_canc_sustento_{dni}")
         
     if guardar:
         if not archivo:
@@ -747,15 +775,13 @@ def mostrar_dialogo_sustento(dni, nombre, row_sheet, col_hoy, df_editor, periodo
             if "sustentos_pendientes" not in st.session_state:
                 st.session_state["sustentos_pendientes"] = {}
                 
-            st.session_state["sustentos_pendientes"][sustento_key] = {
+            st.session_state["sustentos_pendientes"][dni] = {
                 "nombre_archivo": archivo.name,
                 "contenido_bytes": archivo.read(),
                 "mime_type": archivo.type,
                 "dni": dni,
                 "nombre": nombre,
-                "row_sheet": row_sheet,
-                "periodo": periodo_sel,
-                "col_dia": col_hoy
+                "row_sheet": row_sheet
             }
             
             # Forzar la marcación "A-BM" en el caché del DataFrame actual para evitar que se pierda en el rerun
@@ -797,47 +823,32 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
     if not validar_cabecera_sin_red(hoja_asistencia):
         return
 
-    # Carga inicial cacheada. Recargar Drive solo fuerza nueva lectura desde Google Sheets.
-    cargar_cache_desde_drive(hoja_asistencia)
-
-    df_cache_tmp = st.session_state.get(KEY_DF_TOTAL, pd.DataFrame()).copy()
-    opciones_periodo = periodos_disponibles(df_cache_tmp)
-
-    p1, p2, p3, p4 = st.columns([1.2, 0.9, 1.25, 4.0])
-    with p1:
-        periodo = st.selectbox("PERIODO", opciones_periodo, index=opciones_periodo.index(periodo_actual()) if periodo_actual() in opciones_periodo else 0, key="asis_periodo")
+    # Período y día: no hay botón de sincronizar para el socio.
+    # Al cargar o refrescar la página, se actualiza automáticamente de forma NO destructiva.
+    periodos = sorted(set(periodos_recientes(4)), reverse=True)
+    periodo = st.selectbox("PERIODO", periodos, index=0, key="asis_periodo_sel")
     dias_validos = dias_del_periodo(periodo)
-    with p2:
-        dia_sel = st.selectbox("DÍA", dias_validos, index=(dia_actual()-1 if periodo == periodo_actual() and dia_actual() in dias_validos else 0), key="asis_dia")
-    col_hoy = f"DIA_{int(dia_sel)}"
-    fecha_edicion = fecha_desde_periodo_dia(periodo, int(dia_sel))
-    es_hoy_real = periodo == periodo_actual() and int(dia_sel) == dia_actual()
+    hoy = hoy_actual()
+    dia_default = hoy.day if periodo == periodo_actual() and hoy.day in dias_validos else dias_validos[-1]
+    dia_sel = st.selectbox("DÍA", dias_validos, index=dias_validos.index(dia_default), key="asis_dia_sel")
+    fecha_edicion = fecha_desde_periodo_dia(periodo, dia_sel)
+    col_hoy = f"DIA_{dia_sel}"
+    es_dia_actual = fecha_edicion == hoy
 
-    with p3:
-        if st.button("🔄 Sincronizar periodo", key="btn_sync_asistencia"):
-            with st.spinner("Sincronizando con colaboradores…"):
-                try:
-                    nuevos, actualizados = sincronizar_mes(hoja_asistencia, hoja_colaboradores, periodo)
-                    cargar_cache_desde_drive(hoja_asistencia, forzar=True)
-                    st.success(f"✅ Periodo sincronizado. Nuevos: {nuevos} | Datos base actualizados: {actualizados}")
-                except Exception as e:
-                    st.error(f"Error sincronizando: {e}")
-                    return
+    st.info(
+        f"📅 Periodo: **{periodo}** | Día seleccionado: **{col_hoy}** | "
+        "La información se actualiza al cargar/refrescar la página. A-BM permite sustento histórico."
+    )
 
-    with p4:
-        st.info(
-            f"📅 Periodo seleccionado: **{periodo}** | Día en edición: **{col_hoy}** | "
-            "A-BM puede registrarse para cualquier día del periodo seleccionado. Las demás marcas solo aplican al día actual."
-        )
+    # AUTO-UPsert seguro: agrega faltantes y actualiza datos base sin tocar DIA_1..DIA_31.
+    # No usa clear(), no borra filas y no reemplaza marcas anteriores.
+    try:
+        sincronizar_mes(hoja_asistencia, hoja_colaboradores, periodo)
+    except Exception as e:
+        st.warning(f"No se pudo actualizar automáticamente la base de presencialidad: {e}")
 
-    if st.button("♻️ Recargar Drive", key="btn_reload_asistencia"):
-        with st.spinner("Recargando desde Drive…"):
-            try:
-                cargar_cache_desde_drive(hoja_asistencia, forzar=True)
-                st.success("✅ Datos actualizados desde Drive.")
-            except Exception as e:
-                st.error(f"Error recargando: {e}")
-                return
+    # Forzar lectura real para que otro usuario vea cambios al refrescar la página.
+    cargar_cache_desde_drive(hoja_asistencia, forzar=True)
 
     df_total = st.session_state[KEY_DF_TOTAL].copy()
     df_original = st.session_state[KEY_DF_ORIGINAL].copy()
@@ -858,7 +869,7 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
         df_mes = df_mes[df_mes["RAZON SOCIAL"].astype(str).str.strip().str.upper().eq(razon_usuario.upper())].copy()
 
     if df_mes.empty:
-        st.warning("⚠️ No hay registros del periodo actual. Presiona **Sincronizar mes**.")
+        st.warning("⚠️ No hay registros para el periodo seleccionado. La app intentó actualizar automáticamente desde colaboradores. Si sigue vacío, valida que existan colaboradores vigentes en ese mes.")
         return
 
     # =====================================================
@@ -915,14 +926,14 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
         st.warning("No hay registros con los filtros seleccionados.")
         return
 
-    # Editor para la fecha seleccionada. Si no es el día actual, solo se permite A-BM.
+    # Editor solo para personas vigentes hoy.
     df_editor_base = df_filtrado[df_filtrado.apply(lambda r: fila_editable_fecha(r, fecha_edicion), axis=1)].copy()
     total_filtrado = len(df_editor_base)
 
-    st.caption(f"Registros vigentes en el día seleccionado: **{total_filtrado}** | Registros en espejo mensual: **{len(df_filtrado)}**")
+    st.caption(f"Registros editables hoy: **{total_filtrado}** | Registros en espejo mensual: **{len(df_filtrado)}**")
 
     if df_editor_base.empty:
-        st.warning("⚠️ No hay personal vigente para marcar asistencia en el día seleccionado con los filtros seleccionados.")
+        st.warning("⚠️ No hay personal vigente para marcar asistencia el día de hoy con los filtros seleccionados.")
     else:
         if total_filtrado > MAX_FILAS_EDITOR:
             st.warning(
@@ -940,12 +951,9 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
             df_editor_base = df_editor_base.iloc[inicio: inicio + MAX_FILAS_EDITOR].copy()
             st.caption(f"Mostrando filas {inicio + 1}–{min(inicio + MAX_FILAS_EDITOR, total_filtrado)} de {total_filtrado}")
 
-        st.markdown("<span class='wow-section-title'>✏️ Registrar presencialidad</span>", unsafe_allow_html=True)
+        st.markdown("<span class='wow-section-title'>✏️ Registrar presencialidad de hoy</span>", unsafe_allow_html=True)
         st.info("**Motivos de validación:** A = Asistió · A-BM = No Asistió por Baja Médica · A-VAC = No Asistió por Vacaciones · NA-SA = No Asistió - Sin aviso · NA-CA = No Asistió - Con aviso")
-        if es_hoy_real:
-            st.caption(f"Está habilitada la columna **{col_hoy}**. Para días pasados/futuros solo se permite A-BM con sustento.")
-        else:
-            st.warning(f"Día distinto al actual: en **{col_hoy}** solo se permite A-BM con sustento. No se habilitan A, A-VAC, NA-SA ni NA-CA.")
+        st.caption(f"Columna habilitada: **{col_hoy}**. Si el día no es hoy, solo se permite **A-BM** con sustento. Los INACTIVOS solo se respetan hasta su fecha de cese.")
 
         columnas_editor = COLUMNAS_FIJAS_EDITOR + [col_hoy, "ROW_SHEET"]
         for col in columnas_editor:
@@ -983,16 +991,16 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                         nombre = row_data["NOMBRE"]
                         row_sheet = row_data["ROW_SHEET"]
                         
-                        sust_key = f"{dni}|{periodo}|{col_hoy}"
-                        if sust_key not in st.session_state.get("sustentos_pendientes", {}):
-                            mostrar_dialogo_sustento(dni, nombre, row_sheet, col_hoy, df_editor, periodo)
+                        if dni not in st.session_state.get("sustentos_pendientes", {}):
+                            mostrar_dialogo_sustento(dni, nombre, row_sheet, col_hoy, df_editor, periodo, fecha_edicion)
 
         disabled_cols = [col for col in df_editor.columns if col != col_hoy]
         # Mantengo ROW_SHEET visible como FILA técnica para evitar el error React #185
         # que aparece a veces cuando se oculta una columna usada para guardar.
+        opciones_marca = MARCAS_PRESENCIALIDAD if es_dia_actual else MARCAS_SOLO_BAJA_MEDICA
         column_config = {
             "ROW_SHEET": st.column_config.NumberColumn("FILA", width="small", disabled=True),
-            col_hoy: st.column_config.SelectboxColumn(col_hoy, options=(MARCAS_PRESENCIALIDAD if es_hoy_real else ["", "A-BM"]), width="small"),
+            col_hoy: st.column_config.SelectboxColumn(col_hoy, options=opciones_marca, width="small"),
         }
 
         editado = st.data_editor(
@@ -1022,8 +1030,7 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                             if col_hoy in cols and cols[col_hoy] == "A-BM":
                                 if r_idx < len(df_editor):
                                     dni = df_editor.iloc[r_idx]["DNI"]
-                                    sust_key = f"{dni}|{periodo}|{col_hoy}"
-                                    if sust_key not in st.session_state.get("sustentos_pendientes", {}):
+                                    if dni not in st.session_state.get("sustentos_pendientes", {}):
                                         st.error(f"❌ Falta el sustento médico obligatorio para {df_editor.iloc[r_idx]['NOMBRE']}.")
                                         st.stop()
 
@@ -1048,12 +1055,9 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                             tz_lima = pytz.timezone("America/Lima")
                             timestamp_lima = datetime.now(tz_lima).strftime("%Y-%m-%d %H:%M:%S")
                             
-                            for sust_key, datos in list(sustentos.items()):
-                                if datos.get("periodo") != periodo or datos.get("col_dia") != col_hoy:
-                                    continue
-                                dni = datos.get("dni", "")
+                            for dni, datos in list(sustentos.items()):
                                 extension = "pdf" if datos["mime_type"] == "application/pdf" else "jpg"
-                                nombre_archivo_drive = f"sustento_{dni}_{periodo}_{col_hoy}_{int(time.time())}.{extension}"
+                                nombre_archivo_drive = f"sustento_{dni}_{fecha_edicion}_{int(time.time())}.{extension}"
                                 
                                 link_drive = subir_archivo_drive(
                                     nombre_archivo=nombre_archivo_drive,
@@ -1079,19 +1083,8 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                             if filas_nuevas:
                                 hoja_sustentos.append_rows(filas_nuevas, value_input_option="USER_ENTERED")
                             
-                            # Limpiar solo los sustentos procesados de este periodo/día
-                            pendientes = st.session_state.get("sustentos_pendientes", {})
-                            for k_s in list(pendientes.keys()):
-                                d_s = pendientes.get(k_s, {})
-                                if d_s.get("periodo") == periodo and d_s.get("col_dia") == col_hoy:
-                                    del pendientes[k_s]
-                            st.session_state["sustentos_pendientes"] = pendientes
-
-                        if not es_hoy_real:
-                            valores_invalidos = df_editado[col_hoy].apply(limpiar_marca).loc[lambda x: ~x.isin(["", "A-BM"])]
-                            if not valores_invalidos.empty:
-                                st.error("❌ Para días distintos al actual solo se permite A-BM con sustento.")
-                                st.stop()
+                            # Limpiar memoria de sustentos procesados
+                            st.session_state["sustentos_pendientes"] = {}
 
                         updates = preparar_updates(
                             df_editado=df_editado,
