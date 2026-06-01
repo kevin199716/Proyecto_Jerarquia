@@ -5,8 +5,6 @@
     "estado": "activo",
     "razon": "ALL"
   },
-
-{
   "interconexion_presencialidad": {
     "password": "Inter360@123",
     "rol": "presencialidad",
