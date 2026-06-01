@@ -273,7 +273,20 @@ def obtener_dni_jerarquia(hoja_ubicaciones, df_ubi: pd.DataFrame, columna_nombre
     return "", df_ubi
 
 
-MOTIVOS_REINGRESO_BLOQUEADOS = ("FPD", "VN2", "VN3", "PRODUCTIVIDAD")
+MOTIVOS_REINGRESO_BLOQUEADOS = (
+    "FPD",
+    "VN2",
+    "VN3",
+    "BN2",
+    "BN3",
+    "PRODUCTIVIDAD",
+    "VENTAS CERO",
+    "VENTAS 0",
+    "VENTA CERO",
+    "VENTA 0",
+    "BAJA CALIDAD",
+    "BAJA DE CALIDAD",
+)
 
 
 def motivo_bloqueante_reingreso(motivo: str) -> str:
@@ -320,10 +333,15 @@ def revisar_motivo_reingreso(df_colab: pd.DataFrame, dni_limpio: str) -> tuple[b
             motivos.append(motivo)
 
     if motivos:
-        ultimo = motivos[-1]
+        # Si tiene varios historiales, se muestran todos los motivos únicos para que el usuario sepa el antecedente.
+        motivos_unicos = []
+        for m in motivos:
+            if m not in motivos_unicos:
+                motivos_unicos.append(m)
+        detalle_motivos = " / ".join(motivos_unicos[-3:])
         return True, (
-            f"⚠️ Reingreso con antecedente: el DNI {dni_limpio} tuvo una baja anterior con motivo: {ultimo}. "
-            f"No es bloqueante, pero debe validarse antes de continuar."
+            f"⚠️ Reingreso con antecedente: el DNI {dni_limpio} registra baja previa con motivo: {detalle_motivos}. "
+            f"No es bloqueante, pero debes confirmar el registro volviendo a presionar Guardar Alta."
         )
 
     return True, ""
@@ -769,7 +787,14 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             return
 
         if msg_motivo:
-            st.warning(msg_motivo)
+            ack_key = f"{dni_limpio}|{normalizar_nombre_match(msg_motivo)}"
+            if st.session_state.get("alta_reingreso_ack") != ack_key:
+                st.session_state["alta_reingreso_ack"] = ack_key
+                st.warning(msg_motivo)
+                st.info("Si validaste el antecedente y deseas continuar, vuelve a presionar Guardar Alta. En este primer intento no se registró nada.")
+                return
+            else:
+                st.warning("⚠️ Antecedente de reingreso confirmado. Continuando con el registro.")
 
         try:
             columnas_nuevas = [
