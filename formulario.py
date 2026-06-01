@@ -10,6 +10,10 @@ import streamlit as st
 # =========================
 zona_peru = pytz.timezone("America/Lima")
 
+# Canales directos: reemplazan a la opción antigua "VENTAS DIRECTAS" en el desplegable.
+# Los 4 se comportan como directos: sin TIPO_GESTION, sin jerarquía indirecta y con datos adicionales.
+CANALES_DIRECTOS = ["D2D", "ATC", "RETAIL", "CEX"]
+
 
 def ahora_peru_fecha() -> str:
     return datetime.now(zona_peru).strftime("%Y-%m-%d")
@@ -317,7 +321,7 @@ def validar_formulario(campos: dict, df_colab: pd.DataFrame) -> list[str]:
         "FECHA DE CREACION USUARIO", "CONTRATO FIRMADO",
     ]
 
-    if canal_val == "VENTAS DIRECTAS":
+    if canal_val in CANALES_DIRECTOS:
         requeridos += ["SUPERVISOR", "CAPACITADOR", "ORIGEN_INGRESO", "FUENTE_INGRESO"]
     else:
         requeridos += ["DEPARTAMENTO", "PROVINCIA", "SUPERVISOR A CARGO", "DNI SUPERVISOR", "COORDINADOR", "DNI COORDINADOR"]
@@ -358,10 +362,10 @@ def validar_formulario(campos: dict, df_colab: pd.DataFrame) -> list[str]:
     if firmado != "SI":
         errores.append("❌ CONTRATO FIRMADO debe quedar en SI para registrar el alta.")
 
-    if canal_val == "VENTAS DIRECTAS":
+    if canal_val in CANALES_DIRECTOS:
         for c in ["SUPERVISOR", "CAPACITADOR", "ORIGEN_INGRESO", "FUENTE_INGRESO"]:
             if limpiar_texto(campos.get(c, "")) == "":
-                errores.append(f"❌ Campo obligatorio pendiente para Ventas Directas: {c}")
+                errores.append(f"❌ Campo obligatorio pendiente para canal directo: {c}")
     elif canal_val == "VENTAS INDIRECTAS":
         if limpiar_texto(campos.get("TIPO_GESTION", "")).upper() != "CAMPO":
             errores.append("❌ Para VENTAS INDIRECTAS, TIPO_GESTION debe ser CAMPO.")
@@ -443,14 +447,14 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
     supervisores = lista_limpia(df_ubi, "SUPERVISOR A CARGO FINAL")
     coordinadores = lista_limpia(df_ubi, "COORDINADOR FINAL")
 
-    # Listas adicionales para canal VENTAS DIRECTAS (mismo worksheet ubicaciones).
+    # Listas adicionales para canal CANALES DIRECTOS (mismo worksheet ubicaciones).
     # Si la columna no existe, queda lista vacía y se muestra alerta controlada.
     supervisores_directo = lista_limpia(df_ubi, "SUPERVISOR")
     capacitadores = lista_limpia(df_ubi, "CAPACITADOR")
     origenes_ingreso = lista_limpia(df_ubi, "ORIGEN_INGRESO")
     fuentes_ingreso = lista_limpia(df_ubi, "FUENTE_INGRESO")
 
-    st.caption("WOW TEL se gestiona como VENTAS DIRECTAS. Los demás socios se gestionan como VENTAS INDIRECTAS. En indirectas se mantiene la lógica original de cargos Dealer; en directas el cargo va limpio sin Dealer.")
+    st.caption("WOW TEL se gestiona con canales directos: D2D, ATC, RETAIL y CEX. Los demás socios se gestionan como VENTAS INDIRECTAS. En indirectas se mantiene la lógica original de cargos Dealer; en directos el cargo va limpio sin Dealer.")
 
     col_izq, col_der = st.columns(2)
 
@@ -475,30 +479,34 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
         razon = limpiar_razon_social(razon)
 
         # Regla comercial:
-        # - WOW TEL pertenece a VENTAS DIRECTAS. Apenas se selecciona, el canal queda DIRECTO.
+        # - WOW TEL pertenece a canales directos: D2D, ATC, RETAIL y CEX.
         # - Los demás socios pertenecen a VENTAS INDIRECTAS.
         razon_norm = limpiar_texto(razon).upper()
         if razon_norm == "WOW TEL":
-            canal_options = ["VENTAS DIRECTAS"]
+            canal_options = CANALES_DIRECTOS
         elif razon_norm:
             canal_options = ["VENTAS INDIRECTAS"]
         else:
-            canal_options = ["VENTAS INDIRECTAS", "VENTAS DIRECTAS"]
+            canal_options = ["VENTAS INDIRECTAS"] + CANALES_DIRECTOS
 
         canal = st.selectbox("CANAL", canal_options, key=k("canal"))
-        if canal == "VENTAS DIRECTAS":
-            subcanal = st.selectbox("SUB CANAL", ["VENTAS DIRECTAS"], key=k("subcanal"))
+        es_canal_directo = canal in CANALES_DIRECTOS
+        if es_canal_directo:
+            # Para canales directos, el sub canal viaja igual al canal seleccionado.
+            # No se muestra CANALES DIRECTOS porque ya no debe figurar en el desplegable.
+            subcanal = canal
+            st.text_input("SUB CANAL", value=subcanal, disabled=True, key=k("subcanal_directo_visible"))
             tipo_gestion = ""
         else:
             subcanal = st.selectbox("SUB CANAL", ["VENTAS INDIRECTAS", "OUTBOUND"], key=k("subcanal"))
             tipo_gestion = "CAMPO"
         # TIPO_GESTION no se muestra en pantalla.
-        # Regla: VENTAS INDIRECTAS viaja como CAMPO; VENTAS DIRECTAS viaja vacío.
+        # Regla: VENTAS INDIRECTAS viaja como CAMPO; canales directos viajan vacío.
         region = st.selectbox("REGIÓN", ["", "CENTRAL", "NORORIENTE", "SUR"], key=k("region"))
         # CARGO (ROL) depende del canal:
         # - VENTAS INDIRECTAS conserva la lógica original con "- Dealer".
-        # - VENTAS DIRECTAS usa el rol limpio, sin "- Dealer".
-        if canal == "VENTAS DIRECTAS":
+        # - CANALES DIRECTOS usa el rol limpio, sin "- Dealer".
+        if canal in CANALES_DIRECTOS:
             opciones_cargo = [
                 "",
                 "Agente BO D2D",
@@ -536,8 +544,8 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
         capacitador = ""
         origen_ingreso = ""
         fuente_ingreso = ""
-        if canal == "VENTAS DIRECTAS":
-            st.markdown("**Datos adicionales Ventas Directas**")
+        if canal in CANALES_DIRECTOS:
+            st.markdown("**Datos adicionales Canal Directo**")
             supervisor_directo = st.selectbox("SUPERVISOR", [""] + supervisores_directo, key=k("supervisor_directo"))
             capacitador = st.selectbox("CAPACITADOR", [""] + capacitadores, key=k("capacitador"))
             origen_ingreso = st.selectbox("ORIGEN INGRESO", [""] + origenes_ingreso, key=k("origen_ingreso"))
@@ -575,7 +583,7 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             dni_supervisor = buscar_dni_por_nombre(df_ubi, "SUPERVISOR A CARGO FINAL", "DNI SUPERVISOR", supervisor)
             st.text_input("DNI SUPERVISOR", value=dni_supervisor, disabled=True, key=k("dni_supervisor"))
     else:
-        # Para VENTAS DIRECTAS se oculta completamente la jerarquía D2D indirecta.
+        # Para CANALES DIRECTOS se oculta completamente la jerarquía D2D indirecta.
         # El supervisor válido es el de Datos adicionales Ventas Directas.
         supervisor = supervisor_directo
         dni_supervisor = ""
