@@ -219,20 +219,40 @@ def nombre_completo(row: pd.Series) -> str:
     return " ".join([p for p in partes if p]).strip()
 
 
-def fila_editable_hoy(row: pd.Series) -> bool:
-    hoy = hoy_actual()
+def fila_editable_fecha(row: pd.Series, fecha_revision) -> bool:
+    """
+    FIX_FILA_EDITABLE_FECHA_20260601
+    Determina si una persona está vigente para el día seleccionado.
+    No depende del día actual: sirve para mayo, junio o cualquier periodo elegido.
+    """
+    fecha_revision = parse_fecha(fecha_revision)
+    if fecha_revision is None:
+        fecha_revision = hoy_actual()
+
     alta = parse_fecha(row.get("FECHA_ALTA"))
     cese = parse_fecha(row.get("FECHA_CESE"))
-    periodo = periodo or periodo_actual()
     estado = limpiar_texto(row.get("ESTADO", "")).upper()
 
-    if alta and hoy < alta:
+    if alta and fecha_revision < alta:
         return False
-    if estado != "ACTIVO":
+
+    # Si tiene fecha de cese, solo se permite hasta el día de cese incluido.
+    if cese and fecha_revision > cese:
         return False
-    if cese and hoy > cese:
-        return False
-    return True
+
+    # Activos siempre pueden marcar si la fecha está dentro de su vigencia.
+    if estado == "ACTIVO":
+        return True
+
+    # Inactivos solo quedan visibles/editables hasta su fecha de cese; después ya no.
+    if estado == "INACTIVO" and cese and fecha_revision <= cese:
+        return True
+
+    return False
+
+
+def fila_editable_hoy(row: pd.Series) -> bool:
+    return fila_editable_fecha(row, hoy_actual())
 
 
 # =====================================================
