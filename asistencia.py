@@ -1,4 +1,9 @@
 """
+
+FIX_QUOTA_NO_AUTO_WRITE_FINAL_20260601
+- Este archivo NO escribe en Google Sheets al abrir/refrescar la página.
+- Solo escribe al presionar Guardar Presencialidad.
+- Evita error Google Sheets quota write_requests per minute.
 FIX_VISTA_LIVE_SIN_SINCRONIZAR_NO_BORRA_20260601
 FIX_DEALER_NO_BLANCO_RAZON_NORMALIZADA_20260601
 FIX_AUTO_UPSERT_SIN_BOTON_NO_DESTRUCTIVO_20260601
@@ -351,15 +356,15 @@ def validar_o_crear_cabecera(hoja_asistencia) -> bool:
         st.code(" | ".join(COLUMNAS_ASISTENCIA), language="text")
 
         with st.expander("🧹 Recrear estructura de Asistencia desde la app"):
-            st.info("Esto borra únicamente la pestaña Asistencia y crea la cabecera correcta. Luego presiona Sincronizar mes para cargar colaboradores vigentes.")
+            st.info("Operación deshabilitada: por seguridad no se borra ni recrea Asistencia desde la app.")
             confirmar = st.checkbox("Confirmo que deseo borrar SOLO la hoja Asistencia y recrear la cabecera", key="confirm_reset_asistencia")
-            if confirmar and st.button("🧹 Borrar Asistencia y crear cabecera", key="btn_reset_asistencia"):
-                hoja_asistencia.clear()
-                hoja_asistencia.append_row(COLUMNAS_ASISTENCIA, value_input_option="USER_ENTERED")
+            if confirmar and st.button("🧹 Opción deshabilitada", key="btn_reset_asistencia"):
+                # DESHABILITADO: no se borra Asistencia desde la app.
+                st.error("Operación bloqueada: no se permite borrar la hoja Asistencia desde la app.")
                 for k in [KEY_DF_TOTAL, KEY_DF_ORIGINAL, KEY_HEADERS, KEY_LOADED, KEY_LOAD_TS]:
                     if k in st.session_state:
                         del st.session_state[k]
-                st.success("✅ Hoja Asistencia recreada. Ahora presiona Sincronizar mes.")
+                st.success("Operación deshabilitada por seguridad.")
                 st.rerun()
         return False
 
@@ -1040,7 +1045,7 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
 
     st.info(
         f"📅 Periodo: **{periodo}** | Día seleccionado: **{col_hoy}** | "
-        "La información se actualiza al cargar/refrescar la página. A-BM permite sustento histórico."
+        "La información se lee al abrir/refrescar la página. Solo se escribe al presionar Guardar Presencialidad. A-BM permite sustento histórico."
     )
 
     # VISTA LIVE: lee colaboradores + asistencia y arma la pantalla sin escribir ni borrar.
@@ -1070,14 +1075,14 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                 razones_disponibles = sorted([x for x in df_mes_total_antes_filtro_usuario["RAZON SOCIAL"].astype(str).str.strip().unique().tolist() if x])[:20]
             st.warning(
                 f"⚠️ No hay registros visibles para la razón social del usuario: **{razon_usuario}** en el periodo **{periodo}**. "
-                "La app ya actualizó automáticamente desde colaboradores sin borrar histórico. "
+                "La app leyó colaboradores y asistencia sin escribir ni borrar histórico. "
                 "Valida que en usuarios.json la razón sea igual a la razón del Drive."
             )
             if razones_disponibles:
                 st.caption("Razones sociales encontradas en Asistencia para este periodo:")
                 st.code("\n".join(razones_disponibles), language="text")
         else:
-            st.warning("⚠️ No hay registros para el periodo seleccionado. La app intentó actualizar automáticamente desde colaboradores. Si sigue vacío, valida que existan colaboradores vigentes en ese mes.")
+            st.warning("⚠️ No hay registros para el periodo seleccionado. La app leyó colaboradores y asistencia sin escribir. Si sigue vacío, valida que existan colaboradores vigentes en ese mes.")
         return
 
     # =====================================================
