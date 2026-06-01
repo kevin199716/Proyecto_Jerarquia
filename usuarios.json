@@ -1,57 +1,28 @@
 {
   "admin": {
-    "password": "1234",
+    "password": "1234@wow",
     "rol": "backoffice",
     "estado": "activo",
     "razon": "ALL"
   },
 
-  "editor1": {
-    "password": "1234",
-    "rol": "editor",
-    "estado": "activo",
-    "razon": "ALL"
-  },
-
-  "malutech": {
-    "password": "malutech1234@",
-    "rol": "dealer",
-    "estado": "activo",
-    "razon": "MALUTECH S.A.C."
-  },
-
-  "2connect": {
-    "password": "2connect1234@@",
-    "rol": "dealer",
-    "estado": "activo",
-    "razon": "2CONNECT SERVICES S.A.C."
-  },
-
-  "interconexion": {
-    "password": "interconexion1234_@",
-    "rol": "dealer",
+{
+  "interconexion_presencialidad": {
+    "password": "Inter360@123",
+    "rol": "presencialidad",
     "estado": "activo",
     "razon": "INTERCONEXION 360 SAC"
   },
-
-  "nogales": {
-    "password": "nogales12345678@@",
-    "rol": "dealer",
-    "estado": "activo",
-    "razon": "NOGALES HIGH S.A.C."
-  },
-
-  "multiple": {
-    "password": "multiple1234567891012@",
-    "rol": "dealer",
+  "multiforce_presencialidad": {
+    "password": "MultiForce@123",
+    "rol": "presencialidad",
     "estado": "activo",
     "razon": "MULTIPLE FORCE SAC"
   },
-
-  "konecta": {
-    "password": "konecta1234_Wow@",
-    "rol": "dealer",
+  "nogales_presencialidad": {
+    "password": "Nogales@123",
+    "rol": "presencialidad",
     "estado": "activo",
-    "razon": "KONECTA SAC"
+    "razon": "NOGALES HIGH SAC"
   }
 }
