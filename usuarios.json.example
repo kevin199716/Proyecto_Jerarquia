@@ -1,0 +1,26 @@
+{
+  "admin": {
+    "password": "1234@wow",
+    "rol": "backoffice",
+    "estado": "activo",
+    "razon": "ALL"
+  },
+  "interconexion_presencialidad": {
+    "password": "Inter360@123",
+    "rol": "presencialidad",
+    "estado": "activo",
+    "razon": "INTERCONEXION 360 SAC"
+  },
+  "multiforce_presencialidad": {
+    "password": "MultiForce@123",
+    "rol": "presencialidad",
+    "estado": "activo",
+    "razon": "MULTIPLE FORCE SAC"
+  },
+  "nogales_presencialidad": {
+    "password": "Nogales@123",
+    "rol": "presencialidad",
+    "estado": "activo",
+    "razon": "NOGALES HIGH SAC"
+  }
+}
