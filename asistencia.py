@@ -232,22 +232,36 @@ def _fil(df, sup, coord, dep, prov, estado):
     return r.copy()
 
 def _en_rango_vec(df: pd.DataFrame, fecha_sel: date) -> pd.Series:
-    """Vectorizado — mucho más rápido que apply fila a fila"""
-    estado = df["ESTADO"].astype(str).str.upper() if "ESTADO" in df.columns else pd.Series("ACTIVO", index=df.index)
-    alta   = pd.to_datetime(df["FECHA_ALTA"], errors="coerce").dt.date if "FECHA_ALTA" in df.columns else pd.Series([None]*len(df), index=df.index)
-    cese   = pd.to_datetime(df["FECHA_CESE"], errors="coerce").dt.date if "FECHA_CESE" in df.columns else pd.Series([None]*len(df), index=df.index)
+    """
+    Vectorizado y seguro ante NaT/None.
+    Convierte fecha_sel a Timestamp para comparar con columnas datetime64.
+    Nunca usa .apply() sobre fechas — evita TypeError NaT vs datetime.date.
+    """
+    ts = pd.Timestamp(fecha_sel)   # mismo tipo que las columnas datetime64
+
+    estado = (df["ESTADO"].astype(str).str.upper()
+              if "ESTADO" in df.columns
+              else pd.Series("ACTIVO", index=df.index))
+
+    alta_ts = (pd.to_datetime(df["FECHA_ALTA"], errors="coerce")
+               if "FECHA_ALTA" in df.columns
+               else pd.Series(pd.NaT, index=df.index))
+
+    cese_ts = (pd.to_datetime(df["FECHA_CESE"], errors="coerce")
+               if "FECHA_CESE" in df.columns
+               else pd.Series(pd.NaT, index=df.index))
 
     ok = pd.Series(True, index=df.index)
-    # antes del alta → fuera
-    mask_alta = alta.notna() & alta.apply(lambda a: a is not None and fecha_sel < a if a else False)
-    ok = ok & ~mask_alta
-    # después del cese → fuera
-    mask_cese = cese.notna() & cese.apply(lambda c: c is not None and fecha_sel > c if c else False)
-    ok = ok & ~mask_cese
-    # inactivo sin cese → fuera
-    inactivo_sin_cese = (estado != "ACTIVO") & cese.isna()
-    inactivo_post_cese = (estado != "ACTIVO") & cese.notna() & cese.apply(lambda c: c is not None and fecha_sel > c if c else False)
-    ok = ok & ~inactivo_sin_cese & ~inactivo_post_cese
+
+    # Antes del alta → fuera
+    ok = ok & ~(alta_ts.notna() & (ts < alta_ts))
+
+    # Después del cese → fuera
+    ok = ok & ~(cese_ts.notna() & (ts > cese_ts))
+
+    # Inactivo sin fecha de cese → fuera
+    ok = ok & ~((estado != "ACTIVO") & cese_ts.isna())
+
     return ok
 
 def periodos_disp():
