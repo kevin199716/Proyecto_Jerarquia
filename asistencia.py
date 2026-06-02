@@ -1,4 +1,4 @@
-# FIX_ASISTENCIA_RANGOS_MINIMOS_SIN_FREEZE_20260602
+# FIX_ASISTENCIA_MODO_BUSQUEDA_PROMOTOR_D2D_NO_FREEZE_20260602
 # Presencialidad Dealer optimizada para Render Free + Google Sheets:
 # - NO escribe al abrir/refrescar.
 # - NO sincroniza automáticamente.
@@ -30,7 +30,7 @@ LEYENDA = (
 
 BASE_COLS = [
     "RAZON SOCIAL", "SUPERVISOR", "COORDINADOR", "DEPARTAMENTO", "PROVINCIA",
-    "DNI", "NOMBRE", "ESTADO", "FECHA_ALTA", "FECHA_CESE", "MES", "PERIODO"
+    "DNI", "NOMBRE", "CARGO", "ESTADO", "FECHA_ALTA", "FECHA_CESE", "MES", "PERIODO"
 ]
 DAY_COLS = [f"DIA_{i}" for i in range(1, 32)]
 ALL_COLS = BASE_COLS + DAY_COLS
@@ -224,10 +224,18 @@ def construir_base_colaboradores(hoja_colaboradores, periodo: str, razon_usuario
     if razon_usuario and razon_usuario.upper() != "ALL" and "RAZON SOCIAL" in df.columns:
         df = df[df["RAZON SOCIAL"].map(normalizar_razon).eq(normalizar_razon(razon_usuario))].copy()
 
-    # Solo personal operativo si existe cargo. Si no existe, no bloquea.
+    # Presencialidad solo para Promotor D2D - Dealer / Promotor D2D.
+    # Esto evita cargar agentes, coordinadores, supervisores u otros roles en la marcación.
     if "CARGO (ROL)" in df.columns:
-        cargo = df["CARGO (ROL)"].astype(str).str.upper()
-        df = df[cargo.str.contains("PROMOTOR|AGENTE", na=False)].copy()
+        cargo_norm = (
+            df["CARGO (ROL)"]
+            .astype(str)
+            .str.upper()
+            .str.replace("-", " ", regex=False)
+            .str.replace(r"\s+", " ", regex=True)
+            .str.strip()
+        )
+        df = df[cargo_norm.str.contains(r"\bPROMOTOR D2D\b", na=False)].copy()
 
     if df.empty:
         return pd.DataFrame(columns=BASE_COLS)
@@ -247,6 +255,7 @@ def construir_base_colaboradores(hoja_colaboradores, periodo: str, razon_usuario
     out["PROVINCIA"] = df.get("PROVINCIA", "").map(normalizar_texto) if "PROVINCIA" in df else ""
     out["DNI"] = df.get("DNI", "").map(normalizar_dni) if "DNI" in df else ""
     out["NOMBRE"] = nombre_colaborador_from_df(df)
+    out["CARGO"] = df.get("CARGO (ROL)", "").map(normalizar_texto) if "CARGO (ROL)" in df else ""
     out["ESTADO"] = df.get("ESTADO", "ACTIVO").map(lambda x: normalizar_texto(x).upper()) if "ESTADO" in df else "ACTIVO"
 
     if "FECHA DE CREACION USUARIO" in df.columns:
@@ -443,6 +452,14 @@ def guardar_marca(hoja_asistencia, row: pd.Series, headers: list[str], col_dia: 
 # =============================================================================
 
 def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, razon=None):
+    """Módulo liviano de presencialidad.
+
+    Principio operativo:
+    - Al abrir/refrescar: solo LEE Google Sheets.
+    - No sincroniza, no borra, no escribe, no arma tablas editables masivas.
+    - El usuario busca/filtra y marca una persona puntual.
+    - Solo al presionar Guardar Presencialidad se escribe una celda/fila.
+    """
     st.markdown("<span class='wow-section-title'>🗓️ Presencialidad Dealer</span>", unsafe_allow_html=True)
 
     usuario_razon = normalizar_texto(razon if razon is not None else st.session_state.get("razon", "ALL"))
@@ -464,7 +481,7 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
     )
 
     try:
-        with st.spinner("Cargando información desde Drive…"):
+        with st.spinner("Cargando base mínima desde Drive…"):
             df_live, headers = vista_live(
                 hoja_colaboradores,
                 hoja_asistencia,
@@ -477,126 +494,129 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
         return
 
     if df_live.empty:
-        st.warning("No hay colaboradores para mostrar con este usuario/periodo. Revisa razón social, estado o datos de colaboradores.")
+        st.warning("No hay promotores D2D para mostrar con este usuario/periodo. Revisa razón social o cargo del colaborador.")
         return
 
-    with st.form("form_filtros_presencialidad", clear_on_submit=False):
-        c1, c2, c3, c4, c5, c6 = st.columns(6)
+    # Filtros en FORM para que no recalculen la pantalla en cada selección.
+    with st.form("form_filtros_presencialidad_busqueda", clear_on_submit=False):
+        st.caption("Busca solo lo necesario. La tabla masiva ya no se usa como formulario principal para evitar frizados.")
+        c0, c1, c2 = st.columns([1.2, 1, 1])
+        with c0:
+            texto_busqueda = st.text_input("Buscar DNI / nombre / supervisor / coordinador", value="", placeholder="Ejemplo: 76043772 o Kevin")
         with c1:
-            op_r = opciones(df_live, "RAZON SOCIAL")
-            f_razon = st.selectbox("Razón Social", op_r, index=0, disabled=es_dealer)
-        with c2:
             f_sup = st.selectbox("Supervisor", opciones(df_live, "SUPERVISOR"), index=0)
-        with c3:
+        with c2:
             f_coord = st.selectbox("Coordinador", opciones(df_live, "COORDINADOR"), index=0)
-        with c4:
-            f_dep = st.selectbox("Departamento", opciones(df_live, "DEPARTAMENTO"), index=0)
-        with c5:
-            f_prov = st.selectbox("Provincia", opciones(df_live, "PROVINCIA"), index=0)
-        with c6:
-            f_estado = st.selectbox("Estado", opciones(df_live, "ESTADO"), index=0)
-        st.form_submit_button("🔎 Aplicar filtros", use_container_width=True)
 
-    df_f = filtrar(df_live, f_razon if not es_dealer else "TODOS", f_sup, f_coord, f_dep, f_prov, f_estado)
+        c3, c4, c5 = st.columns(3)
+        with c3:
+            f_dep = st.selectbox("Departamento", opciones(df_live, "DEPARTAMENTO"), index=0)
+        with c4:
+            f_prov = st.selectbox("Provincia", opciones(df_live, "PROVINCIA"), index=0)
+        with c5:
+            f_estado = st.selectbox("Estado", opciones(df_live, "ESTADO"), index=0)
+
+        aplicar = st.form_submit_button("🔎 Buscar / aplicar filtros", use_container_width=True)
+
+    # Se filtra siempre, pero se limita lo visual.
+    df_f = filtrar(df_live, "TODOS", f_sup, f_coord, f_dep, f_prov, f_estado)
+    q = normalizar_texto(texto_busqueda).upper()
+    if q:
+        cols_busqueda = ["DNI", "NOMBRE", "SUPERVISOR", "COORDINADOR", "DEPARTAMENTO", "PROVINCIA"]
+        mask = pd.Series(False, index=df_f.index)
+        for c in cols_busqueda:
+            if c in df_f.columns:
+                mask = mask | df_f[c].astype(str).str.upper().str.contains(q, na=False)
+        df_f = df_f[mask].copy()
+
     if df_f.empty:
-        st.warning("No hay registros con los filtros seleccionados.")
+        st.warning("No hay registros con la búsqueda/filtros seleccionados.")
         return
 
     df_f["_EDITABLE_FECHA"] = df_f.apply(lambda r: editable_en_fecha(r, fecha_sel), axis=1)
-    df_editor_base = df_f[df_f["_EDITABLE_FECHA"]].copy()
+    df_editables = df_f[df_f["_EDITABLE_FECHA"]].copy()
 
-    st.caption(f"Registros encontrados: **{len(df_f)}** | Editables para el día seleccionado: **{len(df_editor_base)}**")
-
-    if df_editor_base.empty:
-        st.warning("No hay personal editable para el día seleccionado. Puede ser por fecha de alta/cese o estado inactivo.")
-        return
-
-    if len(df_editor_base) > MAX_FILAS_EDITOR:
-        st.warning(f"⚠️ Hay {len(df_editor_base)} registros. Se muestran {MAX_FILAS_EDITOR} por vista para proteger el navegador. No borra datos.")
-        paginas = list(range(1, (len(df_editor_base) + MAX_FILAS_EDITOR - 1) // MAX_FILAS_EDITOR + 1))
-        pag = st.selectbox("Bloque de registros", paginas, index=0, key="asis_bloque")
-        ini = (int(pag) - 1) * MAX_FILAS_EDITOR
-        df_editor_base = df_editor_base.iloc[ini:ini + MAX_FILAS_EDITOR].copy()
-
+    st.caption(f"Registros encontrados: **{len(df_f)}** | Editables para el día seleccionado: **{len(df_editables)}**")
     st.markdown("<span class='wow-section-title'>✏️ Registrar presencialidad</span>", unsafe_allow_html=True)
     st.info("**Motivos de validación:** " + LEYENDA)
 
-    editor_cols = DISPLAY_COLS + [col_dia, "ROW_SHEET"]
-    for c in editor_cols:
-        if c not in df_editor_base.columns:
-            df_editor_base[c] = ""
-    df_editor = df_editor_base[editor_cols].copy()
-    df_editor[col_dia] = df_editor[col_dia].map(limpiar_marca)
+    columnas_basicas = ["DNI", "NOMBRE", "SUPERVISOR", "COORDINADOR", "FECHA_ALTA", "FECHA_CESE", "ESTADO", col_dia]
+    for c in columnas_basicas:
+        if c not in df_f.columns:
+            df_f[c] = ""
 
-    editado = st.data_editor(
-        df_editor,
+    # Muestra solo columnas básicas y pocos resultados. No editor masivo.
+    limite_preview = 50
+    st.dataframe(
+        df_f[columnas_basicas].head(limite_preview),
         use_container_width=True,
-        height=min(500, 70 + len(df_editor) * 32),
         hide_index=True,
-        disabled=[c for c in editor_cols if c != col_dia],
-        column_config={
-            col_dia: st.column_config.SelectboxColumn(col_dia, options=MARCAS, width="small"),
-            "ROW_SHEET": st.column_config.TextColumn("FILA", disabled=True, width="small"),
-        },
-        num_rows="fixed",
-        key=f"editor_presencialidad_{periodo}_{col_dia}_{usuario_razon}",
+        height=min(360, 70 + min(len(df_f), limite_preview) * 30),
     )
+    if len(df_f) > limite_preview:
+        st.caption(f"Se muestran los primeros {limite_preview}. Usa búsqueda por DNI/nombre para ubicar más rápido.")
 
-    df_edit = pd.DataFrame(editado).fillna("")
-    cambios = []
-    for i, r in df_edit.iterrows():
-        marca_nueva = limpiar_marca(r.get(col_dia, ""))
-        marca_original = limpiar_marca(df_editor.iloc[i].get(col_dia, "")) if i < len(df_editor) else ""
-        if marca_nueva != marca_original:
-            cambios.append((i, r, marca_nueva, marca_original))
+    if df_editables.empty:
+        st.warning("No hay personal editable para el día seleccionado. Puede ser por fecha de alta/cese o estado inactivo.")
+    else:
+        opciones_persona = []
+        mapa_persona = {}
+        for idx, r in df_editables.iterrows():
+            dni = normalizar_dni(r.get("DNI"))
+            nombre = normalizar_texto(r.get("NOMBRE"))
+            sup = normalizar_texto(r.get("SUPERVISOR"))
+            etiqueta = f"{dni} | {nombre} | Sup: {sup}"
+            # Evita duplicados visuales exactos.
+            if etiqueta not in mapa_persona:
+                mapa_persona[etiqueta] = idx
+                opciones_persona.append(etiqueta)
 
-    necesita_sustento = [x for x in cambios if x[2] == "A-BM"]
-    archivo_bm = None
-    if necesita_sustento:
-        st.warning(f"Se detectó A-BM en {len(necesita_sustento)} registro(s). Adjunta sustento para guardar.")
-        archivo_bm = st.file_uploader(
-            "Adjuntar sustento de Baja Médica (PDF o imagen)",
-            type=["pdf", "png", "jpg", "jpeg"],
-            key=f"file_abm_{periodo}_{dia}",
-        )
+        with st.form("form_guardar_presencialidad_puntual", clear_on_submit=False):
+            persona = st.selectbox("Seleccionar colaborador", opciones_persona, index=0)
+            marca = st.selectbox("Marcación", MARCAS[1:], index=0, help="A-BM habilita sustento obligatorio.")
+            archivo_bm = None
+            if marca == "A-BM":
+                archivo_bm = st.file_uploader(
+                    "Adjuntar sustento de Baja Médica (PDF o imagen)",
+                    type=["pdf", "png", "jpg", "jpeg"],
+                    key=f"file_abm_puntual_{periodo}_{dia}",
+                )
+            guardar = st.form_submit_button("💾 Guardar Presencialidad", use_container_width=True)
 
-    if st.button("💾 Guardar Presencialidad", key=f"btn_guardar_presencialidad_{periodo}_{dia}"):
-        if not cambios:
-            st.info("No hay cambios para guardar.")
-            return
+        if guardar:
+            idx_sel = mapa_persona.get(persona)
+            if idx_sel is None:
+                st.error("No se pudo identificar el colaborador seleccionado.")
+                return
+            row_sel = df_editables.loc[idx_sel].copy()
 
-        if fecha_sel != hoy_lima():
-            no_abm = [x for x in cambios if x[2] != "A-BM"]
-            if no_abm:
+            # Para días distintos al día actual, solo A-BM.
+            if fecha_sel != hoy_lima() and marca != "A-BM":
                 st.error("Para días anteriores/futuros solo se permite registrar A-BM con sustento. Las demás marcas solo aplican al día actual.")
                 return
-        if necesita_sustento and archivo_bm is None:
-            st.error("Falta adjuntar sustento obligatorio para A-BM.")
-            return
+            if marca == "A-BM" and archivo_bm is None:
+                st.error("Falta adjuntar sustento obligatorio para A-BM.")
+                return
 
-        try:
-            guardados = 0
-            for _, r, marca, _orig in cambios:
+            try:
                 if marca == "A-BM":
-                    guardar_sustento(r, periodo, dia, archivo_bm)
-                guardar_marca(hoja_asistencia, r, headers, col_dia, marca)
-                guardados += 1
-                time.sleep(0.05)
-            st.success(f"✅ Presencialidad guardada correctamente. Cambios aplicados: {guardados}")
-            st.rerun()
-        except Exception as e:
-            st.error(f"Error guardando presencialidad: {e}")
+                    guardar_sustento(row_sel, periodo, dia, archivo_bm)
+                resultado = guardar_marca(hoja_asistencia, row_sel, headers, col_dia, marca)
+                st.success(f"✅ Presencialidad guardada correctamente ({resultado}).")
+                st.rerun()
+            except Exception as e:
+                st.error(f"Error guardando presencialidad: {e}")
 
-    # Espejo mensual NO carga todo por defecto para proteger Render Free.
+    # Espejo del día bajo demanda, solo lectura, columnas básicas.
     with st.expander("📊 Ver espejo del día seleccionado", expanded=False):
-        cols_espejo = DISPLAY_COLS + [col_dia]
-        st.dataframe(df_f[cols_espejo].copy(), use_container_width=True, hide_index=True, height=420)
+        st.dataframe(df_f[columnas_basicas].copy(), use_container_width=True, hide_index=True, height=420)
 
-    # Matriz de jerarquía bajo demanda. No cargar automáticamente.
+    # Matriz de jerarquía bajo demanda: aquí sí se muestra/descarga la jerarquía completa.
     if registro_mod is not None:
         st.divider()
-        st.markdown("<span class='wow-section-title'>📋 Matriz de jerarquía</span>", unsafe_allow_html=True)
-        if st.button("📥 Cargar / descargar matriz de jerarquía", key="btn_cargar_matriz_jerarquia"):
+        st.markdown("<span class='wow-section-title'>📋 Estado actual de la jerarquía</span>", unsafe_allow_html=True)
+        st.caption("Esta sección carga la jerarquía completa solo cuando se solicita, para descargar/validar información. No se usa para marcar asistencia.")
+        if st.button("📥 Cargar / descargar jerarquía", key="btn_cargar_matriz_jerarquia"):
             try:
                 registro_mod.mostrar_tabla(hoja_colaboradores, razon)
             except Exception as e:
