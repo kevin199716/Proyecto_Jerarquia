@@ -1,4 +1,4 @@
-# FIX_ESTABLE_FORM_NO_RERUN_GUARDAR_SIEMPRE_20260602
+# FIX_ASISTENCIA_FLUJO_BM_ANTES_GUARDAR_JERARQUIA_ORDENADA_20260602
 # Presencialidad Dealer - 3 bloques:
 # 1) Registrar presencialidad desde hoja Asistencia (rápido)
 # 2) Espejo mensual / trazabilidad por día (solo lectura, bajo demanda)
@@ -341,6 +341,20 @@ def actualizar_asistencia_desde_colaboradores(hoja_asistencia, hoja_colaboradore
 # =============================================================================
 # Guardados
 # =============================================================================
+def asegurar_cabeceras_sustentos(hoja):
+    """Asegura que Sustentos_Bajas tenga cabeceras.
+    Evita que el primer registro se guarde en la fila 1 como si fuera encabezado.
+    """
+    try:
+        primera = hoja.row_values(1)
+    except Exception:
+        primera = []
+    primera_norm = [str(x).strip().upper() for x in primera]
+    esperadas = [str(x).strip().upper() for x in SUSTENTO_COLS]
+    if primera_norm[:len(esperadas)] != esperadas:
+        hoja.update("A1:J1", [SUSTENTO_COLS], value_input_option="USER_ENTERED")
+
+
 def guardar_sustento(row: dict, periodo: str, dia: int, archivo) -> str:
     contenido = archivo.getvalue()
     mime = archivo.type or "application/octet-stream"
@@ -350,6 +364,7 @@ def guardar_sustento(row: dict, periodo: str, dia: int, archivo) -> str:
     fname = f"sustento_ABM_{dni}_{periodo}_DIA{dia}_{ts}.{ext}"
     link = subir_archivo_drive(fname, contenido, mime)
     hoja = obtener_o_crear_worksheet(NOMBRE_LIBRO, HOJA_SUSTENTOS, SUSTENTO_COLS)
+    asegurar_cabeceras_sustentos(hoja)
     hoja.append_row([
         periodo, f"DIA_{dia}", str(fecha_periodo_dia(periodo, dia)), dni,
         row.get("NOMBRE", ""), row.get("RAZON SOCIAL", ""), "A-BM", link,
@@ -379,6 +394,7 @@ def guardar_sustento_payload(row: dict, periodo: str, dia: int, payload: dict) -
     fname = f"sustento_ABM_{dni}_{periodo}_DIA{dia}_{ts}.{ext}"
     link = subir_archivo_drive(fname, contenido, mime)
     hoja = obtener_o_crear_worksheet(NOMBRE_LIBRO, HOJA_SUSTENTOS, SUSTENTO_COLS)
+    asegurar_cabeceras_sustentos(hoja)
     hoja.append_row([
         periodo, f"DIA_{dia}", str(fecha_periodo_dia(periodo, dia)), dni,
         row.get("NOMBRE", ""), row.get("RAZON SOCIAL", ""), "A-BM", link,
@@ -460,10 +476,22 @@ def mostrar_espejo(df_base: pd.DataFrame, col_dia: str):
     st.dataframe(df_view.reset_index(drop=True), use_container_width=True, hide_index=True, height=380)
 
 
-def mostrar_jerarquia_descarga(hoja_colaboradores, razon: str):
-    st.markdown("### 📥 Descarga de jerarquía")
-    st.caption("Se carga bajo demanda desde colaboradores. No afecta la presencialidad.")
-    if not st.button("📋 Cargar jerarquía para descargar", use_container_width=False):
+def mostrar_jerarquia_descarga(hoja_colaboradores, razon: str, registro_mod=None):
+    st.markdown("### 📋 Estado actual de la jerarquía")
+    st.caption("Carga bajo demanda desde colaboradores. No afecta la presencialidad.")
+
+    # Usar el mismo módulo de matriz que ya tenías: filtros, orden visual y descarga.
+    # Si registro_mod está disponible desde app_maestra_vendedores.py, se conserva esa vista
+    # y se elimina el bloque duplicado de "Descarga de jerarquía".
+    if registro_mod is not None and hasattr(registro_mod, "mostrar_tabla"):
+        try:
+            registro_mod.mostrar_tabla(hoja_colaboradores, razon_usuario=razon)
+            return
+        except Exception as e:
+            st.warning(f"No se pudo cargar la matriz estándar: {e}")
+
+    # Respaldo mínimo si por algún motivo registro_mod no llega al módulo.
+    if not st.button("♻️ Cargar / recargar matriz", use_container_width=False):
         return
     with st.spinner("Cargando jerarquía desde Drive..."):
         df = leer_colaboradores_df(hoja_colaboradores)
@@ -472,20 +500,19 @@ def mostrar_jerarquia_descarga(hoja_colaboradores, razon: str):
         return
     if razon and nu(razon) != "ALL" and "RAZON SOCIAL" in df.columns:
         df = filtrar_razon(df, razon)
-    # Orden base primero, luego todo lo demás.
     orden = [
         "FECHA MOV", "RAZON SOCIAL", "CANAL", "SUB CANAL", "REGION", "DEPARTAMENTO", "PROVINCIA",
         "SUPERVISOR A CARGO", "DNI SUPERVISOR", "COORDINADOR", "DNI COORDINADOR", "CARGO (ROL)",
         "NOMBRES", "APELLIDO PATERNO", "APELLIDO MATERNO", "CELULAR", "TIPO DE DOC", "DNI",
         "CORREO (USUARIO SGC/PRONTO)", "ESTADO", "TIPO DE CONTRATO", "FECHA DE CREACION USUARIO",
-        "FECHA DE CESE", "MOTIVO", "CONTRATO FIRMADO", "TIPO_GESTION", "SUPERVISOR", "CAPACITADOR",
+        "FECHA DE CESE", "MOTIVO", "CONTRATO FIRMADO", "TIPO_GESTION", "CAPACITADOR",
         "ORIGEN_INGRESO", "FUENTE_INGRESO", "FECHA_ALTA_REGISTRO", "FECHA_BAJA_REGISTRO", "USUARIO_ALTA",
-        "USUARIO_BAJA", "REACTIVACIONES", "USUARIO ZYTRUST", "ID (SGC/PRONTO)", "NUEVO_GERENTE", "Estado_Usuario", "ZONA_1"
+        "USUARIO_BAJA", "REACTIVACIONES", "USUARIO ZYTRUST", "ID (SGC/PRONTO)", "NUEVO_GERENTE", "ZONA_1", "NUEVA_REGION", "EQUIPOS"
     ]
     cols = [c for c in orden if c in df.columns] + [c for c in df.columns if c not in orden]
     df = df[cols].copy()
     st.success(f"Jerarquía cargada: {len(df)} registros.")
-    st.dataframe(df.head(300), use_container_width=True, hide_index=True, height=360)
+    st.dataframe(df.head(300), use_container_width=True, hide_index=True, height=520)
     st.download_button(
         "⬇️ Descargar jerarquía en Excel",
         data=df_to_excel_bytes(df),
@@ -607,7 +634,7 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
 
     if df_mes.empty:
         st.warning("No hay registros en Asistencia para este periodo/dealer. Presiona Actualizar cambios del Drive para traer altas desde colaboradores sin borrar histórico.")
-        mostrar_jerarquia_descarga(hoja_colaboradores, razon_usuario)
+        mostrar_jerarquia_descarga(hoja_colaboradores, razon_usuario, registro_mod)
         return
 
     # Filtros visibles
@@ -665,52 +692,74 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
         editor_version = int(st.session_state.get(reset_key, 0))
         editor_key = f"editor_{periodo}_{dia}_{razon_usuario}_{editor_version}"
 
-        # MODO ESTABLE: el editor va dentro de un formulario.
-        # Así seleccionar A / A-BM / A-VAC no dispara rerun inmediato ni congela la pantalla.
-        # El botón Guardar Presencialidad queda siempre visible.
-        form_key = f"form_pres_{periodo}_{dia}_{razon_usuario}_{editor_version}"
-        with st.form(form_key, clear_on_submit=False):
-            df_new = st.data_editor(
-                df_edit,
-                hide_index=True,
-                use_container_width=True,
-                height=min(560, 48 + 34 * len(df_edit)),
-                num_rows="fixed",
-                column_config={
-                    col_dia: st.column_config.SelectboxColumn(col_dia, options=marcas, required=False),
-                    "FILA": st.column_config.NumberColumn("FILA", disabled=True),
-                    "DNI": st.column_config.TextColumn("DNI", disabled=True),
-                    "NOMBRE": st.column_config.TextColumn("NOMBRE", disabled=True, width="large"),
-                    "RAZON SOCIAL": st.column_config.TextColumn("RAZON SOCIAL", disabled=True),
-                    "SUPERVISOR": st.column_config.TextColumn("SUPERVISOR", disabled=True),
-                    "COORDINADOR": st.column_config.TextColumn("COORDINADOR", disabled=True),
-                    "DEPARTAMENTO": st.column_config.TextColumn("DEPARTAMENTO", disabled=True),
-                    "PROVINCIA": st.column_config.TextColumn("PROVINCIA", disabled=True),
-                    "ESTADO": st.column_config.TextColumn("ESTADO", disabled=True),
-                    "FECHA_ALTA": st.column_config.TextColumn("FECHA_ALTA", disabled=True),
-                    "FECHA_CESE": st.column_config.TextColumn("FECHA_CESE", disabled=True),
-                    "MES": st.column_config.TextColumn("MES", disabled=True),
-                    "PERIODO": st.column_config.TextColumn("PERIODO", disabled=True),
-                },
-                key=editor_key,
-            )
-            st.caption("Selecciona las marcas y luego presiona Guardar Presencialidad. Para A-BM, si falta sustento se abrirá la ventana emergente y no se guardará hasta adjuntar el documento.")
-            guardar_click = st.form_submit_button(
-                "💾 Guardar Presencialidad",
-                type="primary",
-                use_container_width=True,
-            )
+        # Flujo operativo:
+        # - El botón Guardar queda visible siempre.
+        # - Si se detecta A-BM sin sustento, se abre popup antes de permitir guardar.
+        df_new = st.data_editor(
+            df_edit,
+            hide_index=True,
+            use_container_width=True,
+            height=min(560, 48 + 34 * len(df_edit)),
+            num_rows="fixed",
+            column_config={
+                col_dia: st.column_config.SelectboxColumn(col_dia, options=marcas, required=False),
+                "FILA": st.column_config.NumberColumn("FILA", disabled=True),
+                "DNI": st.column_config.TextColumn("DNI", disabled=True),
+                "NOMBRE": st.column_config.TextColumn("NOMBRE", disabled=True, width="large"),
+                "RAZON SOCIAL": st.column_config.TextColumn("RAZON SOCIAL", disabled=True),
+                "SUPERVISOR": st.column_config.TextColumn("SUPERVISOR", disabled=True),
+                "COORDINADOR": st.column_config.TextColumn("COORDINADOR", disabled=True),
+                "DEPARTAMENTO": st.column_config.TextColumn("DEPARTAMENTO", disabled=True),
+                "PROVINCIA": st.column_config.TextColumn("PROVINCIA", disabled=True),
+                "ESTADO": st.column_config.TextColumn("ESTADO", disabled=True),
+                "FECHA_ALTA": st.column_config.TextColumn("FECHA_ALTA", disabled=True),
+                "FECHA_CESE": st.column_config.TextColumn("FECHA_CESE", disabled=True),
+                "MES": st.column_config.TextColumn("MES", disabled=True),
+                "PERIODO": st.column_config.TextColumn("PERIODO", disabled=True),
+            },
+            key=editor_key,
+        )
 
         cambios = []
-        if guardar_click:
-            for i in range(len(df_new)):
-                old = limpiar_marca(original[i])
-                new = limpiar_marca(df_new.at[i, col_dia])
-                if old != new:
-                    if fecha_sel < hoy_lima() and new != "A-BM":
-                        continue
-                    cambios.append((i, old, new, df_new.iloc[i].to_dict()))
+        for i in range(len(df_new)):
+            old = limpiar_marca(original[i])
+            new = limpiar_marca(df_new.at[i, col_dia])
+            if old != new:
+                if fecha_sel < hoy_lima() and new != "A-BM":
+                    continue
+                cambios.append((i, old, new, df_new.iloc[i].to_dict()))
 
+        # Si aparece A-BM pendiente, abrir diálogo antes del guardado final.
+        bm_pendiente = None
+        for _, _, new, row_bm in cambios:
+            if new == "A-BM":
+                key_abm = _abm_key(row_bm, periodo, dia)
+                if not st.session_state.get("abm_sustentos", {}).get(key_abm):
+                    bm_pendiente = row_bm
+                    break
+        if bm_pendiente is not None:
+            st.session_state["abm_dialog_data"] = {
+                "periodo": periodo,
+                "dia": dia,
+                "col_dia": col_dia,
+                "row": bm_pendiente,
+            }
+            _abrir_dialogo_abm(bm_pendiente, periodo, dia, reset_key)
+
+        if cambios:
+            resumen = ", ".join([f"{c[3].get('DNI','')}→{c[2]}" for c in cambios[:8]])
+            st.markdown(f"<div class='okbox'>📝 Cambios detectados: {resumen}</div>", unsafe_allow_html=True)
+        else:
+            st.caption(f"✔ Sin cambios — edita la columna {col_dia} para registrar presencialidad.")
+
+        guardar_click = st.button(
+            f"💾 Guardar Presencialidad" + (f" ({len(cambios)} cambios)" if cambios else ""),
+            type="primary",
+            use_container_width=True,
+            disabled=False,
+        )
+
+        if guardar_click:
             bm = [c for c in cambios if c[2] == "A-BM"]
             pendientes_bm = []
             for _, _, _, row_bm in bm:
@@ -764,7 +813,7 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
 
     # Bloque 3
     st.divider()
-    mostrar_jerarquia_descarga(hoja_colaboradores, razon_usuario)
+    mostrar_jerarquia_descarga(hoja_colaboradores, razon_usuario, registro_mod)
 
 
 def registrar_alta_en_asistencia(hoja_asis, campos: dict) -> str:
