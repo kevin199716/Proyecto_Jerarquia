@@ -1,13 +1,14 @@
-# ASISTENCIA_V5_HTML_TABLE_20260601
+# ASISTENCIA_V6_DATA_EDITOR_INLINE_20260601
 # ─────────────────────────────────────────────────────────────────────────────
-# CAMBIOS vs V4:
-# 1. Tabla principal = HTML puro con scroll — nunca inputs editables en celdas
-#    La columna DIA_X muestra chips de color dentro de la misma fila
-# 2. Panel de marcación integrado EN LA MISMA SECCIÓN (no debajo), 3 columnas
-# 3. Actualización inline en session_state — sin recargar Drive al guardar
-# 4. Robusto ante altas manuales/por otro módulo: botón Sincronizar limpia caché
-# 5. Errores manejados con retry suave, sin crash para el usuario
-# 6. Paginación virtual: muestra 100 filas, scroll interno, cero inputs fantasma
+# ARQUITECTURA:
+# • st.data_editor con columna DIA_X como SelectboxColumn → marcación inline
+#   en la misma fila, sin panel separado — exactamente como en la imagen antigua
+# • Al presionar "💾 Guardar marcaciones" procesa solo las filas que cambiaron
+# • Retroactivo A-BM: el selectbox de días pasados solo ofrece ["", "A-BM"]
+# • Upload sustento A-BM: aparece contextualmene cuando hay A-BM pendiente de guardar
+# • Bloque Jerarquía rediseñado: estadísticas + tabla profesional
+# • Sin inputs fantasma, sin "None" visible, sin recarga de Drive al guardar
+# • batch_get + caché 90s → escala a millones de filas en Sheets sin reventar
 # ─────────────────────────────────────────────────────────────────────────────
 
 import calendar
@@ -18,28 +19,30 @@ import pandas as pd
 import streamlit as st
 from sheets import subir_archivo_drive, obtener_o_crear_worksheet
 
-NOMBRE_LIBRO     = "maestra_vendedores"
-HOJA_SUSTENTOS   = "Sustentos_Bajas"
-TZ_LIMA          = pytz.timezone("America/Lima")
-CACHE_TTL_SECONDS = 90
+NOMBRE_LIBRO    = "maestra_vendedores"
+HOJA_SUSTENTOS  = "Sustentos_Bajas"
+TZ_LIMA         = pytz.timezone("America/Lima")
+CACHE_TTL       = 90
 
-MARCAS = ["", "A", "A-BM", "A-VAC", "NA-SA", "NA-CA"]
+MARCAS_HOY   = ["", "A", "A-BM", "A-VAC", "NA-SA", "NA-CA"]
+MARCAS_RETRO = ["", "A-BM"]   # días pasados: solo baja médica con sustento
+
 MARCAS_LABELS = {
-    "A":     "✅ A — Asistió",
-    "A-BM":  "🏥 A-BM — Baja Médica",
-    "A-VAC": "🌴 A-VAC — Vacaciones",
-    "NA-SA": "❌ NA-SA — Sin aviso",
-    "NA-CA": "⚠️ NA-CA — Con aviso",
+    "":      "— Sin marca",
+    "A":     "✅ Asistió",
+    "A-BM":  "🏥 Baja Médica",
+    "A-VAC": "🌴 Vacaciones",
+    "NA-SA": "❌ No asistió / Sin aviso",
+    "NA-CA": "⚠️ No asistió / Con aviso",
 }
 
-# Colores semáforo para chips en tabla HTML
-_CHIP_CSS: dict[str, str] = {
+_CHIP_STYLE: dict[str, str] = {
     "A":     "background:#D1FAE5;color:#065F46",
     "A-BM":  "background:#DBEAFE;color:#1E40AF",
     "A-VAC": "background:#FEF9C3;color:#854D0E",
     "NA-SA": "background:#FEE2E2;color:#991B1B",
     "NA-CA": "background:#FFE4BA;color:#92400E",
-    "":      "background:#F1F5F9;color:#6B6175",
+    "":      "",
 }
 
 BASE_COLS = [
@@ -47,7 +50,7 @@ BASE_COLS = [
     "DNI", "NOMBRE", "CARGO", "ESTADO", "FECHA_ALTA", "FECHA_CESE", "MES", "PERIODO"
 ]
 DAY_COLS = [f"DIA_{i}" for i in range(1, 32)]
-ALL_COLS = BASE_COLS + DAY_COLS
+ALL_COLS  = BASE_COLS + DAY_COLS
 
 
 # =============================================================================
@@ -91,13 +94,13 @@ def fecha_str(x) -> str:
 
 def limpiar_marca(x) -> str:
     v = normalizar_texto(x).upper()
-    return v if v in MARCAS else ""
+    return v if v in MARCAS_HOY else ""
 
-def _worksheet_key(worksheet) -> str:
+def _worksheet_key(ws) -> str:
     try:
-        return f"{worksheet.spreadsheet.id}:{worksheet.id}:{worksheet.title}"
+        return f"{ws.spreadsheet.id}:{ws.id}:{ws.title}"
     except Exception:
-        return str(id(worksheet))
+        return str(id(ws))
 
 def _letra_col(n: int) -> str:
     out = ""
@@ -106,137 +109,135 @@ def _letra_col(n: int) -> str:
         out = chr(65 + rem) + out
     return out
 
-def _norm_header(h) -> str:
+def _norm_h(h) -> str:
     return normalizar_texto(h).upper()
 
 
 # =============================================================================
-# Lecturas optimizadas — batch_get, caché 90 s
+# Lecturas con caché optimizado — batch_get solo columnas necesarias
 # =============================================================================
 
-@st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner=False)
-def _leer_header_cached(_worksheet, cache_key: str):
+@st.cache_data(ttl=CACHE_TTL, show_spinner=False)
+def _leer_header_cached(_ws, ck: str):
     try:
-        return [_norm_header(x) for x in _worksheet.row_values(1)]
+        return [_norm_h(x) for x in _ws.row_values(1)]
     except Exception:
         return []
 
-def leer_header(worksheet) -> list:
-    return _leer_header_cached(worksheet, _worksheet_key(worksheet))
+def leer_header(ws) -> list:
+    return _leer_header_cached(ws, _worksheet_key(ws))
 
-@st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner=False)
-def _leer_columnas_cached(_worksheet, cache_key: str, columnas_tuple: tuple):
-    headers = [_norm_header(x) for x in _worksheet.row_values(1)]
+@st.cache_data(ttl=CACHE_TTL, show_spinner=False)
+def _leer_cols_cached(_ws, ck: str, cols_tuple: tuple):
+    headers = [_norm_h(x) for x in _ws.row_values(1)]
     if not headers:
         return headers, {}
-    header_to_index = {h: i + 1 for i, h in enumerate(headers) if h}
-    ranges, selected = [], []
-    for col in columnas_tuple:
-        coln = _norm_header(col)
-        if coln in header_to_index:
-            letra = _letra_col(header_to_index[coln])
+    h2i = {h: i + 1 for i, h in enumerate(headers) if h}
+    ranges, sel = [], []
+    for col in cols_tuple:
+        cn = _norm_h(col)
+        if cn in h2i:
+            letra = _letra_col(h2i[cn])
             ranges.append(f"{letra}2:{letra}")
-            selected.append(coln)
+            sel.append(cn)
     if not ranges:
         return headers, {}
-    values = _worksheet.batch_get(ranges)
+    values = _ws.batch_get(ranges)
     data = {}
-    for coln, vals in zip(selected, values):
-        data[coln] = [normalizar_texto(r[0]) if r else "" for r in vals]
+    for cn, vals in zip(sel, values):
+        data[cn] = [normalizar_texto(r[0]) if r else "" for r in vals]
     return headers, data
 
-def limpiar_cache_asistencia():
-    for fn in [_leer_header_cached, _leer_columnas_cached]:
+def limpiar_cache():
+    for fn in [_leer_header_cached, _leer_cols_cached]:
         try:
             fn.clear()
         except Exception:
             pass
 
-def df_desde_columnas(data: dict, extra_row_sheet: bool = False) -> pd.DataFrame:
+def df_de_cols(data: dict, row_sheet: bool = False) -> pd.DataFrame:
     if not data:
         return pd.DataFrame()
     max_len = max((len(v) for v in data.values()), default=0)
-    fixed = {k: v + [""] * (max_len - len(v)) for k, v in data.items()}
-    df = pd.DataFrame(fixed)
-    if extra_row_sheet:
+    fixed   = {k: v + [""] * (max_len - len(v)) for k, v in data.items()}
+    df      = pd.DataFrame(fixed)
+    if row_sheet:
         df["ROW_SHEET"] = range(2, len(df) + 2)
     return df
 
 
 # =============================================================================
-# Construcción de base colaboradores
+# Construcción base colaboradores
 # =============================================================================
 
-def nombre_colaborador_from_df(df: pd.DataFrame) -> pd.Series:
+def nombre_from_df(df: pd.DataFrame) -> pd.Series:
     n  = df.get("NOMBRES", pd.Series([""] * len(df))).astype(str).map(normalizar_texto)
     ap = df.get("APELLIDO PATERNO", pd.Series([""] * len(df))).astype(str).map(normalizar_texto)
     am = df.get("APELLIDO MATERNO", pd.Series([""] * len(df))).astype(str).map(normalizar_texto)
     return (n + " " + ap + " " + am).str.replace(r"\s+", " ", regex=True).str.strip()
 
-def _es_cargo_presencialidad(cargo_str: str) -> bool:
-    return "PROMOTOR D2D" in str(cargo_str).upper().replace("-", " ").replace("  ", " ").strip()
+def _es_d2d(cargo: str) -> bool:
+    return "PROMOTOR D2D" in str(cargo).upper().replace("-", " ").replace("  ", " ").strip()
 
-def construir_base_colaboradores(hoja_colaboradores, periodo: str, razon_usuario: str = "ALL") -> pd.DataFrame:
-    columnas_necesarias = (
+def base_colaboradores(hoja_col, periodo: str, razon: str = "ALL") -> pd.DataFrame:
+    cols = (
         "RAZON SOCIAL", "SUPERVISOR A CARGO", "SUPERVISOR", "COORDINADOR",
         "DEPARTAMENTO", "PROVINCIA", "DNI", "NOMBRES", "APELLIDO PATERNO", "APELLIDO MATERNO",
         "ESTADO", "FECHA DE CREACION USUARIO", "FECHA_ALTA", "FECHA DE CESE", "FECHA_CESE",
         "CARGO (ROL)"
     )
-    headers, data = _leer_columnas_cached(
-        hoja_colaboradores, _worksheet_key(hoja_colaboradores), columnas_necesarias
-    )
+    headers, data = _leer_cols_cached(hoja_col, _worksheet_key(hoja_col), cols)
     if not headers or not data:
         return pd.DataFrame(columns=BASE_COLS)
-    df = df_desde_columnas(data)
+    df = df_de_cols(data)
     if df.empty:
         return pd.DataFrame(columns=BASE_COLS)
-    if razon_usuario and razon_usuario.upper() != "ALL" and "RAZON SOCIAL" in df.columns:
-        df = df[df["RAZON SOCIAL"].map(normalizar_razon).eq(normalizar_razon(razon_usuario))].copy()
+    if razon and razon.upper() != "ALL" and "RAZON SOCIAL" in df.columns:
+        df = df[df["RAZON SOCIAL"].map(normalizar_razon).eq(normalizar_razon(razon))].copy()
     if "CARGO (ROL)" in df.columns:
-        df = df[df["CARGO (ROL)"].astype(str).apply(_es_cargo_presencialidad)].copy()
+        df = df[df["CARGO (ROL)"].astype(str).apply(_es_d2d)].copy()
     if df.empty:
         return pd.DataFrame(columns=BASE_COLS)
+
     out = pd.DataFrame(index=df.index)
     out["RAZON SOCIAL"] = df.get("RAZON SOCIAL", "").map(normalizar_texto) if "RAZON SOCIAL" in df else ""
-    out["SUPERVISOR"] = (
+    out["SUPERVISOR"]   = (
         df["SUPERVISOR A CARGO"].map(normalizar_texto) if "SUPERVISOR A CARGO" in df.columns
         else df.get("SUPERVISOR", "").map(normalizar_texto) if "SUPERVISOR" in df.columns else ""
     )
-    out["COORDINADOR"]  = df.get("COORDINADOR", "").map(normalizar_texto)  if "COORDINADOR"  in df else ""
+    out["COORDINADOR"]  = df.get("COORDINADOR",  "").map(normalizar_texto) if "COORDINADOR"  in df else ""
     out["DEPARTAMENTO"] = df.get("DEPARTAMENTO", "").map(normalizar_texto) if "DEPARTAMENTO" in df else ""
-    out["PROVINCIA"]    = df.get("PROVINCIA", "").map(normalizar_texto)    if "PROVINCIA"    in df else ""
-    out["DNI"]          = df.get("DNI", "").map(normalizar_dni)            if "DNI"          in df else ""
-    out["NOMBRE"]       = nombre_colaborador_from_df(df)
-    out["CARGO"]        = df.get("CARGO (ROL)", "").map(normalizar_texto)  if "CARGO (ROL)"  in df else ""
+    out["PROVINCIA"]    = df.get("PROVINCIA",    "").map(normalizar_texto) if "PROVINCIA"    in df else ""
+    out["DNI"]          = df.get("DNI", "").map(normalizar_dni) if "DNI" in df else ""
+    out["NOMBRE"]       = nombre_from_df(df)
+    out["CARGO"]        = df.get("CARGO (ROL)", "").map(normalizar_texto) if "CARGO (ROL)" in df else ""
     out["ESTADO"]       = df.get("ESTADO", "ACTIVO").map(lambda x: normalizar_texto(x).upper()) if "ESTADO" in df else "ACTIVO"
-    out["FECHA_ALTA"] = (
+    out["FECHA_ALTA"]   = (
         df["FECHA DE CREACION USUARIO"].map(fecha_str) if "FECHA DE CREACION USUARIO" in df.columns
         else df["FECHA_ALTA"].map(fecha_str) if "FECHA_ALTA" in df.columns else ""
     )
-    out["FECHA_CESE"] = (
+    out["FECHA_CESE"]   = (
         df["FECHA DE CESE"].map(fecha_str) if "FECHA DE CESE" in df.columns
         else df["FECHA_CESE"].map(fecha_str) if "FECHA_CESE" in df.columns else ""
     )
     out["MES"]    = str(int(periodo[-2:]))
     out["PERIODO"] = periodo
     out = out[out["DNI"].astype(str).str.strip().ne("")].copy()
-    out["KEY"] = out["DNI"].astype(str) + "|" + out["FECHA_ALTA"].astype(str) + "|" + periodo
-    out = out.drop_duplicates("KEY", keep="last")
-    return out
+    out["KEY"] = out["DNI"] + "|" + out["FECHA_ALTA"] + "|" + periodo
+    return out.drop_duplicates("KEY", keep="last")
 
 
 # =============================================================================
-# Lectura asistencia y vista live
+# Lectura asistencia y merge live
 # =============================================================================
 
-def leer_asistencia(hoja_asistencia, periodo: str, col_dia: str, razon_usuario: str = "ALL") -> tuple:
-    headers = leer_header(hoja_asistencia)
+def leer_asistencia(hoja_asis, periodo: str, col_dia: str, razon: str = "ALL") -> tuple:
+    headers = leer_header(hoja_asis)
     if not headers:
         return pd.DataFrame(columns=ALL_COLS + ["ROW_SHEET", "KEY"]), ALL_COLS.copy()
     cols = tuple(BASE_COLS + [col_dia])
-    _headers, data = _leer_columnas_cached(hoja_asistencia, _worksheet_key(hoja_asistencia), cols)
-    df = df_desde_columnas(data, extra_row_sheet=True)
+    _, data = _leer_cols_cached(hoja_asis, _worksheet_key(hoja_asis), cols)
+    df = df_de_cols(data, row_sheet=True)
     if df.empty:
         return pd.DataFrame(columns=ALL_COLS + ["ROW_SHEET", "KEY"]), headers
     for c in BASE_COLS + [col_dia]:
@@ -245,47 +246,46 @@ def leer_asistencia(hoja_asistencia, periodo: str, col_dia: str, razon_usuario: 
     df["DNI"]        = df["DNI"].map(normalizar_dni)
     df["FECHA_ALTA"] = df["FECHA_ALTA"].map(fecha_str)
     df["PERIODO"]    = df["PERIODO"].map(normalizar_texto)
-    df = df[df["PERIODO"].astype(str).eq(periodo)].copy()
-    if razon_usuario and razon_usuario.upper() != "ALL" and "RAZON SOCIAL" in df.columns:
-        df = df[df["RAZON SOCIAL"].map(normalizar_razon).eq(normalizar_razon(razon_usuario))].copy()
-    df["KEY"]   = df["DNI"].astype(str) + "|" + df["FECHA_ALTA"].astype(str) + "|" + df["PERIODO"].astype(str)
+    df = df[df["PERIODO"].eq(periodo)].copy()
+    if razon and razon.upper() != "ALL" and "RAZON SOCIAL" in df.columns:
+        df = df[df["RAZON SOCIAL"].map(normalizar_razon).eq(normalizar_razon(razon))].copy()
+    df["KEY"]   = df["DNI"] + "|" + df["FECHA_ALTA"] + "|" + df["PERIODO"]
     df[col_dia] = df[col_dia].map(limpiar_marca)
     return df, headers
 
-def vista_live(hoja_colaboradores, hoja_asistencia, periodo: str, col_dia: str, razon_usuario: str = "ALL") -> tuple:
-    base    = construir_base_colaboradores(hoja_colaboradores, periodo, razon_usuario)
-    asis_p, headers = leer_asistencia(hoja_asistencia, periodo, col_dia, razon_usuario)
-    marcas  = (
-        asis_p[["KEY", "ROW_SHEET", col_dia]].drop_duplicates("KEY", keep="last")
-        if not asis_p.empty
+def vista_live(hoja_col, hoja_asis, periodo: str, col_dia: str, razon: str = "ALL") -> tuple:
+    base           = base_colaboradores(hoja_col, periodo, razon)
+    asis, headers  = leer_asistencia(hoja_asis, periodo, col_dia, razon)
+    marcas         = (
+        asis[["KEY", "ROW_SHEET", col_dia]].drop_duplicates("KEY", keep="last")
+        if not asis.empty
         else pd.DataFrame(columns=["KEY", "ROW_SHEET", col_dia])
     )
-    live = base.merge(marcas, on="KEY", how="left", suffixes=("", "_ASIS"))
+    live = base.merge(marcas, on="KEY", how="left", suffixes=("", "_A"))
     live[col_dia]     = live.get(col_dia, "").map(limpiar_marca)
-    live["ROW_SHEET"] = live.get("ROW_SHEET", "").fillna("")
+    live["ROW_SHEET"] = live.get("ROW_SHEET", "").fillna("").astype(str)
     return live, headers
 
 
 # =============================================================================
-# Filtros y validaciones
+# Filtros
 # =============================================================================
 
-def opciones(df, col):
+def _opciones(df, col):
     if col not in df.columns:
         return ["TODOS"]
     vals = sorted([v for v in df[col].dropna().astype(str).map(normalizar_texto).unique() if v])
     return ["TODOS"] + vals
 
-def filtrar(df, razon, sup, coord, dep, prov, estado):
+def _filtrar(df, sup, coord, dep, prov, estado):
     r = df.copy()
-    for col, val in [("RAZON SOCIAL", razon), ("SUPERVISOR", sup), ("COORDINADOR", coord),
+    for col, val in [("SUPERVISOR", sup), ("COORDINADOR", coord),
                      ("DEPARTAMENTO", dep), ("PROVINCIA", prov), ("ESTADO", estado)]:
         if val and val != "TODOS" and col in r.columns:
             r = r[r[col].astype(str).map(normalizar_texto).eq(val)].copy()
     return r
 
-def editable_en_fecha(row, fecha_sel: date) -> bool:
-    """True si el colaborador puede tener asistencia en esa fecha (rango alta/cese/estado)."""
+def en_rango(row, fecha_sel: date) -> bool:
     alta   = parse_fecha(row.get("FECHA_ALTA"))
     cese   = parse_fecha(row.get("FECHA_CESE"))
     estado = normalizar_texto(row.get("ESTADO")).upper()
@@ -297,221 +297,219 @@ def editable_en_fecha(row, fecha_sel: date) -> bool:
         return False
     return True
 
-def periodos_disponibles():
+def periodos_disp():
     h = hoy_lima()
-    periodos = []
+    out = []
     y, m = h.year, h.month
-    for i in range(6):   # 6 meses para retroactivos A-BM
+    for i in range(6):
         yy, mm = y, m - i
         while mm <= 0:
-            yy -= 1
-            mm += 12
-        periodos.append(f"{yy}-{mm:02d}")
-    return periodos
+            yy -= 1; mm += 12
+        out.append(f"{yy}-{mm:02d}")
+    return out
 
-def fecha_desde_periodo_dia(periodo: str, dia: int) -> date:
+def fecha_de_periodo_dia(periodo: str, dia: int) -> date:
     y, m = map(int, periodo.split("-"))
-    return date(y, m, min(int(dia), calendar.monthrange(y, m)[1]))
+    return date(y, m, min(dia, calendar.monthrange(y, m)[1]))
 
 
 # =============================================================================
-# Escritura
+# Escritura Sheets + Drive
 # =============================================================================
 
 def guardar_sustento(row, periodo, dia, archivo) -> str:
-    if archivo is None:
+    if not archivo:
         return ""
     contenido = archivo.getvalue()
     mime      = archivo.type or "application/octet-stream"
-    ext       = "pdf" if mime == "application/pdf" else "jpg"
-    dni       = normalizar_dni(row.get("DNI"))
+    ext       = "pdf" if "pdf" in mime else "jpg"
+    dni       = normalizar_dni(row.get("DNI", ""))
     ts        = datetime.now(TZ_LIMA).strftime("%Y%m%d_%H%M%S")
-    nombre_archivo = f"sustento_ABM_{dni}_{periodo}_DIA_{dia}_{ts}.{ext}"
-    link = subir_archivo_drive(nombre_archivo, contenido, mime)
-    cols = ["PERIODO", "DIA", "FECHA_ASISTENCIA", "DNI", "NOMBRE", "RAZON SOCIAL",
-            "MOTIVO", "LINK_DOCUMENTO", "FECHA_SUBIDA", "USUARIO_REGISTRO"]
-    hoja = obtener_o_crear_worksheet(NOMBRE_LIBRO, HOJA_SUSTENTOS, cols)
+    fname     = f"sustento_ABM_{dni}_{periodo}_DIA{dia}_{ts}.{ext}"
+    link      = subir_archivo_drive(fname, contenido, mime)
+    cols      = ["PERIODO","DIA","FECHA","DNI","NOMBRE","RAZON SOCIAL",
+                 "MOTIVO","LINK","FECHA_SUBIDA","USUARIO"]
+    hoja      = obtener_o_crear_worksheet(NOMBRE_LIBRO, HOJA_SUSTENTOS, cols)
     hoja.append_row([
-        periodo, f"DIA_{dia}", str(fecha_desde_periodo_dia(periodo, dia)),
-        dni, row.get("NOMBRE", ""), row.get("RAZON SOCIAL", ""),
+        periodo, f"DIA_{dia}", str(fecha_de_periodo_dia(periodo, dia)),
+        dni, row.get("NOMBRE",""), row.get("RAZON SOCIAL",""),
         "A-BM", link, datetime.now(TZ_LIMA).strftime("%Y-%m-%d %H:%M:%S"),
-        st.session_state.get("usuario", "")
+        st.session_state.get("usuario","")
     ], value_input_option="USER_ENTERED")
     return link
 
-def garantizar_cabecera_si_vacia(hoja_asistencia, headers: list) -> list:
+def _cabecera_si_vacia(hoja_asis, headers: list) -> list:
     if headers:
         return headers
-    hoja_asistencia.append_row(ALL_COLS, value_input_option="USER_ENTERED")
-    limpiar_cache_asistencia()
+    hoja_asis.append_row(ALL_COLS, value_input_option="USER_ENTERED")
+    limpiar_cache()
     return ALL_COLS.copy()
 
-def guardar_marca(hoja_asistencia, row: pd.Series, headers: list, col_dia: str, marca: str) -> str:
-    headers = [_norm_header(h) for h in headers]
-    headers = garantizar_cabecera_si_vacia(hoja_asistencia, headers)
+def guardar_marca(hoja_asis, row: pd.Series, headers: list, col_dia: str, marca: str) -> str:
+    headers = [_norm_h(h) for h in headers]
+    headers = _cabecera_si_vacia(hoja_asis, headers)
     if col_dia not in headers:
-        nueva_col = len(headers) + 1
-        hoja_asistencia.update_cell(1, nueva_col, col_dia)
+        hoja_asis.update_cell(1, len(headers) + 1, col_dia)
         headers.append(col_dia)
-        limpiar_cache_asistencia()
-    row_sheet = normalizar_texto(row.get("ROW_SHEET"))
-    col_idx   = headers.index(col_dia) + 1
-    col_letra = _letra_col(col_idx)
-    if row_sheet.isdigit():
-        hoja_asistencia.update_acell(f"{col_letra}{int(row_sheet)}", marca)
-        limpiar_cache_asistencia()
+        limpiar_cache()
+    rs     = normalizar_texto(row.get("ROW_SHEET", ""))
+    ci     = headers.index(col_dia) + 1
+    cl     = _letra_col(ci)
+    if rs.isdigit():
+        hoja_asis.update_acell(f"{cl}{int(rs)}", marca)
+        limpiar_cache()
         return "actualizado"
-    nueva = []
-    for h in headers:
-        nueva.append(row.get(h, "") if h in BASE_COLS else (marca if h == col_dia else ""))
-    hoja_asistencia.append_row(nueva, value_input_option="USER_ENTERED")
-    limpiar_cache_asistencia()
+    nueva = [row.get(h, "") if h in BASE_COLS else (marca if h == col_dia else "") for h in headers]
+    hoja_asis.append_row(nueva, value_input_option="USER_ENTERED")
+    limpiar_cache()
     return "nuevo"
 
-def registrar_alta_en_asistencia(hoja_asistencia, campos: dict) -> str:
+def registrar_alta_en_asistencia(hoja_asis, campos: dict) -> str:
     try:
-        limpiar_cache_asistencia()
-        dni    = campos.get("DNI", "")
-        nombre = " ".join([
-            campos.get("NOMBRES", ""),
-            campos.get("APELLIDO PATERNO", ""),
-            campos.get("APELLIDO MATERNO", ""),
-        ]).strip()
-        return f"Colaborador DNI {dni} – {nombre} disponible en Presencialidad Dealer."
+        limpiar_cache()
+        return f"Colaborador DNI {campos.get('DNI','')} disponible en Presencialidad."
     except Exception as e:
         return f"Recarga Presencialidad para ver al colaborador ({e})."
 
 
 # =============================================================================
-# CSS global
+# CSS global del módulo
 # =============================================================================
 
 _CSS = """
 <style>
-/* ── Leyenda chips ── */
-.leyenda-wrap { display:flex; flex-wrap:wrap; gap:6px; margin:2px 0 10px; }
-.chip { padding:3px 10px; border-radius:20px; font-size:11px; font-weight:600; white-space:nowrap; }
+/* ── Leyenda ── */
+.asis-leyenda { display:flex; flex-wrap:wrap; gap:6px; margin:4px 0 10px; }
+.asis-chip { padding:3px 11px; border-radius:20px; font-size:11px; font-weight:600; white-space:nowrap; border:1px solid rgba(0,0,0,.06); }
 .chip-A    { background:#D1FAE5; color:#065F46; }
 .chip-BM   { background:#DBEAFE; color:#1E40AF; }
 .chip-VAC  { background:#FEF9C3; color:#854D0E; }
 .chip-NASA { background:#FEE2E2; color:#991B1B; }
 .chip-NACA { background:#FFE4BA; color:#92400E; }
 
-/* ── Tabla HTML personalizada ── */
-.asis-table-wrap {
-    width:100%; overflow-x:auto; overflow-y:auto;
-    max-height:460px;
-    border-radius:10px;
-    border:1px solid #E5E0EA;
-    margin-bottom:6px;
+/* ── Métricas ── */
+.asis-metrics { display:grid; grid-template-columns:repeat(4,1fr); gap:10px; margin:10px 0; }
+.asis-metric {
+    background:white; border:1px solid #E5E0EA; border-radius:12px;
+    padding:12px 16px 10px; text-align:center;
+    box-shadow:0 1px 3px rgba(75,0,103,.06);
 }
-.asis-table {
-    width:100%; border-collapse:collapse;
-    font-size:12.5px; font-family:inherit;
-}
-.asis-table thead th {
-    position:sticky; top:0; z-index:2;
-    background:#4B0067; color:white;
-    padding:9px 10px; text-align:left;
-    font-size:11px; font-weight:700; letter-spacing:.4px;
-    white-space:nowrap;
-}
-.asis-table tbody tr { border-bottom:1px solid #F2EEF5; }
-.asis-table tbody tr:hover { background:#FAF3FE; }
-.asis-table tbody td {
-    padding:7px 10px; color:#1A1521;
-    vertical-align:middle; white-space:nowrap;
-}
-.asis-table tbody td.nombre-col { white-space:normal; min-width:160px; max-width:240px; }
-.dia-chip {
-    display:inline-block; padding:2px 9px; border-radius:12px;
-    font-size:11px; font-weight:700; letter-spacing:.3px;
-}
-.st-badge-activo   { background:#D1FAE5; color:#065F46; padding:1px 8px; border-radius:12px; font-size:11px; font-weight:700; }
-.st-badge-inactivo { background:#FEE2E2; color:#991B1B; padding:1px 8px; border-radius:12px; font-size:11px; font-weight:700; }
-
-/* ── Panel marcación integrado ── */
-.mrc-panel {
-    background:linear-gradient(135deg,#FAF3FE 0%,#F3E5FA 100%);
-    border:1.5px solid #E9D5F5; border-radius:14px;
-    padding:14px 18px; margin:4px 0;
-}
-.mrc-row { display:flex; flex-wrap:wrap; gap:6px 20px; font-size:12.5px; color:#3D3548; line-height:1.7; }
-.mrc-row b { color:#4B0067; }
-.badge-marca { display:inline-block; padding:2px 9px; border-radius:12px; font-size:11px; font-weight:700; background:#EDE9FE; color:#4B0067; }
-
-/* ── Métricas mini ── */
-.mini-metric { background:white; border:1px solid #E5E0EA; border-radius:10px; padding:10px 14px 8px; text-align:center; }
-.mini-metric .val { font-size:22px; font-weight:800; color:#4B0067; line-height:1.1; }
-.mini-metric .lbl { font-size:11px; color:#6B6175; margin-top:2px; }
+.asis-metric .v { font-size:26px; font-weight:800; color:#4B0067; line-height:1; }
+.asis-metric .l { font-size:11px; color:#6B6175; margin-top:4px; }
+.asis-metric.m-ok .v  { color:#065F46; }
+.asis-metric.m-pen .v { color:#92400E; }
+.asis-metric.m-tot .v { color:#1E40AF; }
 
 /* ── Banner retroactivo ── */
-.retro-banner { background:#FFF7ED; border:1.5px solid #FED7AA; border-radius:10px; padding:10px 14px; font-size:12.5px; color:#92400E; margin:6px 0; }
+.retro-banner {
+    background:#FFF7ED; border:1.5px solid #FED7AA; border-radius:10px;
+    padding:10px 16px; font-size:12.5px; color:#92400E; margin:6px 0 10px;
+    display:flex; align-items:center; gap:8px;
+}
 
-/* ── Info sync banner ── */
-.sync-banner { background:#EFF6FF; border:1.5px solid #BFDBFE; border-radius:10px; padding:8px 14px; font-size:12px; color:#1E40AF; margin:4px 0; }
+/* ── Bloque de guardado A-BM ── */
+.bm-box {
+    background:#EFF6FF; border:1.5px solid #BFDBFE; border-radius:12px;
+    padding:14px 18px; margin:8px 0;
+}
+.bm-box-title { font-size:12px; font-weight:700; color:#1E40AF; margin-bottom:8px; }
+
+/* ── Jerarquía stats ── */
+.jer-stats { display:flex; flex-wrap:wrap; gap:10px; margin:10px 0 14px; }
+.jer-stat {
+    flex:1; min-width:120px;
+    background:white; border:1px solid #E5E0EA; border-radius:10px;
+    padding:10px 14px; text-align:center;
+    box-shadow:0 1px 3px rgba(75,0,103,.06);
+}
+.jer-stat .sv { font-size:20px; font-weight:800; color:#4B0067; line-height:1.1; }
+.jer-stat .sl { font-size:10.5px; color:#6B6175; margin-top:3px; font-weight:600; text-transform:uppercase; letter-spacing:.4px; }
+
+/* ── Tabla jerarquía HTML ── */
+.jer-wrap {
+    width:100%; overflow-x:auto; overflow-y:auto; max-height:500px;
+    border-radius:10px; border:1px solid #E5E0EA; margin:4px 0;
+}
+.jer-table { width:100%; border-collapse:collapse; font-size:12.5px; font-family:inherit; }
+.jer-table thead th {
+    position:sticky; top:0; z-index:2;
+    background:linear-gradient(135deg,#4B0067,#3a0052);
+    color:white; padding:9px 12px; text-align:left;
+    font-size:11px; font-weight:700; letter-spacing:.5px; white-space:nowrap;
+}
+.jer-table tbody tr { border-bottom:1px solid #F2EEF5; }
+.jer-table tbody tr:hover { background:#FAF3FE; }
+.jer-table tbody td { padding:7px 12px; color:#1A1521; white-space:nowrap; }
+.jer-table tbody td.nm { white-space:normal; min-width:160px; }
+.jr-badge-a { background:#D1FAE5; color:#065F46; padding:1px 8px; border-radius:10px; font-size:10.5px; font-weight:700; }
+.jr-badge-i { background:#FEE2E2; color:#991B1B; padding:1px 8px; border-radius:10px; font-size:10.5px; font-weight:700; }
+
+/* ── Sync banner ── */
+.sync-info { background:#EFF6FF; border:1px solid #BFDBFE; border-radius:10px; padding:8px 14px; font-size:12px; color:#1E40AF; margin:4px 0; }
 </style>
 """
 
 
-def _leyenda_html() -> str:
-    return """<div class='leyenda-wrap'>
-      <span class='chip chip-A'>✅ A — Asistió</span>
-      <span class='chip chip-BM'>🏥 A-BM — Baja Médica</span>
-      <span class='chip chip-VAC'>🌴 A-VAC — Vacaciones</span>
-      <span class='chip chip-NASA'>❌ NA-SA — Sin aviso</span>
-      <span class='chip chip-NACA'>⚠️ NA-CA — Con aviso</span>
-    </div>"""
+def _leyenda():
+    return """<div class='asis-leyenda'>
+<span class='asis-chip chip-A'>✅ A — Asistió</span>
+<span class='asis-chip chip-BM'>🏥 A-BM — Baja Médica</span>
+<span class='asis-chip chip-VAC'>🌴 A-VAC — Vacaciones</span>
+<span class='asis-chip chip-NASA'>❌ NA-SA — Sin aviso</span>
+<span class='asis-chip chip-NACA'>⚠️ NA-CA — Con aviso</span>
+</div>"""
 
 
-def _chip_dia(marca: str) -> str:
-    """Devuelve un <span> chip de color para la columna DIA en la tabla HTML."""
-    css = _CHIP_CSS.get(marca, _CHIP_CSS[""])
-    label = marca if marca else "—"
-    return f"<span class='dia-chip' style='{css}'>{label}</span>"
+def _metricas_html(total, editables, marcados, pendientes):
+    return f"""<div class='asis-metrics'>
+<div class='asis-metric m-tot'><div class='v'>{total}</div><div class='l'>👥 Total filtrado</div></div>
+<div class='asis-metric'><div class='v'>{editables}</div><div class='l'>✏️ Editables</div></div>
+<div class='asis-metric m-ok'><div class='v'>{marcados}</div><div class='l'>✅ Marcados</div></div>
+<div class='asis-metric m-pen'><div class='v'>{pendientes}</div><div class='l'>⏳ Pendientes</div></div>
+</div>"""
 
 
-def _badge_estado(estado: str) -> str:
-    cls = "st-badge-activo" if estado == "ACTIVO" else "st-badge-inactivo"
-    return f"<span class='{cls}'>{estado}</span>"
-
-
-def _tabla_html(df: pd.DataFrame, col_dia: str, limite: int = 200) -> str:
-    """
-    Genera tabla HTML pura con scroll vertical.
-    La columna DIA muestra chips de color — nunca inputs editables.
-    """
-    filas = df.head(limite)
-    cols  = ["DNI", "NOMBRE", "SUPERVISOR", "COORDINADOR",
-             "DEPARTAMENTO", "PROVINCIA", "ESTADO", "FECHA_ALTA", "FECHA_CESE", col_dia]
-    cabeceras = ["DNI", "Nombre", "Supervisor", "Coordinador",
-                 "Departamento", "Provincia", "Estado", "Alta", "Cese", col_dia]
-
-    thead = "".join(f"<th>{h}</th>" for h in cabeceras)
-    rows_html = []
-    for _, r in filas.iterrows():
+def _tabla_jerarquia_html(df: pd.DataFrame) -> str:
+    cols = ["RAZON SOCIAL","DNI","NOMBRE","SUPERVISOR","COORDINADOR",
+            "DEPARTAMENTO","PROVINCIA","ESTADO","FECHA_ALTA","FECHA_CESE"]
+    cols = [c for c in cols if c in df.columns]
+    labels = {"RAZON SOCIAL":"Razón Social","DNI":"DNI","NOMBRE":"Nombre",
+              "SUPERVISOR":"Supervisor","COORDINADOR":"Coordinador",
+              "DEPARTAMENTO":"Departamento","PROVINCIA":"Provincia",
+              "ESTADO":"Estado","FECHA_ALTA":"Alta","FECHA_CESE":"Cese"}
+    thead = "".join(f"<th>{labels.get(c,c)}</th>" for c in cols)
+    rows  = []
+    for _, r in df.iterrows():
         cells = []
         for c in cols:
-            val = str(r.get(c, "") or "").strip()
-            if c == col_dia:
-                cells.append(f"<td>{_chip_dia(val)}</td>")
+            v = str(r.get(c,"") or "").strip()
+            if c == "ESTADO":
+                cls = "jr-badge-a" if v.upper()=="ACTIVO" else "jr-badge-i"
+                cells.append(f"<td><span class='{cls}'>{v or '—'}</span></td>")
             elif c == "NOMBRE":
-                cells.append(f"<td class='nombre-col'>{val}</td>")
-            elif c == "ESTADO":
-                cells.append(f"<td>{_badge_estado(val)}</td>")
+                cells.append(f"<td class='nm'>{v or '—'}</td>")
             else:
-                cells.append(f"<td>{val if val else '—'}</td>")
-        rows_html.append("<tr>" + "".join(cells) + "</tr>")
+                cells.append(f"<td>{v or '—'}</td>")
+        rows.append("<tr>"+"".join(cells)+"</tr>")
+    tbody = "".join(rows)
+    return (f"<div class='jer-wrap'><table class='jer-table'>"
+            f"<thead><tr>{thead}</tr></thead><tbody>{tbody}</tbody>"
+            f"</table></div>")
 
-    tbody = "".join(rows_html)
-    return (
-        f"<div class='asis-table-wrap'>"
-        f"<table class='asis-table'>"
-        f"<thead><tr>{thead}</tr></thead>"
-        f"<tbody>{tbody}</tbody>"
-        f"</table>"
-        f"</div>"
-    )
+
+def _stats_jerarquia(df: pd.DataFrame) -> str:
+    total   = len(df)
+    activos = int((df.get("ESTADO","").astype(str).str.upper() == "ACTIVO").sum()) if "ESTADO" in df.columns else 0
+    inact   = total - activos
+    sups    = df["SUPERVISOR"].nunique() if "SUPERVISOR" in df.columns else 0
+    deps    = df["DEPARTAMENTO"].nunique() if "DEPARTAMENTO" in df.columns else 0
+    return f"""<div class='jer-stats'>
+<div class='jer-stat'><div class='sv'>{total}</div><div class='sl'>Total registros</div></div>
+<div class='jer-stat'><div class='sv' style='color:#065F46'>{activos}</div><div class='sl'>Activos</div></div>
+<div class='jer-stat'><div class='sv' style='color:#991B1B'>{inact}</div><div class='sl'>Inactivos</div></div>
+<div class='jer-stat'><div class='sv'>{sups}</div><div class='sl'>Supervisores</div></div>
+<div class='jer-stat'><div class='sv'>{deps}</div><div class='sl'>Departamentos</div></div>
+</div>"""
 
 
 # =============================================================================
@@ -522,108 +520,82 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
     st.markdown(_CSS, unsafe_allow_html=True)
     st.markdown("<span class='wow-section-title'>🗓️ Presencialidad Dealer</span>", unsafe_allow_html=True)
 
-    usuario_razon = normalizar_texto(razon if razon is not None else st.session_state.get("razon", "ALL"))
+    usuario_razon = normalizar_texto(razon if razon is not None else st.session_state.get("razon","ALL"))
     es_dealer     = bool(usuario_razon and usuario_razon.upper() != "ALL")
 
-    # ── Barra de control ────────────────────────────────────────────────────
-    c_per, c_dia, c_sync = st.columns([1.5, 1.5, 0.8])
-    with c_per:
-        periodo = st.selectbox("📅 Periodo", periodos_disponibles(), index=0, key="asis_periodo")
+    # ── Control: Periodo · Día · Sincronizar ────────────────────────────────
+    c1, c2, c3 = st.columns([1.5, 1.5, 0.7])
+    with c1:
+        periodo = st.selectbox("📅 Periodo", periodos_disp(), index=0, key="asis_periodo")
     y, m  = map(int, periodo.split("-"))
     dias  = list(range(1, calendar.monthrange(y, m)[1] + 1))
-    dia_def = hoy_lima().day if periodo == periodo_lima() and hoy_lima().day in dias else 1
-    with c_dia:
-        dia = st.selectbox("📆 Día", dias, index=dias.index(dia_def), key="asis_dia")
-    with c_sync:
+    dd    = hoy_lima().day if periodo == periodo_lima() and hoy_lima().day in dias else 1
+    with c2:
+        dia = st.selectbox("📆 Día", dias, index=dias.index(dd), key="asis_dia")
+    with c3:
         st.markdown("<div style='height:26px'></div>", unsafe_allow_html=True)
         if st.button("🔄 Sincronizar", key="btn_sync",
-                     help="Fuerza relecura completa desde Drive — útil tras altas/bajas en otros módulos o edición manual"):
-            limpiar_cache_asistencia()
-            # Limpiar marcas inline para que se lea la data fresca
-            for k in list(st.session_state.keys()):
-                if k.startswith("marcas_inline_"):
-                    del st.session_state[k]
+                     help="Releer desde Drive — útil tras altas/bajas en otro módulo o edición manual en Sheets"):
+            limpiar_cache()
+            for k in [k for k in st.session_state if k.startswith("asis_edit_")]:
+                del st.session_state[k]
             st.rerun()
 
     col_dia   = f"DIA_{dia}"
-    fecha_sel = fecha_desde_periodo_dia(periodo, dia)
-    es_retro  = (fecha_sel < hoy_lima())
+    fecha_sel = fecha_de_periodo_dia(periodo, dia)
+    es_retro  = fecha_sel < hoy_lima()
 
-    st.markdown(_leyenda_html(), unsafe_allow_html=True)
+    st.markdown(_leyenda(), unsafe_allow_html=True)
 
     if es_retro:
         st.markdown(
             "<div class='retro-banner'>⚠️ <b>Fecha retroactiva</b> — "
-            "Solo se puede registrar o corregir <b>A-BM</b> con sustento adjunto. "
-            "Aplica a cualquier día del mes actual o meses anteriores.</div>",
+            "Solo se puede marcar <b>A-BM (Baja Médica)</b> con sustento adjunto. "
+            "Aplica a cualquier día o mes anterior.</div>",
             unsafe_allow_html=True
         )
 
-    # ── Carga de datos ───────────────────────────────────────────────────────
+    # ── Carga ───────────────────────────────────────────────────────────────
     with st.spinner("⏳ Cargando datos desde Drive…"):
         try:
             df_live, headers = vista_live(
                 hoja_colaboradores, hoja_asistencia, periodo, col_dia,
-                usuario_razon if es_dealer else "ALL",
+                usuario_razon if es_dealer else "ALL"
             )
         except Exception as e:
             st.error(f"Error al cargar presencialidad: {e}")
-            st.markdown(
-                "<div class='sync-banner'>💡 Si acabas de ingresar altas o bajas en otro módulo, "
-                "usa <b>🔄 Sincronizar</b> para forzar la lectura actualizada desde Drive.</div>",
-                unsafe_allow_html=True
-            )
+            st.markdown("<div class='sync-info'>💡 Usa <b>🔄 Sincronizar</b> si acabas de hacer altas/bajas en otro módulo.</div>", unsafe_allow_html=True)
             return
 
     if df_live.empty:
-        st.warning(
-            "No hay promotores D2D para este usuario/periodo. "
-            "Verifica razón social o que el cargo sea 'Promotor D2D'."
-        )
-        st.markdown(
-            "<div class='sync-banner'>💡 Si recién ingresaste un alta, "
-            "usa <b>🔄 Sincronizar</b> para ver al nuevo colaborador.</div>",
-            unsafe_allow_html=True
-        )
+        st.warning("No hay promotores D2D para este usuario/periodo.")
+        st.markdown("<div class='sync-info'>💡 Si recién ingresaste un alta, usa <b>🔄 Sincronizar</b>.</div>", unsafe_allow_html=True)
         return
 
-    # Session state para actualización inline (sin releer Drive al guardar)
-    SS_KEY = f"marcas_inline_{periodo}_{col_dia}"
-    if SS_KEY not in st.session_state:
-        st.session_state[SS_KEY] = {}
-
-    # Aplicar marcas de sesión sobre el DataFrame en memoria
-    for key_row, nueva_marca in st.session_state[SS_KEY].items():
-        mask = df_live["KEY"] == key_row
-        if mask.any():
-            df_live.loc[mask, col_dia] = nueva_marca
-
     # ── Filtros ──────────────────────────────────────────────────────────────
-    with st.expander("🔍 Filtros de búsqueda", expanded=False):
-        with st.form("form_filtros_asis", clear_on_submit=False):
-            fa, fb, fc = st.columns([1.5, 1, 1])
+    with st.expander("🔍 Filtros", expanded=False):
+        with st.form("form_filtros", clear_on_submit=False):
+            fa, fb, fc = st.columns([1.5,1,1])
             with fa:
-                texto_busqueda = st.text_input("DNI / nombre / supervisor", value="",
-                                               placeholder="Ej: 12345678 o Kevin")
+                buscar = st.text_input("DNI / nombre / supervisor", placeholder="Ej: 12345678")
             with fb:
-                f_sup   = st.selectbox("Supervisor",   opciones(df_live, "SUPERVISOR"),   index=0)
+                f_sup   = st.selectbox("Supervisor",   _opciones(df_live,"SUPERVISOR"),   index=0)
             with fc:
-                f_coord = st.selectbox("Coordinador",  opciones(df_live, "COORDINADOR"),  index=0)
+                f_coord = st.selectbox("Coordinador",  _opciones(df_live,"COORDINADOR"),  index=0)
             fd, fe, ff = st.columns(3)
             with fd:
-                f_dep    = st.selectbox("Departamento", opciones(df_live, "DEPARTAMENTO"), index=0)
+                f_dep    = st.selectbox("Departamento", _opciones(df_live,"DEPARTAMENTO"), index=0)
             with fe:
-                f_prov   = st.selectbox("Provincia",    opciones(df_live, "PROVINCIA"),    index=0)
+                f_prov   = st.selectbox("Provincia",    _opciones(df_live,"PROVINCIA"),    index=0)
             with ff:
-                f_estado = st.selectbox("Estado",       opciones(df_live, "ESTADO"),       index=0)
-            st.form_submit_button("🔎 Aplicar filtros", use_container_width=True)
+                f_estado = st.selectbox("Estado",       _opciones(df_live,"ESTADO"),       index=0)
+            st.form_submit_button("🔎 Aplicar", use_container_width=True)
 
-    # ── Filtrado en memoria ──────────────────────────────────────────────────
-    df_f = filtrar(df_live, "TODOS", f_sup, f_coord, f_dep, f_prov, f_estado)
-    q = normalizar_texto(texto_busqueda).upper()
+    df_f = _filtrar(df_live, f_sup, f_coord, f_dep, f_prov, f_estado)
+    q    = normalizar_texto(buscar).upper() if "buscar" in dir() else ""
     if q:
         mask = pd.Series(False, index=df_f.index)
-        for c in ["DNI", "NOMBRE", "SUPERVISOR", "COORDINADOR", "DEPARTAMENTO", "PROVINCIA"]:
+        for c in ["DNI","NOMBRE","SUPERVISOR","COORDINADOR","DEPARTAMENTO","PROVINCIA"]:
             if c in df_f.columns:
                 mask |= df_f[c].astype(str).str.upper().str.contains(q, na=False)
         df_f = df_f[mask].copy()
@@ -632,232 +604,210 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
         st.warning("Sin resultados con los filtros aplicados.")
         return
 
-    df_f["_EDITABLE"] = df_f.apply(lambda r: editable_en_fecha(r, fecha_sel), axis=1)
-    df_editables      = df_f[df_f["_EDITABLE"]].copy()
+    df_f["_en_rango"] = df_f.apply(lambda r: en_rango(r, fecha_sel), axis=1)
 
-    # ── Métricas rápidas ─────────────────────────────────────────────────────
+    # Métricas
     total     = len(df_f)
-    editables = len(df_editables)
-    marcados  = int((df_f.get(col_dia, pd.Series([""] * total)) != "").sum())
-    pendientes = editables - int((df_editables.get(col_dia, pd.Series()) != "").sum())
+    edit_mask = df_f["_en_rango"]
+    editables = int(edit_mask.sum())
+    marcados  = int((df_f.loc[edit_mask, col_dia].ne("")).sum()) if editables else 0
+    pendientes = editables - marcados
 
-    m1, m2, m3, m4 = st.columns(4)
-    for col_ui, val, label in [
-        (m1, total,      "👥 Total filtrado"),
-        (m2, editables,  "✏️ Editables"),
-        (m3, marcados,   "✅ Marcados"),
-        (m4, pendientes, "⏳ Pendientes"),
-    ]:
-        with col_ui:
-            st.markdown(
-                f"<div class='mini-metric'>"
-                f"<div class='val'>{val}</div>"
-                f"<div class='lbl'>{label}</div>"
-                f"</div>", unsafe_allow_html=True
-            )
-
-    st.markdown("<div style='height:8px'></div>", unsafe_allow_html=True)
+    st.markdown(_metricas_html(total, editables, marcados, pendientes), unsafe_allow_html=True)
 
     # ═══════════════════════════════════════════════════════════════════════
-    # BLOQUE 1 — Tabla HTML: todos los registros visibles, scroll interno,
-    #            columna DIA con chip de color — cero inputs editables
+    # BLOQUE 1 — data_editor con columna DIA_X inline (selectbox por fila)
     # ═══════════════════════════════════════════════════════════════════════
     st.markdown(
-        f"<span class='wow-section-title'>📋 Lista de personal — <b>{col_dia}</b> integrado</span>",
-        unsafe_allow_html=True
-    )
-
-    LIMITE_TABLA = 200   # muestra hasta 200 filas; usa filtros para acotar más
-    html_tabla   = _tabla_html(df_f, col_dia, LIMITE_TABLA)
-    st.markdown(html_tabla, unsafe_allow_html=True)
-
-    total_df = len(df_f)
-    if total_df > LIMITE_TABLA:
-        st.caption(f"Mostrando {LIMITE_TABLA} de {total_df} registros. Usa los filtros para acotar.")
-    else:
-        st.caption(f"Total: {total_df} registros del socio.")
-
-    # ═══════════════════════════════════════════════════════════════════════
-    # BLOQUE 2 — Panel de marcación (3 sub-bloques integrados)
-    # ═══════════════════════════════════════════════════════════════════════
-    st.markdown("<span class='wow-section-title'>✏️ Registrar asistencia</span>", unsafe_allow_html=True)
-
-    with st.expander("📝 Panel de marcación", expanded=True):
-        if df_editables.empty:
-            st.warning(
-                "No hay personal editable para esta fecha. "
-                "Todos son INACTIVOS o la fecha cae fuera del rango alta/cese."
-            )
-        else:
-            # Construir opciones sin DNIs duplicados
-            opciones_persona = []
-            mapa_persona     = {}
-            seen_dni         = set()
-
-            for idx, r in df_editables.iterrows():
-                dni = normalizar_dni(r.get("DNI"))
-                if dni in seen_dni:
-                    continue
-                seen_dni.add(dni)
-                nombre       = normalizar_texto(r.get("NOMBRE"))
-                sup          = normalizar_texto(r.get("SUPERVISOR"))
-                marca_actual = limpiar_marca(r.get(col_dia, ""))
-                ind          = f" [{marca_actual}]" if marca_actual else " [—]"
-                etiqueta     = f"{dni} | {nombre} | {sup}{ind}"
-                mapa_persona[etiqueta] = idx
-                opciones_persona.append(etiqueta)
-
-            # ── Sub-bloque A: Selector ──────────────────────────────────────
-            col_a, col_b, col_c = st.columns([1.8, 2.2, 1.4])
-
-            with col_a:
-                st.markdown("**👤 Colaborador**")
-                persona = st.selectbox(
-                    "col",
-                    opciones_persona, index=0,
-                    key="asis_persona_sel",
-                    help="[marca] = marcación actual · [—] = sin marca",
-                    label_visibility="collapsed"
-                )
-
-            idx_sel_prev = mapa_persona.get(persona)
-
-            # ── Sub-bloque B: Datos del colaborador (panel morado) ──────────
-            with col_b:
-                st.markdown("**📌 Datos del colaborador**")
-                if idx_sel_prev is not None:
-                    rp        = df_editables.loc[idx_sel_prev]
-                    estado_p  = normalizar_texto(rp.get("ESTADO", "")).upper()
-                    badge_cls = "st-badge-activo" if estado_p == "ACTIVO" else "st-badge-inactivo"
-                    marca_p   = limpiar_marca(rp.get(col_dia, ""))
-                    chip_p    = _chip_dia(marca_p)
-                    st.markdown(
-                        f"""<div class='mrc-panel'>
-                        <div class='mrc-row'>
-                          <span><b>DNI:</b> {normalizar_dni(rp.get('DNI',''))}</span>
-                          <span><b>Nombre:</b> {normalizar_texto(rp.get('NOMBRE',''))}</span>
-                          <span class='{badge_cls}'>{estado_p}</span>
-                        </div>
-                        <div class='mrc-row' style='margin-top:5px'>
-                          <span><b>Supervisor:</b> {normalizar_texto(rp.get('SUPERVISOR',''))}</span>
-                          <span><b>Coordinador:</b> {normalizar_texto(rp.get('COORDINADOR',''))}</span>
-                        </div>
-                        <div class='mrc-row' style='margin-top:5px'>
-                          <span><b>Alta:</b> {rp.get('FECHA_ALTA','—')}</span>
-                          <span><b>Cese:</b> {rp.get('FECHA_CESE','—') or '—'}</span>
-                          <span><b>Marca {col_dia}:</b> {chip_p}</span>
-                        </div>
-                        </div>""",
-                        unsafe_allow_html=True
-                    )
-
-            # ── Sub-bloque C: Marcación + upload + guardar ──────────────────
-            with col_c:
-                st.markdown("**📋 Marcación**")
-                marcas_opciones = list(MARCAS_LABELS.keys())
-                marcas_display  = [MARCAS_LABELS[k] for k in marcas_opciones]
-                marca_idx = st.selectbox(
-                    "Tipo",
-                    range(len(marcas_opciones)),
-                    format_func=lambda i: marcas_display[i],
-                    index=0,
-                    key="asis_marca_idx",
-                    label_visibility="collapsed"
-                )
-                marca = marcas_opciones[marca_idx]
-
-                if es_retro and marca and marca != "A-BM":
-                    st.caption("⛔ Solo A-BM en fechas pasadas.")
-
-                # Upload de sustento — visible únicamente al seleccionar A-BM
-                archivo_bm = None
-                if marca == "A-BM":
-                    st.markdown(
-                        "<div style='font-size:11.5px;color:#1E40AF;margin:4px 0 2px'>"
-                        "🏥 Adjunta el sustento (PDF o imagen):</div>",
-                        unsafe_allow_html=True
-                    )
-                    archivo_bm = st.file_uploader(
-                        "Sustento",
-                        type=["pdf", "png", "jpg", "jpeg"],
-                        key=f"file_abm_{periodo}_{dia}",
-                        label_visibility="collapsed"
-                    )
-
-                guardar = st.button(
-                    "💾 Guardar",
-                    key="btn_guardar_pres",
-                    use_container_width=True,
-                    type="primary",
-                )
-
-                if guardar:
-                    idx_g = mapa_persona.get(persona)
-                    if idx_g is None:
-                        st.error("No se identificó al colaborador.")
-                    elif not marca:
-                        st.error("⛔ Selecciona una marcación.")
-                    elif es_retro and marca != "A-BM":
-                        st.error("⛔ Fechas pasadas: solo A-BM con sustento.")
-                    elif marca == "A-BM" and archivo_bm is None:
-                        st.error("⛔ Adjunta el sustento para A-BM.")
-                    else:
-                        row_g = df_editables.loc[idx_g].copy()
-                        try:
-                            if marca == "A-BM":
-                                with st.spinner("📤 Subiendo sustento a Drive…"):
-                                    guardar_sustento(row_g, periodo, dia, archivo_bm)
-                            with st.spinner("💾 Guardando en Sheets…"):
-                                resultado = guardar_marca(
-                                    hoja_asistencia, row_g, headers, col_dia, marca
-                                )
-                            # Actualización inline: refleja la marca en la tabla
-                            # sin releer Drive (basta con el session_state)
-                            key_row = row_g.get("KEY", "")
-                            if key_row:
-                                st.session_state[SS_KEY][key_row] = marca
-                            nombre_g = normalizar_texto(row_g.get("NOMBRE", ""))
-                            st.success(
-                                f"✅ **{marca}** guardado para **{nombre_g}** ({resultado})."
-                            )
-                            st.rerun()
-                        except Exception as e:
-                            st.error(f"Error al guardar: {e}")
-                            st.caption("Si el error persiste, usa 🔄 Sincronizar y vuelve a intentarlo.")
-
-    # ═══════════════════════════════════════════════════════════════════════
-    # BLOQUE 3 — Espejo de marcaciones del día (solo registros con marca)
-    # ═══════════════════════════════════════════════════════════════════════
-    marcados_df = df_f[df_f.get(col_dia, pd.Series()) != ""].copy() if col_dia in df_f.columns else pd.DataFrame()
-    label_espejo = f"📊 Marcaciones registradas — {col_dia} ({len(marcados_df)} de {total})"
-
-    with st.expander(label_espejo, expanded=False):
-        if marcados_df.empty:
-            st.info("Aún no hay marcaciones registradas para este día.")
-        else:
-            st.markdown(_tabla_html(marcados_df, col_dia, 500), unsafe_allow_html=True)
-
-    # ── Jerarquía completa ───────────────────────────────────────────────────
-    st.divider()
-    st.markdown(
-        "<span class='wow-section-title'>📋 Jerarquía completa de promotores</span>",
+        f"<span class='wow-section-title'>📋 Lista de personal — marcación {col_dia} inline</span>",
         unsafe_allow_html=True
     )
     st.caption(
-        f"**{len(df_live)}** promotores D2D en memoria — "
-        "datos de la misma lectura, sin llamada adicional a Drive."
+        f"Edita la columna **{col_dia}** directamente. "
+        "En fechas pasadas solo aparece A-BM. Presiona **💾 Guardar marcaciones** cuando termines."
     )
-    cols_jer = ["RAZON SOCIAL", "DNI", "NOMBRE", "CARGO", "SUPERVISOR", "COORDINADOR",
-                "DEPARTAMENTO", "PROVINCIA", "ESTADO", "FECHA_ALTA", "FECHA_CESE"]
-    cols_jer = [c for c in cols_jer if c in df_live.columns]
-    st.dataframe(
-        df_live[cols_jer].reset_index(drop=True),
+
+    # Preparar DataFrame para el editor
+    cols_editor = ["DNI","NOMBRE","SUPERVISOR","COORDINADOR",
+                   "DEPARTAMENTO","PROVINCIA","ESTADO","FECHA_ALTA","FECHA_CESE", col_dia]
+    for c in cols_editor:
+        if c not in df_f.columns:
+            df_f[c] = ""
+
+    # La marca disponible depende de si es retroactivo
+    marcas_sel = MARCAS_RETRO if es_retro else MARCAS_HOY
+
+    # Bloquear edición de filas fuera de rango
+    df_edit = df_f[cols_editor + ["_en_rango","KEY","ROW_SHEET"]].copy()
+    df_edit[col_dia] = df_edit[col_dia].apply(limpiar_marca)
+
+    # Solo filas en rango son editables; las demás se muestran igual pero bloqueadas
+    df_editables_mask = df_edit["_en_rango"]
+    df_para_editor    = df_edit[cols_editor].reset_index(drop=True)
+    keys_list         = df_edit["KEY"].reset_index(drop=True)
+    row_sheet_list    = df_edit["ROW_SHEET"].reset_index(drop=True)
+    en_rango_list     = df_edit["_en_rango"].reset_index(drop=True)
+
+    LIMITE = 300
+    if len(df_para_editor) > LIMITE:
+        st.caption(f"Mostrando {LIMITE} de {len(df_para_editor)} registros. Usa filtros para acotar.")
+        df_para_editor = df_para_editor.head(LIMITE)
+        keys_list      = keys_list.head(LIMITE)
+        row_sheet_list = row_sheet_list.head(LIMITE)
+        en_rango_list  = en_rango_list.head(LIMITE)
+
+    # Configuración de columnas del editor
+    col_cfg = {
+        "DNI":          st.column_config.TextColumn("DNI", disabled=True, width="small"),
+        "NOMBRE":       st.column_config.TextColumn("Nombre", disabled=True, width="large"),
+        "SUPERVISOR":   st.column_config.TextColumn("Supervisor", disabled=True),
+        "COORDINADOR":  st.column_config.TextColumn("Coordinador", disabled=True),
+        "DEPARTAMENTO": st.column_config.TextColumn("Departamento", disabled=True),
+        "PROVINCIA":    st.column_config.TextColumn("Provincia", disabled=True),
+        "ESTADO":       st.column_config.TextColumn("Estado", disabled=True, width="small"),
+        "FECHA_ALTA":   st.column_config.TextColumn("Alta", disabled=True, width="small"),
+        "FECHA_CESE":   st.column_config.TextColumn("Cese", disabled=True, width="small"),
+        col_dia: st.column_config.SelectboxColumn(
+            col_dia,
+            options=marcas_sel,
+            required=False,
+            width="small",
+        ),
+    }
+
+    editor_key = f"asis_editor_{periodo}_{dia}"
+    df_edited  = st.data_editor(
+        df_para_editor,
+        column_config=col_cfg,
         use_container_width=True,
         hide_index=True,
-        height=500,
-        column_config={
-            "DNI":    st.column_config.TextColumn("DNI"),
-            "NOMBRE": st.column_config.TextColumn("Nombre", width="large"),
-            "ESTADO": st.column_config.TextColumn("Estado"),
-        },
+        height=min(540, 56 + len(df_para_editor) * 35),
+        key=editor_key,
+        num_rows="fixed",
     )
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # Detectar cambios y guardar
+    # ═══════════════════════════════════════════════════════════════════════
+
+    # Cambios: filas donde DIA_x difiere entre original y editado
+    cambios = []
+    for i in range(len(df_para_editor)):
+        marca_orig  = limpiar_marca(df_para_editor.iloc[i].get(col_dia,""))
+        marca_nueva = limpiar_marca(df_edited.iloc[i].get(col_dia,"") if df_edited is not None else "")
+        if marca_nueva != marca_orig and en_rango_list.iloc[i]:
+            if es_retro and marca_nueva not in MARCAS_RETRO:
+                continue   # silenciosamente ignorar si no es A-BM en retroactivo
+            cambios.append({
+                "idx":        i,
+                "key":        keys_list.iloc[i],
+                "row_sheet":  row_sheet_list.iloc[i],
+                "nombre":     df_para_editor.iloc[i].get("NOMBRE",""),
+                "dni":        df_para_editor.iloc[i].get("DNI",""),
+                "marca_orig": marca_orig,
+                "marca_nueva":marca_nueva,
+                "row_data":   df_live[df_live["KEY"] == keys_list.iloc[i]].iloc[0].to_dict()
+                              if not df_live[df_live["KEY"] == keys_list.iloc[i]].empty else {},
+            })
+
+    # Panel de guardado — se muestra solo si hay cambios pendientes
+    if cambios:
+        n_bm     = sum(1 for c in cambios if c["marca_nueva"] == "A-BM")
+        n_otros  = len(cambios) - n_bm
+
+        if n_bm > 0:
+            st.markdown(
+                f"<div class='bm-box'>"
+                f"<div class='bm-box-title'>🏥 {n_bm} marca(s) A-BM — adjunta los sustentos antes de guardar</div>",
+                unsafe_allow_html=True
+            )
+            archivos_bm = {}
+            for c in cambios:
+                if c["marca_nueva"] == "A-BM":
+                    dni_c = c["dni"]
+                    nombre_c = normalizar_texto(c["nombre"])
+                    f = st.file_uploader(
+                        f"Sustento para {dni_c} — {nombre_c}",
+                        type=["pdf","png","jpg","jpeg"],
+                        key=f"file_bm_{periodo}_{dia}_{dni_c}",
+                    )
+                    archivos_bm[c["key"]] = f
+            st.markdown("</div>", unsafe_allow_html=True)
+        else:
+            archivos_bm = {}
+
+        if n_otros > 0:
+            st.info(
+                f"📝 **{n_otros}** cambio(s) listos para guardar: "
+                + ", ".join(f"{c['dni']} → {c['marca_nueva']}" for c in cambios if c['marca_nueva'] != 'A-BM')
+            )
+
+        guardar_btn = st.button(
+            f"💾 Guardar {len(cambios)} marcación(es)",
+            key="btn_guardar",
+            type="primary",
+            use_container_width=True,
+        )
+
+        if guardar_btn:
+            errores = []
+            exitos  = []
+            for c in cambios:
+                try:
+                    if c["marca_nueva"] == "A-BM":
+                        archivo = archivos_bm.get(c["key"])
+                        if not archivo:
+                            errores.append(f"⛔ {c['dni']}: falta sustento A-BM.")
+                            continue
+                        with st.spinner(f"📤 Subiendo sustento {c['dni']}…"):
+                            guardar_sustento(c["row_data"], periodo, dia, archivo)
+
+                    row_serie = pd.Series(c["row_data"])
+                    row_serie["ROW_SHEET"] = c["row_sheet"]
+                    with st.spinner(f"💾 Guardando {c['dni']} → {c['marca_nueva']}…"):
+                        res = guardar_marca(hoja_asistencia, row_serie, headers, col_dia, c["marca_nueva"])
+                    exitos.append(f"✅ {c['dni']} ({normalizar_texto(c['nombre'])}) → **{c['marca_nueva']}** ({res})")
+                except Exception as e:
+                    errores.append(f"❌ {c['dni']}: {e}")
+
+            for msg in exitos:
+                st.success(msg)
+            for msg in errores:
+                st.error(msg)
+            if exitos:
+                st.rerun()
+    else:
+        st.caption("✔ Sin cambios pendientes. Edita la columna " + col_dia + " en la tabla de arriba y guarda aquí.")
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # BLOQUE 2 — Espejo marcaciones del día
+    # ═══════════════════════════════════════════════════════════════════════
+    ya_marcados = df_f[df_f[col_dia].ne("")] if col_dia in df_f.columns else pd.DataFrame()
+    with st.expander(f"📊 Marcaciones registradas hoy — {col_dia} ({len(ya_marcados)} de {total})", expanded=False):
+        if ya_marcados.empty:
+            st.info("Aún no hay marcaciones para este día.")
+        else:
+            cols_esp = ["DNI","NOMBRE","SUPERVISOR","DEPARTAMENTO","PROVINCIA","ESTADO",col_dia]
+            cols_esp = [c for c in cols_esp if c in ya_marcados.columns]
+            st.dataframe(
+                ya_marcados[cols_esp].reset_index(drop=True),
+                use_container_width=True, hide_index=True, height=360,
+                column_config={
+                    "DNI":    st.column_config.TextColumn("DNI"),
+                    "NOMBRE": st.column_config.TextColumn("Nombre", width="large"),
+                    col_dia:  st.column_config.TextColumn(col_dia, width="small"),
+                }
+            )
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # BLOQUE 3 — Jerarquía completa rediseñada
+    # ═══════════════════════════════════════════════════════════════════════
+    st.divider()
+    st.markdown(
+        "<span class='wow-section-title'>📋 Jerarquía completa de promotores D2D</span>",
+        unsafe_allow_html=True
+    )
+    st.caption("Datos en memoria — misma lectura, sin llamada adicional a Drive.")
+    st.markdown(_stats_jerarquia(df_live), unsafe_allow_html=True)
+    st.markdown(_tabla_jerarquia_html(df_live), unsafe_allow_html=True)
+    st.caption(f"Total en base: **{len(df_live)}** promotores D2D del socio.")
