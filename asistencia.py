@@ -64,7 +64,7 @@ KEY_LOAD_TS = "asis_load_timestamp"
 
 CACHE_TTL = 600
 # Mantener la vista amplia original. Solo pagina si realmente supera este límite.
-MAX_FILAS_EDITOR = 200
+MAX_FILAS_EDITOR = 100
 
 MARCAS_PRESENCIALIDAD = ["", "A", "A-BM", "A-VAC", "NA-SA", "NA-CA"]
 LEYENDA_MARCAS = {
@@ -1055,47 +1055,49 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
         st.info("**Motivos de validación:** A = Asistió · A-BM = No Asistió por Baja Médica · A-VAC = No Asistió por Vacaciones · NA-SA = No Asistió - Sin aviso · NA-CA = No Asistió - Con aviso")
         st.caption(f"Solo está habilitada la columna **{col_hoy}** para personal ACTIVO. Los INACTIVOS quedan visibles en el espejo histórico, pero no se pueden marcar.")
 
+        # OPTIMIZACIÓN: Editor dentro de un form() para evitar rererenderizado en cada clic.
+        # Mostrar TODAS las columnas (info completa) pero máximo 100 filas para no freezear.
         columnas_editor = COLUMNAS_FIJAS_EDITOR + [col_hoy, "ROW_SHEET"]
+        df_editor_build = df_editor_base.copy()
         for col in columnas_editor:
-            if col not in df_editor_base.columns:
-                df_editor_base[col] = ""
+            if col not in df_editor_build.columns:
+                df_editor_build[col] = ""
 
-        df_editor = df_editor_base[columnas_editor].copy().fillna("").replace({"None": "", "nan": ""})
+        df_editor = df_editor_build[columnas_editor].copy().fillna("").replace({"None": "", "nan": ""})
         df_editor[col_hoy] = df_editor[col_hoy].apply(limpiar_marca)
 
         disabled_cols = [col for col in df_editor.columns if col != col_hoy]
-        # Mantengo ROW_SHEET visible como FILA técnica para evitar el error React #185
-        # que aparece a veces cuando se oculta una columna usada para guardar.
         column_config = {
             "ROW_SHEET": st.column_config.NumberColumn("FILA", width="small", disabled=True),
             col_hoy: st.column_config.SelectboxColumn(col_hoy, options=MARCAS_PRESENCIALIDAD, width="small"),
         }
 
-        editado = st.data_editor(
-            df_editor,
-            use_container_width=True,
-            height=min(460, 50 + len(df_editor) * 32),
-            hide_index=True,
-            disabled=disabled_cols,
-            column_config=column_config,
-            num_rows="fixed",
-            key="editor_presencialidad_dia_actual",
-        )
+        with st.form(key="form_presencialidad", clear_on_submit=False):
+            editado = st.data_editor(
+                df_editor,
+                use_container_width=True,
+                height=min(460, 50 + len(df_editor) * 32),
+                hide_index=True,
+                disabled=disabled_cols,
+                column_config=column_config,
+                num_rows="fixed",
+                key="editor_presencialidad_dia_actual",
+            )
 
-        faltantes_sustento = detectar_abm_sin_sustento(pd.DataFrame(editado).fillna(""), df_original, col_hoy)
-        if faltantes_sustento:
-            primero = faltantes_sustento[0]
-            st.warning(f"⚠️ Hay {len(faltantes_sustento)} marca(s) A-BM pendiente(s) de sustento. Primero valida el archivo del colaborador mostrado.")
-            if st.button("📎 Adjuntar sustento A-BM pendiente", key="btn_abrir_dialogo_sustento_bm"):
-                dialogo_sustento_bm(
-                    primero["clave"],
-                    primero["dni"],
-                    primero["nombre"],
-                    primero["razon_social"],
-                    primero["row_sheet"],
-                )
+            faltantes_sustento = detectar_abm_sin_sustento(pd.DataFrame(editado).fillna(""), df_original, col_hoy)
+            if faltantes_sustento:
+                primero = faltantes_sustento[0]
+                st.warning(f"⚠️ Hay {len(faltantes_sustento)} marca(s) A-BM pendiente(s) de sustento. Primero valida el archivo del colaborador mostrado.")
+                if st.button("📎 Adjuntar sustento A-BM pendiente", key="btn_abrir_dialogo_sustento_bm"):
+                    dialogo_sustento_bm(
+                        primero["clave"],
+                        primero["dni"],
+                        primero["nombre"],
+                        primero["razon_social"],
+                        primero["row_sheet"],
+                    )
 
-        guardar_pres = st.button("💾 Guardar Presencialidad", key="btn_guardar_presencialidad")
+            guardar_pres = st.form_submit_button("💾 Guardar Presencialidad", use_container_width=True)
 
         if guardar_pres:
             with st.spinner("Guardando en Google Drive…"):
