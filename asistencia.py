@@ -1,4 +1,4 @@
-# FIX_RESTORE_FLUIDO_DIALOGO_ABM_SIN_SYNC_20260602
+# FIX_RESTORE_FLUIDO_DIALOGO_ABM_ESTADO_FIX_20260602
 """
 asistencia.py — Presencialidad Dealer
 Cambios aplicados:
@@ -783,8 +783,20 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
     op_estado = ["ACTIVO"]  # Presencialidad solo permite registrar personal activo
 
     def _valor_guardado(clave, opciones):
-        valor = st.session_state.get(clave, "TODOS")
-        return valor if valor in opciones else "TODOS"
+        """
+        Devuelve un valor válido para el selectbox.
+        Antes devolvía TODOS aunque la lista fuera solo [ACTIVO],
+        y eso generaba ValueError: list.index(x): x not in list.
+        """
+        if not opciones:
+            return ""
+        valor = st.session_state.get(clave, opciones[0])
+        return valor if valor in opciones else opciones[0]
+
+    # Si quedó guardado un filtro viejo de versiones anteriores (por ejemplo TODOS),
+    # lo corregimos antes de pintar el selectbox de Estado.
+    if st.session_state.get("asis_filtro_estado") not in op_estado:
+        st.session_state["asis_filtro_estado"] = op_estado[0]
 
     with st.form("form_filtros_presencialidad"):
         # IMPORTANTE: etiquetas visibles. No usar label_visibility="collapsed".
