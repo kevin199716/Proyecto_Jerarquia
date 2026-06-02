@@ -136,7 +136,7 @@ def mostrar_matriz_jerarquia(titulo="Estado actual de la jerarquía", icono="�
 # =====================================================
 if rol == "backoffice":
     if pagina == "Alta":
-        mostrar_formulario(hoja_colaboradores, hoja_ubicaciones)
+        mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia)
         mostrar_matriz_jerarquia()
 
     elif pagina == "Bajas":
@@ -156,7 +156,7 @@ elif rol == "dealer":
     wow_section(f"Socio: {razon}", "📌")
 
     if pagina == "Alta":
-        mostrar_formulario(hoja_colaboradores, hoja_ubicaciones)
+        mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia)
         mostrar_matriz_jerarquia()
 
     elif pagina == "Bajas":
