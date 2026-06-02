@@ -581,29 +581,32 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
         f"Editables para el día seleccionado: **{len(df_editables)}**"
     )
 
-    columnas_basicas = ["DNI", "NOMBRE", "SUPERVISOR", "COORDINADOR", "FECHA_ALTA", "FECHA_CESE", "ESTADO", col_dia]
-    for c in columnas_basicas:
+    # Columnas del preview SIN col_dia para evitar que Streamlit muestre
+    # celdas editables en la tabla (problema visual de la imagen de referencia).
+    columnas_preview = ["DNI", "NOMBRE", "SUPERVISOR", "COORDINADOR", "FECHA_ALTA", "FECHA_CESE", "ESTADO"]
+    # Para el espejo completo sí incluimos col_dia (solo lectura).
+    columnas_completas = columnas_preview + [col_dia]
+    for c in columnas_completas:
         if c not in df_f.columns:
             df_f[c] = ""
 
-    # ── Layout: tabla (izq) + marcación (der) ─────────────────────────────────
+    # ── Sección: Registrar presencialidad ──────────────────────────────────────
     st.markdown("<span class='wow-section-title'>✏️ Registrar presencialidad</span>", unsafe_allow_html=True)
     st.info("**Motivos:** " + LEYENDA)
 
-    col_tabla, col_marca = st.columns([1.6, 1])
-
+    # Tabla de preview: sin columna DIA_x para evitar render de celdas editables.
     limite_preview = 50
-    with col_tabla:
-        st.dataframe(
-            df_f[columnas_basicas].head(limite_preview),
-            use_container_width=True,
-            hide_index=True,
-            height=min(420, 70 + min(len(df_f), limite_preview) * 30),
-        )
-        if len(df_f) > limite_preview:
-            st.caption(f"Se muestran los primeros {limite_preview}. Usa búsqueda por DNI/nombre para ubicar más.")
+    st.dataframe(
+        df_f[columnas_preview].head(limite_preview),
+        use_container_width=True,
+        hide_index=True,
+        height=min(420, 70 + min(len(df_f), limite_preview) * 30),
+    )
+    if len(df_f) > limite_preview:
+        st.caption(f"Se muestran los primeros {limite_preview}. Usa búsqueda por DNI/nombre para ubicar más.")
 
-    with col_marca:
+    # ── Marcación: debajo de la tabla, dentro de expander abierto por defecto ──
+    with st.expander("✏️ Marcar asistencia", expanded=True):
         if df_editables.empty:
             st.warning("No hay personal editable para el día seleccionado (fecha de alta/cese o estado inactivo).")
         else:
@@ -618,54 +621,68 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                     mapa_persona[etiqueta] = idx
                     opciones_persona.append(etiqueta)
 
-            with st.form("form_guardar_presencialidad_puntual", clear_on_submit=False):
-                persona = st.selectbox("Seleccionar colaborador", opciones_persona, index=0)
+            col_sel, col_marc = st.columns([2, 1])
+            with col_sel:
+                persona = st.selectbox("Seleccionar colaborador", opciones_persona, index=0, key="asis_persona_sel")
+            with col_marc:
                 marca = st.selectbox(
-                    "Marcación", MARCAS[1:], index=0,
+                    "Marcación", MARCAS[1:], index=0, key="asis_marca_sel",
                     help="A-BM habilita sustento obligatorio."
                 )
-                archivo_bm = None
-                if marca == "A-BM":
-                    archivo_bm = st.file_uploader(
-                        "Adjuntar sustento BM (PDF o imagen)",
-                        type=["pdf", "png", "jpg", "jpeg"],
-                        key=f"file_abm_puntual_{periodo}_{dia}",
-                    )
-                guardar = st.form_submit_button("💾 Guardar Presencialidad", use_container_width=True)
 
-            if guardar:
+            # file_uploader FUERA de st.form: única forma de que funcione
+            # correctamente en Streamlit (los forms no soportan bien file_uploader).
+            archivo_bm = None
+            marca_actual = st.session_state.get("asis_marca_sel", "")
+            if marca_actual == "A-BM":
+                archivo_bm = st.file_uploader(
+                    "📎 Adjuntar sustento de Baja Médica (PDF o imagen obligatorio)",
+                    type=["pdf", "png", "jpg", "jpeg"],
+                    key=f"file_abm_{periodo}_{dia}",
+                )
+
+            if st.button("💾 Guardar Presencialidad", key="btn_guardar_pres", use_container_width=True, type="primary"):
                 idx_sel = mapa_persona.get(persona)
                 if idx_sel is None:
                     st.error("No se pudo identificar el colaborador seleccionado.")
-                    return
-                row_sel = df_editables.loc[idx_sel].copy()
+                else:
+                    row_sel = df_editables.loc[idx_sel].copy()
+                    if fecha_sel != hoy_lima() and marca != "A-BM":
+                        st.error("Para días anteriores/futuros solo se permite A-BM con sustento.")
+                    elif marca == "A-BM" and archivo_bm is None:
+                        st.error("Falta adjuntar el sustento obligatorio para A-BM.")
+                    else:
+                        try:
+                            if marca == "A-BM":
+                                guardar_sustento(row_sel, periodo, dia, archivo_bm)
+                            resultado = guardar_marca(hoja_asistencia, row_sel, headers, col_dia, marca)
+                            st.success(f"✅ Presencialidad guardada correctamente ({resultado}).")
+                            st.rerun()
+                        except Exception as e:
+                            st.error(f"Error guardando presencialidad: {e}")
 
-                if fecha_sel != hoy_lima() and marca != "A-BM":
-                    st.error("Para días anteriores/futuros solo se permite A-BM con sustento.")
-                    return
-                if marca == "A-BM" and archivo_bm is None:
-                    st.error("Falta adjuntar sustento obligatorio para A-BM.")
-                    return
+    # ── Espejo del día: tabla completa con columna DIA_x (solo lectura) ────────
+    with st.expander(f"📊 Ver marcaciones del {col_dia} (espejo completo)", expanded=False):
+        st.dataframe(
+            df_f[columnas_completas].copy(),
+            use_container_width=True,
+            hide_index=True,
+            height=420,
+        )
 
-                try:
-                    if marca == "A-BM":
-                        guardar_sustento(row_sel, periodo, dia, archivo_bm)
-                    resultado = guardar_marca(hoja_asistencia, row_sel, headers, col_dia, marca)
-                    st.success(f"✅ Presencialidad guardada correctamente ({resultado}).")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"Error guardando presencialidad: {e}")
-
-    # ── Espejo del día bajo demanda ────────────────────────────────────────────
-    with st.expander("📊 Ver espejo completo del día seleccionado", expanded=False):
-        st.dataframe(df_f[columnas_basicas].copy(), use_container_width=True, hide_index=True, height=420)
-
-    # ── Jerarquía bajo demanda ─────────────────────────────────────────────────
-    if registro_mod is not None:
-        st.divider()
-        st.markdown("<span class='wow-section-title'>📋 Estado actual de la jerarquía</span>", unsafe_allow_html=True)
-        if st.button("📥 Cargar jerarquía completa", key="btn_cargar_matriz_jerarquia"):
-            try:
-                registro_mod.mostrar_tabla(hoja_colaboradores, razon)
-            except Exception as e:
-                st.warning(f"No se pudo cargar la matriz de jerarquía: {e}")
+    # ── Jerarquía completa: siempre visible al final, optimizada con caché ─────
+    st.divider()
+    st.markdown("<span class='wow-section-title'>📋 Jerarquía completa</span>", unsafe_allow_html=True)
+    st.caption("Lista completa de promotores cargada desde colaboradores. Usa los filtros de arriba para acotar.")
+    try:
+        cols_jerarquia = ["RAZON SOCIAL", "DNI", "NOMBRE", "CARGO", "SUPERVISOR", "COORDINADOR",
+                          "DEPARTAMENTO", "PROVINCIA", "ESTADO", "FECHA_ALTA", "FECHA_CESE"]
+        cols_mostrar = [c for c in cols_jerarquia if c in df_live.columns]
+        st.dataframe(
+            df_live[cols_mostrar].reset_index(drop=True),
+            use_container_width=True,
+            hide_index=True,
+            height=480,
+        )
+    except Exception as e:
+        st.warning(f"No se pudo mostrar la jerarquía: {e}")
