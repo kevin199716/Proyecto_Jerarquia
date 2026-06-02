@@ -1,4 +1,5 @@
 """
+FIX_MEMORIA_RENDER_EDITOR_FORM_SIN_POPUP_INMEDIATO_20260602
 asistencia.py — Presencialidad Dealer
 Cambios aplicados:
   1. Módulo visible como Presencialidad Dealer desde app_maestra_vendedores.py.
@@ -64,7 +65,7 @@ KEY_LOAD_TS = "asis_load_timestamp"
 
 CACHE_TTL = 600
 # Mantener la vista amplia original. Solo pagina si realmente supera este límite.
-MAX_FILAS_EDITOR = 200
+MAX_FILAS_EDITOR = 50
 
 MARCAS_PRESENCIALIDAD = ["", "A", "A-BM", "A-VAC", "NA-SA", "NA-CA"]
 LEYENDA_MARCAS = {
@@ -747,34 +748,10 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
     hoy_dia = dia_actual()
     col_hoy = f"DIA_{hoy_dia}"
 
-    c1, c2, c3 = st.columns([1.25, 1.15, 5])
-
-    with c1:
-        if st.button("🔄 Sincronizar mes", key="btn_sync_asistencia"):
-            with st.spinner("Sincronizando con colaboradores…"):
-                try:
-                    nuevos, actualizados = sincronizar_mes(hoja_asistencia, hoja_colaboradores)
-                    cargar_cache_desde_drive(hoja_asistencia, forzar=True)
-                    st.success(f"✅ Mes sincronizado. Nuevos: {nuevos} | Datos base actualizados: {actualizados}")
-                except Exception as e:
-                    st.error(f"Error sincronizando: {e}")
-                    return
-
-    with c2:
-        if st.button("♻️ Recargar Drive", key="btn_reload_asistencia"):
-            with st.spinner("Recargando desde Drive…"):
-                try:
-                    cargar_cache_desde_drive(hoja_asistencia, forzar=True)
-                    st.success("✅ Datos actualizados.")
-                except Exception as e:
-                    st.error(f"Error recargando: {e}")
-                    return
-
-    with c3:
-        st.info(
-            f"📅 Periodo: **{periodo}** | Día editable: **{col_hoy}** | "
-            "Los días anteriores y futuros quedan bloqueados."
-        )
+    st.info(
+        f"📅 Periodo: **{periodo}** | Día editable: **{col_hoy}** | "
+        "Vista optimizada para Render: se carga en memoria y solo se escribe al presionar Guardar Presencialidad."
+    )
 
     cargar_cache_desde_drive(hoja_asistencia)
 
@@ -891,36 +868,7 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
         df_editor = df_editor_base[columnas_editor].copy().fillna("").replace({"None": "", "nan": ""})
         df_editor[col_hoy] = df_editor[col_hoy].apply(limpiar_marca)
 
-        # =====================================================
-        # DETECCIÓN EN TIEMPO REAL: marca A-BM sin sustento
-        # =====================================================
-        cambios = st.session_state.get("editor_presencialidad_dia_actual", {}).get("edited_rows", {})
-        if cambios:
-            # Limpiar sustentos huérfanos si cambiaron de A-BM a otra cosa
-            sustentos_cargados = st.session_state.get("sustentos_pendientes", {})
-            if sustentos_cargados:
-                dni_en_baja = set()
-                for r_str, cols in cambios.items():
-                    r_idx = int(r_str)
-                    if col_hoy in cols and cols[col_hoy] == "A-BM":
-                        if r_idx < len(df_editor):
-                            dni_en_baja.add(df_editor.iloc[r_idx]["DNI"])
-                for dni in list(sustentos_cargados.keys()):
-                    if dni not in dni_en_baja:
-                        del st.session_state["sustentos_pendientes"][dni]
-
-            # Verificar si hay alguna selección nueva de A-BM que requiera sustento
-            for r_str, cols in cambios.items():
-                r_idx = int(r_str)
-                if col_hoy in cols and cols[col_hoy] == "A-BM":
-                    if r_idx < len(df_editor):
-                        row_data = df_editor.iloc[r_idx]
-                        dni = row_data["DNI"]
-                        nombre = row_data["NOMBRE"]
-                        row_sheet = row_data["ROW_SHEET"]
-                        
-                        if dni not in st.session_state.get("sustentos_pendientes", {}):
-                            mostrar_dialogo_sustento(dni, nombre, row_sheet, col_hoy, df_editor)
+        # La detección A-BM se hace al presionar Guardar para evitar rerun por cada celda.
 
         disabled_cols = [col for col in df_editor.columns if col != col_hoy]
         # Mantengo ROW_SHEET visible como FILA técnica para evitar el error React #185
@@ -930,18 +878,19 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
             col_hoy: st.column_config.SelectboxColumn(col_hoy, options=MARCAS_PRESENCIALIDAD, width="small"),
         }
 
-        editado = st.data_editor(
-            df_editor,
-            use_container_width=True,
-            height=min(460, 50 + len(df_editor) * 32),
-            hide_index=True,
-            disabled=disabled_cols,
-            column_config=column_config,
-            num_rows="fixed",
-            key="editor_presencialidad_dia_actual",
-        )
+        with st.form("form_guardar_presencialidad_estable", clear_on_submit=False):
+            editado = st.data_editor(
+                df_editor,
+                use_container_width=True,
+                height=min(420, 50 + len(df_editor) * 30),
+                hide_index=True,
+                disabled=disabled_cols,
+                column_config=column_config,
+                num_rows="fixed",
+                key="editor_presencialidad_dia_actual",
+            )
 
-        guardar_pres = st.button("💾 Guardar Presencialidad", key="btn_guardar_presencialidad")
+            guardar_pres = st.form_submit_button("💾 Guardar Presencialidad", use_container_width=True)
 
         if guardar_pres:
             with st.spinner("Guardando en Google Drive…"):
@@ -958,7 +907,9 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                                 if r_idx < len(df_editor):
                                     dni = df_editor.iloc[r_idx]["DNI"]
                                     if dni not in st.session_state.get("sustentos_pendientes", {}):
-                                        st.error(f"❌ Falta el sustento médico obligatorio para {df_editor.iloc[r_idx]['NOMBRE']}.")
+                                        row_data = df_editor.iloc[r_idx]
+                                        mostrar_dialogo_sustento(row_data["DNI"], row_data["NOMBRE"], row_data["ROW_SHEET"], col_hoy, df_editor)
+                                        st.warning("Adjunta el sustento A-BM y vuelve a presionar Guardar Presencialidad.")
                                         st.stop()
 
                         # 2. Subida de certificados a Google Drive y registro de auditoría en Sheets
