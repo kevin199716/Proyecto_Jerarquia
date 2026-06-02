@@ -1,5 +1,11 @@
-# FIX_ASISTENCIA_LIVE_NO_AUTO_WRITE_TABLA_VISIBLE_20260601
-# Presencialidad Dealer: lectura en vivo + guardado puntual. No sincroniza ni escribe al abrir.
+# FIX_ASISTENCIA_OPTIMIZADA_SIN_AUTO_WRITE_SIN_FREEZE_20260601
+# Presencialidad Dealer optimizada:
+# - NO escribe al abrir/refrescar.
+# - NO sincroniza automáticamente.
+# - NO borra histórico.
+# - Lee Drive con caché corta para evitar frizado por cada interacción.
+# - Filtra por dealer en memoria antes de pintar editor.
+# - La matriz de jerarquía NO carga automáticamente; solo bajo demanda para no reventar memoria Render.
 
 import calendar
 import time
@@ -15,7 +21,11 @@ HOJA_SUSTENTOS = "Sustentos_Bajas"
 TZ_LIMA = pytz.timezone("America/Lima")
 
 MARCAS = ["", "A", "A-BM", "A-VAC", "NA-SA", "NA-CA"]
-LEYENDA = "A = Asistió · A-BM = No Asistió por Baja Médica · A-VAC = No Asistió por Vacaciones · NA-SA = No Asistió - Sin aviso · NA-CA = No Asistió - Con aviso"
+LEYENDA = (
+    "A = Asistió · A-BM = No Asistió por Baja Médica · "
+    "A-VAC = No Asistió por Vacaciones · NA-SA = No Asistió - Sin aviso · "
+    "NA-CA = No Asistió - Con aviso"
+)
 
 BASE_COLS = [
     "RAZON SOCIAL", "SUPERVISOR", "COORDINADOR", "DEPARTAMENTO", "PROVINCIA",
@@ -30,6 +40,7 @@ DISPLAY_COLS = [
 ]
 
 MAX_FILAS_EDITOR = 200
+CACHE_TTL_SECONDS = 20
 
 
 def hoy_lima() -> date:
@@ -82,19 +93,43 @@ def limpiar_marca(x) -> str:
     return v if v in MARCAS else ""
 
 
+def _worksheet_key(worksheet) -> str:
+    """Clave simple para cachear sin intentar hashear el objeto Worksheet."""
+    try:
+        return f"{worksheet.spreadsheet.id}:{worksheet.id}:{worksheet.title}"
+    except Exception:
+        return str(id(worksheet))
+
+
+@st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner=False)
+def _leer_values_cached(_worksheet, cache_key: str):
+    # _worksheet queda excluido del hash por el guion bajo.
+    return _worksheet.get_all_values()
+
+
+def leer_values(worksheet):
+    return _leer_values_cached(worksheet, _worksheet_key(worksheet))
+
+
+def limpiar_cache_asistencia():
+    try:
+        _leer_values_cached.clear()
+    except Exception:
+        pass
+
+
 def asegurar_headers_asistencia(hoja_asistencia):
     """Solo crea cabecera si la hoja está totalmente vacía. No borra nada."""
-    vals = hoja_asistencia.get_all_values()
+    vals = leer_values(hoja_asistencia)
     if not vals:
         hoja_asistencia.append_row(ALL_COLS, value_input_option="USER_ENTERED")
+        limpiar_cache_asistencia()
         return ALL_COLS.copy()
     headers = [normalizar_texto(h).upper() for h in vals[0]]
-    # No agregamos columnas automáticamente para evitar escrituras al abrir.
     return headers
 
 
-def leer_sheet_df(worksheet) -> pd.DataFrame:
-    vals = worksheet.get_all_values()
+def values_a_df(vals) -> pd.DataFrame:
     if not vals:
         return pd.DataFrame()
     headers = [normalizar_texto(h).upper() for h in vals[0]]
@@ -105,6 +140,10 @@ def leer_sheet_df(worksheet) -> pd.DataFrame:
     return df
 
 
+def leer_sheet_df(worksheet) -> pd.DataFrame:
+    return values_a_df(leer_values(worksheet))
+
+
 def nombre_colaborador(row: pd.Series) -> str:
     if "NOMBRE" in row and normalizar_texto(row.get("NOMBRE")):
         return normalizar_texto(row.get("NOMBRE"))
@@ -112,17 +151,24 @@ def nombre_colaborador(row: pd.Series) -> str:
     return " ".join([normalizar_texto(p) for p in partes if normalizar_texto(p)]).strip()
 
 
-def construir_base_colaboradores(hoja_colaboradores, periodo: str) -> pd.DataFrame:
+def construir_base_colaboradores(hoja_colaboradores, periodo: str, razon_usuario: str = "ALL") -> pd.DataFrame:
     df = leer_sheet_df(hoja_colaboradores)
     if df.empty:
         return pd.DataFrame(columns=BASE_COLS)
 
-    # Solo promotores/agentes operativos; si no existe cargo, no bloquea.
+    # Filtrar dealer lo más temprano posible para no procesar toda la base en usuarios de socio.
+    if razon_usuario and razon_usuario.upper() != "ALL" and "RAZON SOCIAL" in df.columns:
+        df = df[df["RAZON SOCIAL"].map(normalizar_razon).eq(normalizar_razon(razon_usuario))].copy()
+
+    # Solo personal operativo. Si no existe cargo, no bloquea.
     if "CARGO (ROL)" in df.columns:
         cargo = df["CARGO (ROL)"].astype(str).str.upper()
         df = df[cargo.str.contains("PROMOTOR|AGENTE", na=False)].copy()
 
-    out = pd.DataFrame()
+    if df.empty:
+        return pd.DataFrame(columns=BASE_COLS)
+
+    out = pd.DataFrame(index=df.index)
     out["RAZON SOCIAL"] = df.get("RAZON SOCIAL", "").apply(normalizar_texto) if "RAZON SOCIAL" in df else ""
     out["SUPERVISOR"] = df.get("SUPERVISOR A CARGO", df.get("SUPERVISOR", "")).apply(normalizar_texto) if any(c in df.columns for c in ["SUPERVISOR A CARGO", "SUPERVISOR"]) else ""
     out["COORDINADOR"] = df.get("COORDINADOR", "").apply(normalizar_texto) if "COORDINADOR" in df else ""
@@ -141,7 +187,7 @@ def construir_base_colaboradores(hoja_colaboradores, periodo: str) -> pd.DataFra
     return out
 
 
-def leer_asistencia(hoja_asistencia) -> tuple[pd.DataFrame, list[str]]:
+def leer_asistencia(hoja_asistencia, periodo: str, razon_usuario: str = "ALL") -> tuple[pd.DataFrame, list[str]]:
     headers = asegurar_headers_asistencia(hoja_asistencia)
     df = leer_sheet_df(hoja_asistencia)
     if df.empty:
@@ -151,20 +197,29 @@ def leer_asistencia(hoja_asistencia) -> tuple[pd.DataFrame, list[str]]:
             df[c] = ""
     if "ROW_SHEET" not in df.columns:
         df["ROW_SHEET"] = ""
+
     df["DNI"] = df["DNI"].apply(normalizar_dni)
     df["FECHA_ALTA"] = df["FECHA_ALTA"].apply(fecha_str)
     df["PERIODO"] = df["PERIODO"].apply(normalizar_texto)
+
+    # Filtrar periodo y dealer temprano para bajar memoria.
+    df = df[df["PERIODO"].astype(str).eq(periodo)].copy()
+    if razon_usuario and razon_usuario.upper() != "ALL" and "RAZON SOCIAL" in df.columns:
+        df = df[df["RAZON SOCIAL"].map(normalizar_razon).eq(normalizar_razon(razon_usuario))].copy()
+
     df["KEY"] = df["DNI"].astype(str) + "|" + df["FECHA_ALTA"].astype(str) + "|" + df["PERIODO"].astype(str)
     return df, headers
 
 
-def vista_live(hoja_colaboradores, hoja_asistencia, periodo: str) -> tuple[pd.DataFrame, pd.DataFrame, list[str]]:
-    base = construir_base_colaboradores(hoja_colaboradores, periodo)
-    asis, headers = leer_asistencia(hoja_asistencia)
-    asis_p = asis[asis["PERIODO"].astype(str).eq(periodo)].copy()
+def vista_live(hoja_colaboradores, hoja_asistencia, periodo: str, razon_usuario: str = "ALL") -> tuple[pd.DataFrame, pd.DataFrame, list[str]]:
+    base = construir_base_colaboradores(hoja_colaboradores, periodo, razon_usuario)
+    asis_p, headers = leer_asistencia(hoja_asistencia, periodo, razon_usuario)
 
     cols_marca = [c for c in DAY_COLS if c in asis_p.columns]
-    marcas = asis_p[["KEY", "ROW_SHEET"] + cols_marca].drop_duplicates("KEY", keep="last") if not asis_p.empty else pd.DataFrame(columns=["KEY", "ROW_SHEET"] + cols_marca)
+    if not asis_p.empty:
+        marcas = asis_p[["KEY", "ROW_SHEET"] + cols_marca].drop_duplicates("KEY", keep="last")
+    else:
+        marcas = pd.DataFrame(columns=["KEY", "ROW_SHEET"] + cols_marca)
 
     live = base.merge(marcas, on="KEY", how="left", suffixes=("", "_ASIS"))
     for c in DAY_COLS:
@@ -174,7 +229,7 @@ def vista_live(hoja_colaboradores, hoja_asistencia, periodo: str) -> tuple[pd.Da
     if "ROW_SHEET" not in live.columns:
         live["ROW_SHEET"] = ""
     live["ROW_SHEET"] = live["ROW_SHEET"].fillna("")
-    return live, asis, headers
+    return live, asis_p, headers
 
 
 def opciones(df, col):
@@ -193,7 +248,7 @@ def filtrar(df, razon, sup, coord, dep, prov, estado):
     return r
 
 
-def editable_en_fecha(row, fecha_sel: date, marca_abm=False):
+def editable_en_fecha(row, fecha_sel: date):
     alta = parse_fecha(row.get("FECHA_ALTA"))
     cese = parse_fecha(row.get("FECHA_CESE"))
     estado = normalizar_texto(row.get("ESTADO")).upper()
@@ -225,6 +280,14 @@ def fecha_desde_periodo_dia(periodo: str, dia: int) -> date:
     return date(y, m, min(int(dia), ultimo))
 
 
+def _letra_col(n):
+    out = ""
+    while n:
+        n, rem = divmod(n - 1, 26)
+        out = chr(65 + rem) + out
+    return out
+
+
 def guardar_sustento(row, periodo, dia, archivo):
     if archivo is None:
         return ""
@@ -250,7 +313,6 @@ def guardar_marca(hoja_asistencia, row: pd.Series, headers: list[str], col_dia: 
     headers = [normalizar_texto(h).upper() for h in headers]
     if not headers:
         headers = ALL_COLS.copy()
-    # Asegurar columnas mínimas en memoria; no crear columnas al abrir, solo al guardar si no existe día crítico.
     if col_dia not in headers:
         raise Exception(f"La hoja Asistencia no tiene la columna {col_dia}. Revisa cabecera de la hoja.")
 
@@ -260,6 +322,7 @@ def guardar_marca(hoja_asistencia, row: pd.Series, headers: list[str], col_dia: 
 
     if row_sheet.isdigit():
         hoja_asistencia.update_acell(f"{col_letra}{int(row_sheet)}", marca)
+        limpiar_cache_asistencia()
         return "actualizado"
 
     nueva = []
@@ -271,26 +334,17 @@ def guardar_marca(hoja_asistencia, row: pd.Series, headers: list[str], col_dia: 
         else:
             nueva.append("")
     hoja_asistencia.append_row(nueva, value_input_option="USER_ENTERED")
+    limpiar_cache_asistencia()
     return "nuevo"
-
-
-def _letra_col(n):
-    out = ""
-    while n:
-        n, rem = divmod(n - 1, 26)
-        out = chr(65 + rem) + out
-    return out
 
 
 def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, razon=None):
     st.markdown("<span class='wow-section-title'>🗓️ Presencialidad Dealer</span>", unsafe_allow_html=True)
 
     usuario_razon = normalizar_texto(razon if razon is not None else st.session_state.get("razon", "ALL"))
-    rol = normalizar_texto(st.session_state.get("rol", "")).lower()
     es_dealer = usuario_razon and usuario_razon.upper() != "ALL"
 
-    periodos = periodos_disponibles()
-    periodo = st.selectbox("PERIODO", periodos, index=0, key="asis_periodo")
+    periodo = st.selectbox("PERIODO", periodos_disponibles(), index=0, key="asis_periodo")
     y, m = map(int, periodo.split("-"))
     dias = list(range(1, calendar.monthrange(y, m)[1] + 1))
     dia_default = hoy_lima().day if periodo == periodo_lima() and hoy_lima().day in dias else 1
@@ -298,24 +352,26 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
     col_dia = f"DIA_{dia}"
     fecha_sel = fecha_desde_periodo_dia(periodo, dia)
 
-    st.info(f"📅 Periodo: **{periodo}** | Día seleccionado: **{col_dia}** | La información se lee al abrir/refrescar la página. Solo se escribe al presionar **Guardar Presencialidad**. A-BM permite sustento histórico.")
+    st.info(
+        f"📅 Periodo: **{periodo}** | Día seleccionado: **{col_dia}** | "
+        "La información se lee al abrir/refrescar la página. "
+        "Solo se escribe al presionar **Guardar Presencialidad**. "
+        "A-BM permite sustento histórico."
+    )
 
     with st.spinner("Cargando información desde Drive…"):
         try:
-            df_live, df_asis, headers = vista_live(hoja_colaboradores, hoja_asistencia, periodo)
+            df_live, _df_asis, headers = vista_live(hoja_colaboradores, hoja_asistencia, periodo, usuario_razon if es_dealer else "ALL")
         except Exception as e:
             st.error(f"No se pudo cargar presencialidad: {e}")
             return
 
-    if es_dealer:
-        df_live = df_live[df_live["RAZON SOCIAL"].map(normalizar_razon).eq(normalizar_razon(usuario_razon))].copy()
-
     if df_live.empty:
-        st.warning("No hay colaboradores para mostrar con este usuario/periodo. Revisa que la razón social del usuario coincida con la hoja colaboradores.")
+        st.warning("No hay colaboradores para mostrar con este usuario/periodo. Revisa razón social, estado o datos de colaboradores.")
         return
 
-    # Filtros solo en memoria.
-    with st.form("form_filtros_presencialidad"):
+    # Filtros dentro de un form para que cambiar combos NO recargue todo cada vez.
+    with st.form("form_filtros_presencialidad", clear_on_submit=False):
         c1, c2, c3, c4, c5, c6 = st.columns(6)
         with c1:
             op_r = opciones(df_live, "RAZON SOCIAL")
@@ -330,14 +386,14 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
             f_prov = st.selectbox("Provincia", opciones(df_live, "PROVINCIA"), index=0)
         with c6:
             f_estado = st.selectbox("Estado", opciones(df_live, "ESTADO"), index=0)
-        st.form_submit_button("🔎 Aplicar filtros", use_container_width=True)
+        aplicar = st.form_submit_button("🔎 Aplicar filtros", use_container_width=True)
 
+    # El form evita escrituras y cache evita releer Drive por cada interacción.
     df_f = filtrar(df_live, f_razon if not es_dealer else "TODOS", f_sup, f_coord, f_dep, f_prov, f_estado)
     if df_f.empty:
         st.warning("No hay registros con los filtros seleccionados.")
         return
 
-    # Filas editables: marca normal solo día actual. A-BM se permite para cualquier día, pero la fila debe ser válida para esa fecha.
     df_f["_EDITABLE_FECHA"] = df_f.apply(lambda r: editable_en_fecha(r, fecha_sel), axis=1)
     df_editor_base = df_f[df_f["_EDITABLE_FECHA"]].copy()
 
@@ -350,7 +406,7 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
     if len(df_editor_base) > MAX_FILAS_EDITOR:
         st.warning(f"⚠️ Hay {len(df_editor_base)} registros. Se muestran {MAX_FILAS_EDITOR} por vista para proteger el navegador. No borra datos.")
         paginas = list(range(1, (len(df_editor_base) + MAX_FILAS_EDITOR - 1) // MAX_FILAS_EDITOR + 1))
-        pag = st.selectbox("Bloque de registros", paginas, index=0)
+        pag = st.selectbox("Bloque de registros", paginas, index=0, key="asis_bloque")
         ini = (int(pag) - 1) * MAX_FILAS_EDITOR
         df_editor_base = df_editor_base.iloc[ini:ini + MAX_FILAS_EDITOR].copy()
 
@@ -367,7 +423,7 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
     editado = st.data_editor(
         df_editor,
         use_container_width=True,
-        height=min(520, 70 + len(df_editor) * 34),
+        height=min(500, 70 + len(df_editor) * 32),
         hide_index=True,
         disabled=[c for c in editor_cols if c != col_dia],
         column_config={
@@ -375,7 +431,7 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
             "ROW_SHEET": st.column_config.TextColumn("FILA", disabled=True, width="small"),
         },
         num_rows="fixed",
-        key="editor_presencialidad_live",
+        key=f"editor_presencialidad_{periodo}_{col_dia}_{usuario_razon}",
     )
 
     df_edit = pd.DataFrame(editado).fillna("")
@@ -390,14 +446,13 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
     archivo_bm = None
     if necesita_sustento:
         st.warning(f"Se detectó A-BM en {len(necesita_sustento)} registro(s). Adjunta sustento para guardar.")
-        archivo_bm = st.file_uploader("Adjuntar sustento de Baja Médica (PDF o imagen)", type=["pdf", "png", "jpg", "jpeg"], key="file_abm")
+        archivo_bm = st.file_uploader("Adjuntar sustento de Baja Médica (PDF o imagen)", type=["pdf", "png", "jpg", "jpeg"], key=f"file_abm_{periodo}_{dia}")
 
-    if st.button("💾 Guardar Presencialidad", key="btn_guardar_presencialidad"):
+    if st.button("💾 Guardar Presencialidad", key=f"btn_guardar_presencialidad_{periodo}_{dia}"):
         if not cambios:
             st.info("No hay cambios para guardar.")
             return
 
-        # Validación: marcas normales solo hoy. A-BM puede ser cualquier día del periodo.
         if fecha_sel != hoy_lima():
             no_abm = [x for x in cambios if x[2] != "A-BM"]
             if no_abm:
@@ -420,14 +475,16 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
         except Exception as e:
             st.error(f"Error guardando presencialidad: {e}")
 
-    with st.expander("📊 Ver espejo mensual / descarga"):
+    with st.expander("📊 Ver espejo mensual / descarga", expanded=False):
         cols_espejo = DISPLAY_COLS + [c for c in DAY_COLS if c in df_f.columns]
         st.dataframe(df_f[cols_espejo].copy(), use_container_width=True, hide_index=True, height=420)
 
+    # MUY IMPORTANTE: no cargar jerarquía automáticamente porque revienta memoria en Render Free.
     if registro_mod is not None:
         st.divider()
         st.markdown("<span class='wow-section-title'>📋 Matriz de jerarquía</span>", unsafe_allow_html=True)
-        try:
-            registro_mod.mostrar_tabla(hoja_colaboradores, razon)
-        except Exception as e:
-            st.warning(f"No se pudo cargar la matriz de jerarquía: {e}")
+        if st.button("📥 Cargar / descargar matriz de jerarquía", key="btn_cargar_matriz_jerarquia"):
+            try:
+                registro_mod.mostrar_tabla(hoja_colaboradores, razon)
+            except Exception as e:
+                st.warning(f"No se pudo cargar la matriz de jerarquía: {e}")
