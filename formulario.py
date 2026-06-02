@@ -1,4 +1,4 @@
-# FORMULARIO_CARGOS_DIRECTOS_CEX_20260601
+# FIX_FORMULARIO_WOW_TEL_CANAL_SUBCANAL_DEFAULT_20260602
 import re
 from datetime import datetime, timedelta
 
@@ -465,24 +465,46 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             razon = razon_usuario
             st.text_input("RAZÓN SOCIAL", value=razon, disabled=True, key=k("razon_dealer"))
 
-        # Regla comercial:
-        # - WOW TEL pertenece a VENTAS DIRECTAS. Apenas se selecciona, el canal queda DIRECTO.
-        # - Los demás socios pertenecen a VENTAS INDIRECTAS.
+        # Regla comercial estable, sin cambiar la lógica inicial:
+        # - WOW TEL siempre viaja como VENTAS DIRECTAS. No debe permitir que el valor anterior
+        #   de sesión deje el SUB CANAL como VENTAS INDIRECTAS/OUTBOUND.
+        # - Los demás socios siguen como VENTAS INDIRECTAS y mantienen SUB CANAL original.
         razon_norm = limpiar_texto(razon).upper()
-        if razon_norm == "WOW TEL":
-            canal_options = ["VENTAS DIRECTAS"]
-        elif razon_norm:
-            canal_options = ["VENTAS INDIRECTAS"]
-        else:
-            canal_options = ["VENTAS INDIRECTAS", "VENTAS DIRECTAS"]
 
-        canal = st.selectbox("CANAL", canal_options, key=k("canal"))
-        if canal == "VENTAS DIRECTAS":
-            subcanal = st.selectbox("SUB CANAL", ["VENTAS DIRECTAS"], key=k("subcanal"))
+        if razon_norm == "WOW TEL":
+            canal = "VENTAS DIRECTAS"
+            subcanal = "VENTAS DIRECTAS"
             tipo_gestion = ""
-        else:
-            subcanal = st.selectbox("SUB CANAL", ["VENTAS INDIRECTAS", "OUTBOUND"], key=k("subcanal"))
+            # Se muestra fijo para evitar que Streamlit conserve valores anteriores del selectbox.
+            st.text_input("CANAL", value=canal, disabled=True, key=k("canal_wow_fijo"))
+            st.text_input("SUB CANAL", value=subcanal, disabled=True, key=k("subcanal_wow_fijo"))
+
+        elif razon_norm:
+            canal = "VENTAS INDIRECTAS"
+            st.text_input("CANAL", value=canal, disabled=True, key=k("canal_indirecto_fijo"))
+            subcanal = st.selectbox(
+                "SUB CANAL",
+                ["VENTAS INDIRECTAS", "OUTBOUND"],
+                index=0,
+                key=k("subcanal_indirecto"),
+            )
             tipo_gestion = "CAMPO"
+
+        else:
+            canal = st.selectbox("CANAL", ["VENTAS INDIRECTAS", "VENTAS DIRECTAS"], key=k("canal"))
+            if canal == "VENTAS DIRECTAS":
+                subcanal = "VENTAS DIRECTAS"
+                st.text_input("SUB CANAL", value=subcanal, disabled=True, key=k("subcanal_directo_fijo"))
+                tipo_gestion = ""
+            else:
+                subcanal = st.selectbox(
+                    "SUB CANAL",
+                    ["VENTAS INDIRECTAS", "OUTBOUND"],
+                    index=0,
+                    key=k("subcanal_indirecto_sin_razon"),
+                )
+                tipo_gestion = "CAMPO"
+
         # TIPO_GESTION no se muestra en pantalla.
         # Regla: VENTAS INDIRECTAS viaja como CAMPO; VENTAS DIRECTAS viaja vacío.
         region = st.selectbox("REGIÓN", ["", "CENTRAL", "NORORIENTE", "SUR"], key=k("region"))
@@ -496,8 +518,6 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
                 "Promotor D2D",
                 "Supervisor D2D",
                 "Coordinador D2D",
-                "Agente CEX",
-                "Lider CEX",
             ]
         else:
             opciones_cargo = [
