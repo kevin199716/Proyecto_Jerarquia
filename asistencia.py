@@ -1,5 +1,5 @@
 """
-FIX_MEMORIA_RENDER_EDITOR_FORM_SIN_POPUP_INMEDIATO_20260602
+FIX_GUARDADO_BATCH_ABM_NO_PIERDE_CAMBIOS_20260602
 asistencia.py — Presencialidad Dealer
 Cambios aplicados:
   1. Módulo visible como Presencialidad Dealer desde app_maestra_vendedores.py.
@@ -65,7 +65,7 @@ KEY_LOAD_TS = "asis_load_timestamp"
 
 CACHE_TTL = 600
 # Mantener la vista amplia original. Solo pagina si realmente supera este límite.
-MAX_FILAS_EDITOR = 50
+MAX_FILAS_EDITOR = 200
 
 MARCAS_PRESENCIALIDAD = ["", "A", "A-BM", "A-VAC", "NA-SA", "NA-CA"]
 LEYENDA_MARCAS = {
@@ -668,69 +668,176 @@ def actualizar_cache_con_editado(df_editado: pd.DataFrame, col_hoy: str) -> None
 
 
 # =====================================================
-# MODAL DE CARGA DE SUSTENTO OBLIGATORIO (A-BM)
+# GUARDADO PENDIENTE + MODAL DE SUSTENTO OBLIGATORIO (A-BM)
 # =====================================================
-@st.dialog("📋 Carga de Sustento Obligatorio: Baja Médica")
-def mostrar_dialogo_sustento(dni, nombre, row_sheet, col_hoy, df_editor):
-    st.write(f"Colaborador: **{nombre}** (DNI: {dni})")
-    st.warning("⚠️ Para registrar **A-BM (Baja Médica)**, es obligatorio subir el sustento o certificado médico correspondiente.")
-    
-    archivo = st.file_uploader(
-        "Subir certificado médico (PDF o Imagen)",
-        type=["pdf", "png", "jpg", "jpeg"],
-        key=f"file_uploader_{dni}"
-    )
-    
-    st.markdown("<div style='height: 10px;'></div>", unsafe_allow_html=True)
-    col_c1, col_c2 = st.columns(2)
-    with col_c1:
-        guardar = st.button("✅ Subir y Validar", use_container_width=True, key=f"btn_val_sustento_{dni}")
-    with col_c2:
-        cancelar = st.button("❌ Cancelar y Revertir", use_container_width=True, key=f"btn_canc_sustento_{dni}")
-        
-    if guardar:
-        if not archivo:
-            st.error("❌ Debes seleccionar y subir un archivo válido para registrar la baja médica.")
-        else:
-            if "sustentos_pendientes" not in st.session_state:
-                st.session_state["sustentos_pendientes"] = {}
-                
-            st.session_state["sustentos_pendientes"][dni] = {
-                "nombre_archivo": archivo.name,
-                "contenido_bytes": archivo.read(),
-                "mime_type": archivo.type,
-                "dni": dni,
-                "nombre": nombre,
-                "row_sheet": row_sheet
-            }
-            
-            # Forzar la marcación "A-BM" en el caché del DataFrame actual para evitar que se pierda en el rerun
-            if KEY_DF_TOTAL in st.session_state:
-                df_total = st.session_state[KEY_DF_TOTAL].copy()
-                periodo = periodo_actual()
-                mask = (df_total["DNI"].astype(str) == str(dni)) & (df_total["PERIODO"].astype(str) == str(periodo))
-                if mask.any():
-                    df_total.loc[mask, col_hoy] = "A-BM"
-                    st.session_state[KEY_DF_TOTAL] = df_total.copy()
-                    
-            st.success("✅ Sustento cargado y validado en memoria. Se subirá a Drive al guardar la asistencia.")
-            time.sleep(1.2)
+def _asegurar_hoja_sustentos():
+    """Crea/normaliza cabecera de Sustentos_Bajas sin borrar filas históricas."""
+    hoja = obtener_o_crear_worksheet("maestra_vendedores", "Sustentos_Bajas", COLUMNAS_SUSTENTOS_BM)
+    try:
+        headers = [limpiar_texto(x).upper() for x in (hoja.row_values(1) or [])]
+        if headers != COLUMNAS_SUSTENTOS_BM:
+            hoja.update("A1:J1", [COLUMNAS_SUSTENTOS_BM], value_input_option="USER_ENTERED")
+    except Exception:
+        # No detenemos la presencialidad si solo falla la normalización de cabecera.
+        pass
+    return hoja
+
+
+def _subir_sustentos_pendientes(pending: dict) -> int:
+    """Sube sustentos A-BM ya cargados en memoria y registra log homologado."""
+    abm_rows = pending.get("abm_rows", []) or []
+    periodo = pending.get("periodo", periodo_actual())
+    dia = int(pending.get("dia", dia_actual()))
+    fecha_asistencia = str(fecha_pd(periodo, dia))
+    sustentos = st.session_state.get("sustentos_pendientes", {}) or {}
+
+    filas = []
+    usuario = st.session_state.get("usuario", "desconocido")
+    tz_lima = pytz.timezone("America/Lima")
+    fecha_subida = datetime.now(tz_lima).strftime("%Y-%m-%d %H:%M:%S")
+
+    for row in abm_rows:
+        dni = normalizar_dni(row.get("DNI", ""))
+        datos = sustentos.get(dni)
+        if not datos:
+            continue
+        mime = datos.get("mime_type") or "application/octet-stream"
+        nombre_original = datos.get("nombre_archivo") or "sustento"
+        ext = os.path.splitext(nombre_original)[1].lower().replace(".", "")
+        if not ext:
+            ext = "pdf" if "pdf" in mime else "jpg"
+        nombre_archivo = f"sustento_ABM_{dni}_{periodo}_DIA{dia}_{datetime.now(tz_lima).strftime('%Y%m%d_%H%M%S')}.{ext}"
+        link = subir_archivo_drive(
+            nombre_archivo=nombre_archivo,
+            contenido_bytes=datos.get("contenido_bytes", b""),
+            mime_type=mime,
+        )
+        filas.append([
+            periodo,
+            f"DIA_{dia}",
+            fecha_asistencia,
+            dni,
+            row.get("NOMBRE", datos.get("nombre", "")),
+            row.get("RAZON SOCIAL", ""),
+            "A-BM",
+            link,
+            fecha_subida,
+            usuario,
+        ])
+
+    if filas:
+        hoja_sustentos = _asegurar_hoja_sustentos()
+        hoja_sustentos.append_rows(filas, value_input_option="USER_ENTERED")
+    return len(filas)
+
+
+def _ejecutar_guardado_pendiente(hoja_asistencia) -> tuple[int, int]:
+    """Guarda TODAS las marcas pendientes y los sustentos sin perder cambios previos."""
+    pending = st.session_state.get("asis_guardado_pendiente") or {}
+    updates = pending.get("updates", []) or []
+    col_hoy = pending.get("col_hoy", f"DIA_{dia_actual()}")
+    df_records = pending.get("df_editado_records", []) or []
+
+    if not updates:
+        return 0, 0
+
+    # Primero registra sustentos A-BM homologados. Si falla, no tocamos asistencia.
+    total_sustentos = _subir_sustentos_pendientes(pending)
+
+    for i in range(0, len(updates), 100):
+        hoja_asistencia.batch_update(updates[i:i + 100], value_input_option="USER_ENTERED")
+        if i + 100 < len(updates):
+            time.sleep(0.10)
+
+    if df_records:
+        try:
+            actualizar_cache_con_editado(pd.DataFrame(df_records), col_hoy)
+        except Exception:
+            # Si la actualización del cache falla, limpiamos para obligar relectura posterior.
+            for k in [KEY_DF_TOTAL, KEY_DF_ORIGINAL, KEY_HEADERS, KEY_LOADED, KEY_LOAD_TS]:
+                st.session_state.pop(k, None)
+
+    # Limpieza controlada: solo después de guardar correctamente todo el lote.
+    st.session_state.pop("asis_guardado_pendiente", None)
+    st.session_state.pop("asis_dialog_abm_activo", None)
+    st.session_state["sustentos_pendientes"] = {}
+    return len(updates), total_sustentos
+
+
+@st.dialog("📋 Sustento obligatorio - A-BM")
+def mostrar_dialogo_sustento_guardado(hoja_asistencia):
+    """Popup para adjuntar sustento y guardar TODO el lote pendiente."""
+    pending = st.session_state.get("asis_guardado_pendiente") or {}
+    abm_rows = pending.get("abm_rows", []) or []
+    sustentos = st.session_state.get("sustentos_pendientes", {}) or {}
+
+    faltantes = [r for r in abm_rows if normalizar_dni(r.get("DNI", "")) not in sustentos]
+    if not faltantes:
+        st.success("✅ Sustentos completos. Guardando presencialidad...")
+        try:
+            guardados, sust = _ejecutar_guardado_pendiente(hoja_asistencia)
+            st.session_state["asis_guardado_msg"] = f"✅ {guardados} registro(s) guardado(s) correctamente. Sustentos A-BM registrados: {sust}."
             st.rerun()
-            
+        except Exception as e:
+            st.error(f"❌ Error guardando presencialidad: {e}")
+        return
+
+    row = faltantes[0]
+    dni = normalizar_dni(row.get("DNI", ""))
+    nombre = limpiar_texto(row.get("NOMBRE", ""))
+    periodo = pending.get("periodo", periodo_actual())
+    dia = int(pending.get("dia", dia_actual()))
+
+    st.markdown(f"**Colaborador:** {nombre}  ")
+    st.markdown(f"**DNI:** {dni} | **Periodo:** {periodo} | **Día:** DIA_{dia}")
+    st.warning("Para registrar **A-BM (Baja Médica)** es obligatorio adjuntar PDF o imagen. Sin sustento no se guardará el lote.")
+
+    archivo = st.file_uploader(
+        "Subir certificado médico (PDF o imagen)",
+        type=["pdf", "png", "jpg", "jpeg"],
+        key=f"file_abm_lote_{dni}_{periodo}_{dia}",
+    )
+
+    if archivo is not None:
+        st.success(f"✅ Documento cargado correctamente: {archivo.name}")
+
+    c1, c2 = st.columns(2)
+    with c1:
+        subir = st.button("✅ Adjuntar y guardar todo", use_container_width=True, key=f"btn_abm_guardar_todo_{dni}")
+    with c2:
+        cancelar = st.button("❌ Cancelar lote", use_container_width=True, key=f"btn_abm_cancelar_lote_{dni}")
+
+    if subir:
+        if archivo is None:
+            st.error("❌ Debes adjuntar el sustento para continuar.")
+            return
+        st.session_state.setdefault("sustentos_pendientes", {})[dni] = {
+            "nombre_archivo": archivo.name,
+            "contenido_bytes": archivo.getvalue(),
+            "mime_type": archivo.type or "application/octet-stream",
+            "dni": dni,
+            "nombre": nombre,
+        }
+        # Si todavía hay más A-BM sin sustento, vuelve a abrir el popup para el siguiente.
+        pendientes_restantes = [r for r in abm_rows if normalizar_dni(r.get("DNI", "")) not in st.session_state.get("sustentos_pendientes", {})]
+        if pendientes_restantes:
+            st.info(f"Sustento registrado. Faltan {len(pendientes_restantes)} baja(s) médica(s) por sustentar.")
+            st.rerun()
+        else:
+            with st.spinner("Guardando asistencia y sustentos..."):
+                try:
+                    guardados, sust = _ejecutar_guardado_pendiente(hoja_asistencia)
+                    st.session_state["asis_guardado_msg"] = f"✅ {guardados} registro(s) guardado(s) correctamente. Sustentos A-BM registrados: {sust}."
+                    st.rerun()
+                except Exception as e:
+                    st.error(f"❌ Error guardando presencialidad: {e}")
+
     if cancelar:
-        # Revertir la selección de A-BM en el data editor
-        if "editor_presencialidad_dia_actual" in st.session_state:
-            edited_rows = st.session_state["editor_presencialidad_dia_actual"].get("edited_rows", {})
-            for r_str in list(edited_rows.keys()):
-                r_idx = int(r_str)
-                if r_idx < len(df_editor):
-                    row_dni = df_editor.iloc[r_idx]["DNI"]
-                    if row_dni == dni:
-                        # Revertimos a vacío
-                        edited_rows[r_str][col_hoy] = ""
-                        
-        st.warning("Marcación revertida.")
-        time.sleep(1.2)
+        st.session_state.pop("asis_guardado_pendiente", None)
+        st.session_state.pop("asis_dialog_abm_activo", None)
+        # No borramos otros estados del módulo, solo el lote pendiente.
+        st.warning("Lote cancelado. No se guardó ningún cambio de este intento.")
+        time.sleep(0.8)
         st.rerun()
 
 
@@ -750,7 +857,7 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
 
     st.info(
         f"📅 Periodo: **{periodo}** | Día editable: **{col_hoy}** | "
-        "Vista optimizada para Render: se carga en memoria y solo se escribe al presionar Guardar Presencialidad."
+        "La vista trabaja desde la hoja Asistencia. Los cambios se guardan solo al presionar Guardar Presencialidad."
     )
 
     cargar_cache_desde_drive(hoja_asistencia)
@@ -868,120 +975,99 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
         df_editor = df_editor_base[columnas_editor].copy().fillna("").replace({"None": "", "nan": ""})
         df_editor[col_hoy] = df_editor[col_hoy].apply(limpiar_marca)
 
-        # La detección A-BM se hace al presionar Guardar para evitar rerun por cada celda.
+        # Si quedó un lote pendiente por A-BM, reabre el popup sin perder los cambios.
+        if st.session_state.get("asis_guardado_pendiente") and st.session_state.get("asis_dialog_abm_activo"):
+            mostrar_dialogo_sustento_guardado(hoja_asistencia)
 
         disabled_cols = [col for col in df_editor.columns if col != col_hoy]
-        # Mantengo ROW_SHEET visible como FILA técnica para evitar el error React #185
-        # que aparece a veces cuando se oculta una columna usada para guardar.
         column_config = {
             "ROW_SHEET": st.column_config.NumberColumn("FILA", width="small", disabled=True),
             col_hoy: st.column_config.SelectboxColumn(col_hoy, options=MARCAS_PRESENCIALIDAD, width="small"),
         }
 
-        with st.form("form_guardar_presencialidad_estable", clear_on_submit=False):
+        # FORMULARIO: evita rerun por cada selección simple (A, A-VAC, NA-SA, NA-CA).
+        # La pantalla solo procesa cuando se presiona Guardar Presencialidad.
+        with st.form("form_editor_presencialidad_estable", clear_on_submit=False):
             editado = st.data_editor(
                 df_editor,
                 use_container_width=True,
-                height=min(420, 50 + len(df_editor) * 30),
+                height=min(460, 50 + len(df_editor) * 32),
                 hide_index=True,
                 disabled=disabled_cols,
                 column_config=column_config,
                 num_rows="fixed",
-                key="editor_presencialidad_dia_actual",
+                key="editor_presencialidad_dia_actual_form",
             )
-
             guardar_pres = st.form_submit_button("💾 Guardar Presencialidad", use_container_width=True)
 
         if guardar_pres:
-            with st.spinner("Guardando en Google Drive…"):
-                try:
-                    df_editado = normalizar_para_guardado(pd.DataFrame(editado).fillna(""), col_hoy)
-                    if df_editado.empty or "ROW_SHEET" not in df_editado.columns:
-                        st.warning("No se pudo leer la tabla del editor. Recarga la página.")
+            try:
+                df_editado = normalizar_para_guardado(pd.DataFrame(editado).fillna(""), col_hoy)
+                if df_editado.empty or "ROW_SHEET" not in df_editado.columns:
+                    st.warning("No se pudo leer la tabla del editor. Recarga la página.")
+                else:
+                    updates = preparar_updates(
+                        df_editado=df_editado,
+                        df_original=df_original,
+                        headers=headers,
+                        col_hoy=col_hoy,
+                    )
+
+                    if not updates:
+                        st.info("ℹ️ No se detectaron cambios para guardar.")
                     else:
-                        # 1. Validación de seguridad final para marcas A-BM sin sustento
-                        cambios_actuales = st.session_state.get("editor_presencialidad_dia_actual", {}).get("edited_rows", {})
-                        for r_str, cols in cambios_actuales.items():
-                            r_idx = int(r_str)
-                            if col_hoy in cols and cols[col_hoy] == "A-BM":
-                                if r_idx < len(df_editor):
-                                    dni = df_editor.iloc[r_idx]["DNI"]
-                                    if dni not in st.session_state.get("sustentos_pendientes", {}):
-                                        row_data = df_editor.iloc[r_idx]
-                                        mostrar_dialogo_sustento(row_data["DNI"], row_data["NOMBRE"], row_data["ROW_SHEET"], col_hoy, df_editor)
-                                        st.warning("Adjunta el sustento A-BM y vuelve a presionar Guardar Presencialidad.")
-                                        st.stop()
+                        # Detecta A-BM NUEVOS dentro de todo el lote, sin perder las otras marcas.
+                        df_e = normalizar_para_guardado(df_editado, col_hoy)
+                        df_o = normalizar_para_guardado(df_original, col_hoy)
+                        orig_idx = df_o.drop_duplicates(subset=["ROW_SHEET"], keep="last").set_index("ROW_SHEET") if not df_o.empty else pd.DataFrame()
 
-                        # 2. Subida de certificados a Google Drive y registro de auditoría en Sheets
-                        sustentos = st.session_state.get("sustentos_pendientes", {})
-                        if sustentos:
-                            columnas_defecto = [
-                                "PERIODO",
-                                "FECHA_ASISTENCIA",
-                                "DNI",
-                                "NOMBRE",
-                                "RAZON SOCIAL",
-                                "MOTIVO",
-                                "LINK_DOCUMENTO",
-                                "FECHA_SUBIDA",
-                                "USUARIO_REGISTRO"
-                            ]
-                            hoja_sustentos = obtener_o_crear_worksheet("maestra_vendedores", "Sustentos_Bajas", columnas_defecto)
-                            
-                            filas_nuevas = []
-                            user_activo = st.session_state.get("usuario", "desconocido")
-                            tz_lima = pytz.timezone("America/Lima")
-                            timestamp_lima = datetime.now(tz_lima).strftime("%Y-%m-%d %H:%M:%S")
-                            
-                            for dni, datos in list(sustentos.items()):
-                                extension = "pdf" if datos["mime_type"] == "application/pdf" else "jpg"
-                                nombre_archivo_drive = f"sustento_{dni}_{hoy_actual()}.{extension}"
-                                
-                                link_drive = subir_archivo_drive(
-                                    nombre_archivo=nombre_archivo_drive,
-                                    contenido_bytes=datos["contenido_bytes"],
-                                    mime_type=datos["mime_type"]
-                                )
-                                
-                                row_vendedor = df_editor[df_editor["DNI"] == dni].iloc[0]
-                                razon_social = row_vendedor.get("RAZON SOCIAL", "")
-                                
-                                filas_nuevas.append([
-                                    periodo,
-                                    str(hoy_actual()),
-                                    dni,
-                                    datos["nombre"],
-                                    razon_social,
-                                    "A-BM (Baja Médica)",
-                                    link_drive,
-                                    timestamp_lima,
-                                    user_activo
-                                ])
-                            
-                            if filas_nuevas:
-                                hoja_sustentos.append_rows(filas_nuevas, value_input_option="USER_ENTERED")
-                            
-                            # Limpiar memoria de sustentos procesados
-                            st.session_state["sustentos_pendientes"] = {}
+                        abm_rows = []
+                        for _, row in df_e.iterrows():
+                            row_sheet = int(row.get("ROW_SHEET", 0))
+                            nuevo = limpiar_marca(row.get(col_hoy, ""))
+                            anterior = ""
+                            if not orig_idx.empty and row_sheet in orig_idx.index:
+                                anterior = limpiar_marca(orig_idx.loc[row_sheet].get(col_hoy, ""))
+                            if nuevo != anterior and nuevo == "A-BM":
+                                abm_rows.append({
+                                    "ROW_SHEET": row_sheet,
+                                    "DNI": normalizar_dni(row.get("DNI", "")),
+                                    "NOMBRE": limpiar_texto(row.get("NOMBRE", "")),
+                                    "RAZON SOCIAL": limpiar_texto(row.get("RAZON SOCIAL", "")),
+                                })
 
-                        updates = preparar_updates(
-                            df_editado=df_editado,
-                            df_original=df_original,
-                            headers=headers,
-                            col_hoy=col_hoy,
-                        )
-                        if not updates:
-                            st.info("ℹ️ No se detectaron cambios para guardar.")
+                        pendientes_sin_sustento = [
+                            r for r in abm_rows
+                            if normalizar_dni(r.get("DNI", "")) not in st.session_state.get("sustentos_pendientes", {})
+                        ]
+
+                        if pendientes_sin_sustento:
+                            # Guarda TODO el lote: 5 A + 1 A-BM quedan en memoria hasta adjuntar sustento.
+                            st.session_state["asis_guardado_pendiente"] = {
+                                "updates": updates,
+                                "df_editado_records": df_e.to_dict("records"),
+                                "col_hoy": col_hoy,
+                                "periodo": periodo,
+                                "dia": hoy_dia,
+                                "abm_rows": abm_rows,
+                            }
+                            st.session_state["asis_dialog_abm_activo"] = True
+                            mostrar_dialogo_sustento_guardado(hoja_asistencia)
                         else:
-                            for i in range(0, len(updates), 100):
-                                hoja_asistencia.batch_update(updates[i:i + 100], value_input_option="USER_ENTERED")
-                                if i + 100 < len(updates):
-                                    time.sleep(0.10)
-                            actualizar_cache_con_editado(df_editado, col_hoy)
-                            st.session_state["asis_guardado_msg"] = f"✅ Presencialidad guardada. Celdas actualizadas: {len(updates)}"
+                            st.session_state["asis_guardado_pendiente"] = {
+                                "updates": updates,
+                                "df_editado_records": df_e.to_dict("records"),
+                                "col_hoy": col_hoy,
+                                "periodo": periodo,
+                                "dia": hoy_dia,
+                                "abm_rows": abm_rows,
+                            }
+                            with st.spinner("Guardando en Google Drive…"):
+                                guardados, sust = _ejecutar_guardado_pendiente(hoja_asistencia)
+                            st.session_state["asis_guardado_msg"] = f"✅ {guardados} registro(s) guardado(s) correctamente. Sustentos A-BM registrados: {sust}."
                             st.rerun()
-                except Exception as e:
-                    st.error(f"❌ Error guardando presencialidad: {e}")
+            except Exception as e:
+                st.error(f"❌ Error guardando presencialidad: {e}")
 
     if msg := st.session_state.pop("asis_guardado_msg", None):
         st.success(msg)
@@ -1004,19 +1090,9 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
         st.markdown("<span class='wow-section-title'>📋 Registro de Sustentos de Bajas Médicas</span>", unsafe_allow_html=True)
         with st.spinner("Cargando sustentos desde Google Sheets..."):
             try:
-                columnas_defecto = [
-                    "PERIODO",
-                    "FECHA_ASISTENCIA",
-                    "DNI",
-                    "NOMBRE",
-                    "RAZON SOCIAL",
-                    "MOTIVO",
-                    "LINK_DOCUMENTO",
-                    "FECHA_SUBIDA",
-                    "USUARIO_REGISTRO"
-                ]
+                columnas_defecto = COLUMNAS_SUSTENTOS_BM
                 # Obtenemos o creamos la hoja
-                hoja_sustentos = obtener_o_crear_worksheet("maestra_vendedores", "Sustentos_Bajas", columnas_defecto)
+                hoja_sustentos = _asegurar_hoja_sustentos()
                 # Leemos todos los registros
                 datos_sustentos = hoja_sustentos.get_all_records()
                 if not datos_sustentos:
