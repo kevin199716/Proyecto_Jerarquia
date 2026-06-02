@@ -1,4 +1,4 @@
-# FIX_ASISTENCIA_FLUJO_BM_ANTES_GUARDAR_JERARQUIA_ORDENADA_20260602
+# FIX_ASISTENCIA_ESTABLE_FORM_SIN_RERUN_BM_SEGURO_20260602
 # Presencialidad Dealer - 3 bloques:
 # 1) Registrar presencialidad desde hoja Asistencia (rápido)
 # 2) Espejo mensual / trazabilidad por día (solo lectura, bajo demanda)
@@ -692,74 +692,58 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
         editor_version = int(st.session_state.get(reset_key, 0))
         editor_key = f"editor_{periodo}_{dia}_{razon_usuario}_{editor_version}"
 
-        # Flujo operativo:
-        # - El botón Guardar queda visible siempre.
-        # - Si se detecta A-BM sin sustento, se abre popup antes de permitir guardar.
-        df_new = st.data_editor(
-            df_edit,
-            hide_index=True,
-            use_container_width=True,
-            height=min(560, 48 + 34 * len(df_edit)),
-            num_rows="fixed",
-            column_config={
-                col_dia: st.column_config.SelectboxColumn(col_dia, options=marcas, required=False),
-                "FILA": st.column_config.NumberColumn("FILA", disabled=True),
-                "DNI": st.column_config.TextColumn("DNI", disabled=True),
-                "NOMBRE": st.column_config.TextColumn("NOMBRE", disabled=True, width="large"),
-                "RAZON SOCIAL": st.column_config.TextColumn("RAZON SOCIAL", disabled=True),
-                "SUPERVISOR": st.column_config.TextColumn("SUPERVISOR", disabled=True),
-                "COORDINADOR": st.column_config.TextColumn("COORDINADOR", disabled=True),
-                "DEPARTAMENTO": st.column_config.TextColumn("DEPARTAMENTO", disabled=True),
-                "PROVINCIA": st.column_config.TextColumn("PROVINCIA", disabled=True),
-                "ESTADO": st.column_config.TextColumn("ESTADO", disabled=True),
-                "FECHA_ALTA": st.column_config.TextColumn("FECHA_ALTA", disabled=True),
-                "FECHA_CESE": st.column_config.TextColumn("FECHA_CESE", disabled=True),
-                "MES": st.column_config.TextColumn("MES", disabled=True),
-                "PERIODO": st.column_config.TextColumn("PERIODO", disabled=True),
-            },
-            key=editor_key,
-        )
+        # Flujo estable:
+        # - IMPORTANTE: el editor va dentro de st.form.
+        # - Así seleccionar A / A-VAC / A-BM NO vuelve a ejecutar toda la pantalla.
+        # - Solo procesa cuando se presiona Guardar Presencialidad.
+        # - Si hay A-BM sin sustento, abre ventana emergente y bloquea el guardado.
+        with st.form(key=f"form_pres_{periodo}_{dia}_{razon_usuario}_{editor_version}", clear_on_submit=False):
+            df_new = st.data_editor(
+                df_edit,
+                hide_index=True,
+                use_container_width=True,
+                height=min(560, 48 + 34 * len(df_edit)),
+                num_rows="fixed",
+                column_config={
+                    col_dia: st.column_config.SelectboxColumn(col_dia, options=marcas, required=False),
+                    "FILA": st.column_config.NumberColumn("FILA", disabled=True),
+                    "DNI": st.column_config.TextColumn("DNI", disabled=True),
+                    "NOMBRE": st.column_config.TextColumn("NOMBRE", disabled=True, width="large"),
+                    "RAZON SOCIAL": st.column_config.TextColumn("RAZON SOCIAL", disabled=True),
+                    "SUPERVISOR": st.column_config.TextColumn("SUPERVISOR", disabled=True),
+                    "COORDINADOR": st.column_config.TextColumn("COORDINADOR", disabled=True),
+                    "DEPARTAMENTO": st.column_config.TextColumn("DEPARTAMENTO", disabled=True),
+                    "PROVINCIA": st.column_config.TextColumn("PROVINCIA", disabled=True),
+                    "ESTADO": st.column_config.TextColumn("ESTADO", disabled=True),
+                    "FECHA_ALTA": st.column_config.TextColumn("FECHA_ALTA", disabled=True),
+                    "FECHA_CESE": st.column_config.TextColumn("FECHA_CESE", disabled=True),
+                    "MES": st.column_config.TextColumn("MES", disabled=True),
+                    "PERIODO": st.column_config.TextColumn("PERIODO", disabled=True),
+                },
+                key=editor_key,
+            )
+            st.caption("Selecciona las marcas necesarias. La página no procesará cambios hasta presionar Guardar Presencialidad.")
+            guardar_click = st.form_submit_button(
+                f"💾 Guardar Presencialidad",
+                type="primary",
+                use_container_width=True,
+            )
 
+        # Solo se llega aquí con cambios reales cuando se presiona el botón del formulario.
         cambios = []
-        for i in range(len(df_new)):
-            old = limpiar_marca(original[i])
-            new = limpiar_marca(df_new.at[i, col_dia])
-            if old != new:
-                if fecha_sel < hoy_lima() and new != "A-BM":
-                    continue
-                cambios.append((i, old, new, df_new.iloc[i].to_dict()))
-
-        # Si aparece A-BM pendiente, abrir diálogo antes del guardado final.
-        bm_pendiente = None
-        for _, _, new, row_bm in cambios:
-            if new == "A-BM":
-                key_abm = _abm_key(row_bm, periodo, dia)
-                if not st.session_state.get("abm_sustentos", {}).get(key_abm):
-                    bm_pendiente = row_bm
-                    break
-        if bm_pendiente is not None:
-            st.session_state["abm_dialog_data"] = {
-                "periodo": periodo,
-                "dia": dia,
-                "col_dia": col_dia,
-                "row": bm_pendiente,
-            }
-            _abrir_dialogo_abm(bm_pendiente, periodo, dia, reset_key)
-
-        if cambios:
-            resumen = ", ".join([f"{c[3].get('DNI','')}→{c[2]}" for c in cambios[:8]])
-            st.markdown(f"<div class='okbox'>📝 Cambios detectados: {resumen}</div>", unsafe_allow_html=True)
-        else:
-            st.caption(f"✔ Sin cambios — edita la columna {col_dia} para registrar presencialidad.")
-
-        guardar_click = st.button(
-            f"💾 Guardar Presencialidad" + (f" ({len(cambios)} cambios)" if cambios else ""),
-            type="primary",
-            use_container_width=True,
-            disabled=False,
-        )
-
         if guardar_click:
+            for i in range(len(df_new)):
+                old = limpiar_marca(original[i])
+                new = limpiar_marca(df_new.at[i, col_dia])
+                if old != new:
+                    if fecha_sel < hoy_lima() and new != "A-BM":
+                        continue
+                    cambios.append((i, old, new, df_new.iloc[i].to_dict()))
+
+            if cambios:
+                resumen = ", ".join([f"{c[3].get('DNI','')}→{c[2]}" for c in cambios[:8]])
+                st.markdown(f"<div class='okbox'>📝 Cambios detectados: {resumen}</div>", unsafe_allow_html=True)
+
             bm = [c for c in cambios if c[2] == "A-BM"]
             pendientes_bm = []
             for _, _, _, row_bm in bm:
@@ -770,6 +754,8 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
             if not cambios:
                 st.info("No hay cambios para guardar. Selecciona una marca en la columna del día y vuelve a presionar Guardar Presencialidad.")
             elif pendientes_bm:
+                # Guardamos temporalmente los cambios para que no se pierdan mientras se adjunta el sustento.
+                st.session_state["asis_cambios_pendientes"] = cambios
                 row_bm = pendientes_bm[0]
                 st.session_state["abm_dialog_data"] = {
                     "periodo": periodo,
@@ -777,7 +763,7 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                     "col_dia": col_dia,
                     "row": row_bm,
                 }
-                st.error("Hay A-BM sin sustento. Adjunta el documento en la ventana emergente y luego vuelve a presionar Guardar Presencialidad.")
+                st.error("Hay A-BM sin sustento. Adjunta el documento en la ventana emergente. Sin documento NO se guarda A-BM.")
                 _abrir_dialogo_abm(row_bm, periodo, dia, reset_key)
             else:
                 ok, err = 0, []
@@ -799,12 +785,51 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                     for _, _, new, row in cambios:
                         if new == "A-BM":
                             st.session_state.get("abm_sustentos", {}).pop(_abm_key(row, periodo, dia), None)
+                    st.session_state.pop("asis_cambios_pendientes", None)
                     st.session_state[reset_key] = int(st.session_state.get(reset_key, 0)) + 1
                     limpiar_cache_asistencia()
                     st.success(f"✅ Se guardaron {ok} marcaciones correctamente.")
                     st.rerun()
                 for e in err:
                     st.error(e)
+        else:
+            st.caption(f"✔ Edita la columna {col_dia} y presiona Guardar Presencialidad.")
+
+        # Si hay cambios pendientes por A-BM, permitir guardarlos después de cargar sustento.
+        pendientes_guardado = st.session_state.get("asis_cambios_pendientes", [])
+        if pendientes_guardado:
+            faltan = []
+            for _, _, new, row in pendientes_guardado:
+                if new == "A-BM" and not st.session_state.get("abm_sustentos", {}).get(_abm_key(row, periodo, dia)):
+                    faltan.append(row)
+            if faltan:
+                st.warning("Hay A-BM pendiente de sustento. Carga el documento en la ventana emergente y luego confirma el guardado.")
+                if st.button("🏥 Abrir ventana de sustento pendiente", use_container_width=True):
+                    _abrir_dialogo_abm(faltan[0], periodo, dia, reset_key)
+            else:
+                if st.button("✅ Confirmar guardado pendiente con sustento", type="primary", use_container_width=True):
+                    ok, err = 0, []
+                    with st.spinner("Guardando presencialidad pendiente..."):
+                        for _, _, new, row in pendientes_guardado:
+                            try:
+                                if new == "A-BM":
+                                    payload = st.session_state.get("abm_sustentos", {}).get(_abm_key(row, periodo, dia))
+                                    guardar_sustento_payload(row, periodo, dia, payload)
+                                guardar_marca(hoja_asistencia, headers, row, col_dia, new)
+                                ok += 1
+                            except Exception as e:
+                                err.append(f"{row.get('DNI','')}: {e}")
+                    if ok:
+                        for _, _, new, row in pendientes_guardado:
+                            if new == "A-BM":
+                                st.session_state.get("abm_sustentos", {}).pop(_abm_key(row, periodo, dia), None)
+                        st.session_state.pop("asis_cambios_pendientes", None)
+                        st.session_state[reset_key] = int(st.session_state.get(reset_key, 0)) + 1
+                        limpiar_cache_asistencia()
+                        st.success(f"✅ Se guardaron {ok} marcaciones correctamente.")
+                        st.rerun()
+                    for e in err:
+                        st.error(e)
 
     # Bloque 2
     st.divider()
