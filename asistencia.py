@@ -1,4 +1,4 @@
-# FIX_ASISTENCIA_ESTABLE_FORM_SIN_RERUN_BM_SEGURO_20260602
+# FIX_CONFIRMACION_SUSTENTO_ABM_VISIBLE_20260602
 # Presencialidad Dealer - 3 bloques:
 # 1) Registrar presencialidad desde hoja Asistencia (rápido)
 # 2) Espejo mensual / trazabilidad por día (solo lectura, bajo demanda)
@@ -544,32 +544,41 @@ def _abrir_dialogo_abm(row: dict, periodo: str, dia: int, reset_key: str):
         st.caption("Sin sustento no se permitirá guardar A-BM. Tamaño máximo referencial: 200 MB según configuración de Streamlit/servidor.")
         st.info(f"DNI: {row.get('DNI','')} | {row.get('NOMBRE','')} | {periodo} - DIA_{dia}")
 
+        upload_key = f"upload_abm_dialog_{key_abm}_{int(st.session_state.get(reset_key,0))}"
         archivo = st.file_uploader(
             "📎 Sustento de baja médica",
             type=["pdf", "png", "jpg", "jpeg"],
-            key=f"upload_abm_dialog_{key_abm}_{int(st.session_state.get(reset_key,0))}",
+            key=upload_key,
         )
+
+        # Streamlit a veces muestra el archivo en el componente antes de que el valor
+        # retornado sea visible en la misma ejecución del diálogo. Por eso también
+        # revisamos st.session_state[upload_key].
+        archivo_state = st.session_state.get(upload_key)
+        if archivo is None and archivo_state is not None:
+            archivo = archivo_state
 
         # Guarda el sustento temporal apenas se adjunta. No sube a Drive hasta Guardar Presencialidad.
         if archivo is not None:
+            contenido = archivo.getvalue()
             st.session_state.setdefault("abm_sustentos", {})[key_abm] = {
                 "name": archivo.name,
                 "mime": archivo.type or "application/octet-stream",
-                "content": archivo.getvalue(),
+                "content": contenido,
                 "dni": nd(row.get("DNI", "")),
                 "periodo": periodo,
                 "dia": dia,
                 "fila": nt(row.get("FILA", "")),
             }
-            st.success(f"✅ Sustento listo: {archivo.name}")
-            st.caption("Cierra esta ventana y presiona Guardar Presencialidad para confirmar la marcación.")
+            st.success(f"✅ Documento cargado correctamente: {archivo.name}")
+            st.info("Sustento listo. Cierra esta ventana y luego presiona Guardar Presencialidad para confirmar la marca A-BM.")
         else:
             ya = st.session_state.get("abm_sustentos", {}).get(key_abm)
             if ya:
-                st.success(f"✅ Sustento listo: {ya.get('name','archivo')}")
-                st.caption("Cierra esta ventana y presiona Guardar Presencialidad para confirmar la marcación.")
+                st.success(f"✅ Documento cargado correctamente: {ya.get('name','archivo')}")
+                st.info("Sustento listo. Cierra esta ventana y luego presiona Guardar Presencialidad para confirmar la marca A-BM.")
             else:
-                st.warning("Aún falta adjuntar el sustento.")
+                st.warning("Aún falta adjuntar el sustento. La marca A-BM no se podrá guardar sin documento.")
 
         c1, c2 = st.columns(2)
         with c1:
