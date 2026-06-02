@@ -42,15 +42,24 @@ def obtener_credenciales():
         st.stop()
 
 
+@st.cache_resource(show_spinner=False)
+def _get_client():
+    """Un único cliente gspread autorizado, reutilizado en todo el proceso."""
+    creds = obtener_credenciales()
+    return gspread.authorize(creds)
+
+
+@st.cache_resource(show_spinner=False)
+def _abrir_spreadsheet(nombre_hoja: str):
+    """Abre el libro UNA sola vez por proceso. Evita buscar en Drive por nombre
+    en cada lectura, que era una de las causas de lentitud y consumo."""
+    return _get_client().open(nombre_hoja)
+
+
 def conectar_google_sheets(nombre_hoja: str, nombre_worksheet: str):
     try:
-        creds = obtener_credenciales()
-        client = gspread.authorize(creds)
-        
-        # Para mayor robustez abrimos por ID si es posible en el futuro.
-        # Por ahora mantenemos compatibilidad abriendo por nombre.
-        sheet = client.open(nombre_hoja).worksheet(nombre_worksheet)
-        return sheet
+        spreadsheet = _abrir_spreadsheet(nombre_hoja)
+        return spreadsheet.worksheet(nombre_worksheet)
     except Exception as e:
         st.error(f"⚠️ Error al conectar con Google Sheets: {e}")
         st.stop()
@@ -92,9 +101,7 @@ def obtener_o_crear_worksheet(nombre_hoja: str, nombre_worksheet: str, columnas_
     Si no existe, la crea con las columnas por defecto especificadas.
     """
     try:
-        creds = obtener_credenciales()
-        client = gspread.authorize(creds)
-        spreadsheet = client.open(nombre_hoja)
+        spreadsheet = _abrir_spreadsheet(nombre_hoja)
         try:
             worksheet = spreadsheet.worksheet(nombre_worksheet)
             return worksheet
