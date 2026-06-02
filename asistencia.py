@@ -1,13 +1,13 @@
-# ASISTENCIA_FIX_RENDER_FREE_NODISCONNECT_20260601
-# Cambios respecto a versión anterior:
-# 1. CACHE_TTL_SECONDS subido de 10s → 90s (evita llamadas frecuentes a Sheets que congelan Render Free)
-# 2. Botón "🔄 Recargar presencialidad" explícito para forzar re-lectura cuando el usuario lo necesita
-# 3. Función registrar_alta_en_asistencia() AÑADIDA (era llamada desde formulario.py pero no existía)
-# 4. construir_base_colaboradores usa cache_data con hash en hoja para que el merge sea en memoria
-# 5. El filtro de cargo acepta tanto "Promotor D2D" como "Promotor D2D - Dealer" (VENTAS INDIRECTAS)
-# 6. UI: selectores Periodo y Día quedan en la parte superior como antes, sin cambios de layout
-# 7. El form de filtros y el selector de persona/marca quedan a la DERECHA del preview (layout side-by-side)
-#    ─ igual que en la versión original del cliente
+# ASISTENCIA_V3_PROFESSIONAL_LAYOUT_20260601
+# Cambios clave vs versiones anteriores:
+# - CACHE_TTL = 90s (evita congelamientos en Render Free)
+# - Botón 🔄 Recargar para forzar re-lectura manual
+# - Tabla de preview SIN columna DIA_x (evita celdas editables fantasma)
+# - Marcación en panel lateral sticky: colaborador + marca + file uploader (A-BM) integrados
+# - file_uploader FUERA de st.form (compatibilidad Streamlit)
+# - Jerarquía completa al final, desde memoria (sin llamada extra a Sheets)
+# - registrar_alta_en_asistencia() presente (llamada desde formulario.py)
+# - Filtro de cargo acepta "Promotor D2D" y "Promotor D2D - Dealer"
 
 import calendar
 import pytz
@@ -22,10 +22,16 @@ HOJA_SUSTENTOS = "Sustentos_Bajas"
 TZ_LIMA = pytz.timezone("America/Lima")
 
 MARCAS = ["", "A", "A-BM", "A-VAC", "NA-SA", "NA-CA"]
+MARCAS_LABELS = {
+    "A":     "✅ A — Asistió",
+    "A-BM":  "🏥 A-BM — Baja Médica",
+    "A-VAC": "🌴 A-VAC — Vacaciones",
+    "NA-SA": "❌ NA-SA — Sin aviso",
+    "NA-CA": "⚠️ NA-CA — Con aviso",
+}
 LEYENDA = (
-    "A = Asistió · A-BM = No Asistió por Baja Médica · "
-    "A-VAC = No Asistió por Vacaciones · NA-SA = No Asistió - Sin aviso · "
-    "NA-CA = No Asistió - Con aviso"
+    "A = Asistió · A-BM = Baja Médica · "
+    "A-VAC = Vacaciones · NA-SA = No asistió sin aviso · NA-CA = No asistió con aviso"
 )
 
 BASE_COLS = [
@@ -35,19 +41,11 @@ BASE_COLS = [
 DAY_COLS = [f"DIA_{i}" for i in range(1, 32)]
 ALL_COLS = BASE_COLS + DAY_COLS
 
-DISPLAY_COLS = [
-    "RAZON SOCIAL", "DNI", "NOMBRE", "SUPERVISOR", "COORDINADOR", "DEPARTAMENTO",
-    "PROVINCIA", "ESTADO", "FECHA_ALTA", "FECHA_CESE", "PERIODO"
-]
-
-MAX_FILAS_EDITOR = 200
-# TTL más largo: evita que Render Free se congele por llamadas frecuentes a la API de Sheets.
-# El usuario puede forzar recarga con el botón dedicado.
 CACHE_TTL_SECONDS = 90
 
 
 # =============================================================================
-# Utilitarios base
+# Utilitarios
 # =============================================================================
 
 def hoy_lima() -> date:
@@ -73,8 +71,7 @@ def normalizar_razon(x) -> str:
 
 
 def normalizar_dni(x) -> str:
-    s = normalizar_texto(x).replace(".0", "")
-    s = s.replace(",", "").replace(" ", "")
+    s = normalizar_texto(x).replace(".0", "").replace(",", "").replace(" ", "")
     return s.zfill(8) if s.isdigit() and len(s) < 8 else s
 
 
@@ -83,9 +80,7 @@ def parse_fecha(x):
         if x is None or str(x).strip() == "":
             return None
         f = pd.to_datetime(x, errors="coerce")
-        if pd.isna(f):
-            return None
-        return f.date()
+        return None if pd.isna(f) else f.date()
     except Exception:
         return None
 
@@ -120,7 +115,7 @@ def _norm_header(h) -> str:
 
 
 # =============================================================================
-# Lecturas optimizadas por rango
+# Lecturas optimizadas
 # =============================================================================
 
 @st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner=False)
@@ -131,30 +126,25 @@ def _leer_header_cached(_worksheet, cache_key: str):
         return []
 
 
-def leer_header(worksheet) -> list[str]:
+def leer_header(worksheet) -> list:
     return _leer_header_cached(worksheet, _worksheet_key(worksheet))
 
 
 @st.cache_data(ttl=CACHE_TTL_SECONDS, show_spinner=False)
 def _leer_columnas_cached(_worksheet, cache_key: str, columnas_tuple: tuple):
-    """Lee solo columnas requeridas usando batch_get. No lee toda la hoja."""
     headers = [_norm_header(x) for x in _worksheet.row_values(1)]
     if not headers:
         return headers, {}
-
     header_to_index = {h: i + 1 for i, h in enumerate(headers) if h}
-    ranges = []
-    selected = []
+    ranges, selected = [], []
     for col in columnas_tuple:
         coln = _norm_header(col)
         if coln in header_to_index:
             letra = _letra_col(header_to_index[coln])
             ranges.append(f"{letra}2:{letra}")
             selected.append(coln)
-
     if not ranges:
         return headers, {}
-
     values = _worksheet.batch_get(ranges)
     data = {}
     for coln, vals in zip(selected, values):
@@ -163,48 +153,38 @@ def _leer_columnas_cached(_worksheet, cache_key: str, columnas_tuple: tuple):
 
 
 def limpiar_cache_asistencia():
-    try:
-        _leer_header_cached.clear()
-    except Exception:
-        pass
-    try:
-        _leer_columnas_cached.clear()
-    except Exception:
-        pass
+    for fn in [_leer_header_cached, _leer_columnas_cached]:
+        try:
+            fn.clear()
+        except Exception:
+            pass
 
 
 def df_desde_columnas(data: dict, extra_row_sheet: bool = False) -> pd.DataFrame:
     if not data:
-        df = pd.DataFrame()
-    else:
-        max_len = max((len(v) for v in data.values()), default=0)
-        fixed = {}
-        for k, vals in data.items():
-            fixed[k] = vals + [""] * (max_len - len(vals))
-        df = pd.DataFrame(fixed)
+        return pd.DataFrame()
+    max_len = max((len(v) for v in data.values()), default=0)
+    fixed = {k: v + [""] * (max_len - len(v)) for k, v in data.items()}
+    df = pd.DataFrame(fixed)
     if extra_row_sheet:
         df["ROW_SHEET"] = range(2, len(df) + 2)
     return df
 
 
 # =============================================================================
-# Construcción de base viva desde colaboradores
+# Base viva desde colaboradores
 # =============================================================================
 
 def nombre_colaborador_from_df(df: pd.DataFrame) -> pd.Series:
-    nombres = df.get("NOMBRES", pd.Series([""] * len(df))).astype(str).map(normalizar_texto)
-    ap_pat = df.get("APELLIDO PATERNO", pd.Series([""] * len(df))).astype(str).map(normalizar_texto)
-    ap_mat = df.get("APELLIDO MATERNO", pd.Series([""] * len(df))).astype(str).map(normalizar_texto)
-    return (nombres + " " + ap_pat + " " + ap_mat).str.replace(r"\s+", " ", regex=True).str.strip()
+    n = df.get("NOMBRES", pd.Series([""] * len(df))).astype(str).map(normalizar_texto)
+    ap = df.get("APELLIDO PATERNO", pd.Series([""] * len(df))).astype(str).map(normalizar_texto)
+    am = df.get("APELLIDO MATERNO", pd.Series([""] * len(df))).astype(str).map(normalizar_texto)
+    return (n + " " + ap + " " + am).str.replace(r"\s+", " ", regex=True).str.strip()
 
 
 def _es_cargo_presencialidad(cargo_str: str) -> bool:
-    """
-    Acepta tanto 'Promotor D2D' (Ventas Directas) como 'Promotor D2D - Dealer' (Ventas Indirectas).
-    Evita que el filtro excluya a colaboradores según el canal de su alta.
-    """
-    c = str(cargo_str).upper().replace("-", " ").replace("  ", " ").strip()
-    return "PROMOTOR D2D" in c
+    """Acepta Promotor D2D y Promotor D2D - Dealer."""
+    return "PROMOTOR D2D" in str(cargo_str).upper().replace("-", " ").replace("  ", " ").strip()
 
 
 def construir_base_colaboradores(hoja_colaboradores, periodo: str, razon_usuario: str = "ALL") -> pd.DataFrame:
@@ -214,7 +194,9 @@ def construir_base_colaboradores(hoja_colaboradores, periodo: str, razon_usuario
         "ESTADO", "FECHA DE CREACION USUARIO", "FECHA_ALTA", "FECHA DE CESE", "FECHA_CESE",
         "CARGO (ROL)"
     )
-    headers, data = _leer_columnas_cached(hoja_colaboradores, _worksheet_key(hoja_colaboradores), columnas_necesarias)
+    headers, data = _leer_columnas_cached(
+        hoja_colaboradores, _worksheet_key(hoja_colaboradores), columnas_necesarias
+    )
     if not headers or not data:
         return pd.DataFrame(columns=BASE_COLS)
 
@@ -222,11 +204,9 @@ def construir_base_colaboradores(hoja_colaboradores, periodo: str, razon_usuario
     if df.empty:
         return pd.DataFrame(columns=BASE_COLS)
 
-    # Filtro dealer temprano.
     if razon_usuario and razon_usuario.upper() != "ALL" and "RAZON SOCIAL" in df.columns:
         df = df[df["RAZON SOCIAL"].map(normalizar_razon).eq(normalizar_razon(razon_usuario))].copy()
 
-    # Filtro de cargo: acepta Promotor D2D y Promotor D2D - Dealer
     if "CARGO (ROL)" in df.columns:
         df = df[df["CARGO (ROL)"].astype(str).apply(_es_cargo_presencialidad)].copy()
 
@@ -235,37 +215,29 @@ def construir_base_colaboradores(hoja_colaboradores, periodo: str, razon_usuario
 
     out = pd.DataFrame(index=df.index)
     out["RAZON SOCIAL"] = df.get("RAZON SOCIAL", "").map(normalizar_texto) if "RAZON SOCIAL" in df else ""
-
-    if "SUPERVISOR A CARGO" in df.columns:
-        out["SUPERVISOR"] = df["SUPERVISOR A CARGO"].map(normalizar_texto)
-    elif "SUPERVISOR" in df.columns:
-        out["SUPERVISOR"] = df["SUPERVISOR"].map(normalizar_texto)
-    else:
-        out["SUPERVISOR"] = ""
-
-    out["COORDINADOR"] = df.get("COORDINADOR", "").map(normalizar_texto) if "COORDINADOR" in df else ""
+    out["SUPERVISOR"] = (
+        df["SUPERVISOR A CARGO"].map(normalizar_texto) if "SUPERVISOR A CARGO" in df.columns
+        else df.get("SUPERVISOR", "").map(normalizar_texto) if "SUPERVISOR" in df.columns
+        else ""
+    )
+    out["COORDINADOR"]  = df.get("COORDINADOR", "").map(normalizar_texto) if "COORDINADOR" in df else ""
     out["DEPARTAMENTO"] = df.get("DEPARTAMENTO", "").map(normalizar_texto) if "DEPARTAMENTO" in df else ""
-    out["PROVINCIA"] = df.get("PROVINCIA", "").map(normalizar_texto) if "PROVINCIA" in df else ""
-    out["DNI"] = df.get("DNI", "").map(normalizar_dni) if "DNI" in df else ""
-    out["NOMBRE"] = nombre_colaborador_from_df(df)
-    out["CARGO"] = df.get("CARGO (ROL)", "").map(normalizar_texto) if "CARGO (ROL)" in df else ""
-    out["ESTADO"] = df.get("ESTADO", "ACTIVO").map(lambda x: normalizar_texto(x).upper()) if "ESTADO" in df else "ACTIVO"
-
-    if "FECHA DE CREACION USUARIO" in df.columns:
-        out["FECHA_ALTA"] = df["FECHA DE CREACION USUARIO"].map(fecha_str)
-    elif "FECHA_ALTA" in df.columns:
-        out["FECHA_ALTA"] = df["FECHA_ALTA"].map(fecha_str)
-    else:
-        out["FECHA_ALTA"] = ""
-
-    if "FECHA DE CESE" in df.columns:
-        out["FECHA_CESE"] = df["FECHA DE CESE"].map(fecha_str)
-    elif "FECHA_CESE" in df.columns:
-        out["FECHA_CESE"] = df["FECHA_CESE"].map(fecha_str)
-    else:
-        out["FECHA_CESE"] = ""
-
-    out["MES"] = str(int(periodo[-2:]))
+    out["PROVINCIA"]    = df.get("PROVINCIA", "").map(normalizar_texto) if "PROVINCIA" in df else ""
+    out["DNI"]          = df.get("DNI", "").map(normalizar_dni) if "DNI" in df else ""
+    out["NOMBRE"]       = nombre_colaborador_from_df(df)
+    out["CARGO"]        = df.get("CARGO (ROL)", "").map(normalizar_texto) if "CARGO (ROL)" in df else ""
+    out["ESTADO"]       = df.get("ESTADO", "ACTIVO").map(lambda x: normalizar_texto(x).upper()) if "ESTADO" in df else "ACTIVO"
+    out["FECHA_ALTA"]   = (
+        df["FECHA DE CREACION USUARIO"].map(fecha_str) if "FECHA DE CREACION USUARIO" in df.columns
+        else df["FECHA_ALTA"].map(fecha_str) if "FECHA_ALTA" in df.columns
+        else ""
+    )
+    out["FECHA_CESE"]   = (
+        df["FECHA DE CESE"].map(fecha_str) if "FECHA DE CESE" in df.columns
+        else df["FECHA_CESE"].map(fecha_str) if "FECHA_CESE" in df.columns
+        else ""
+    )
+    out["MES"]    = str(int(periodo[-2:]))
     out["PERIODO"] = periodo
     out = out[out["DNI"].astype(str).str.strip().ne("")].copy()
     out["KEY"] = out["DNI"].astype(str) + "|" + out["FECHA_ALTA"].astype(str) + "|" + periodo
@@ -274,7 +246,7 @@ def construir_base_colaboradores(hoja_colaboradores, periodo: str, razon_usuario
 
 
 # =============================================================================
-# Asistencia: leer solo base + día seleccionado
+# Leer asistencia y construir vista live
 # =============================================================================
 
 def leer_asistencia(hoja_asistencia, periodo: str, col_dia: str, razon_usuario: str = "ALL") -> tuple:
@@ -291,14 +263,12 @@ def leer_asistencia(hoja_asistencia, periodo: str, col_dia: str, razon_usuario: 
     for c in BASE_COLS + [col_dia]:
         if c not in df.columns:
             df[c] = ""
-    df["DNI"] = df["DNI"].map(normalizar_dni)
-    df["FECHA_ALTA"] = df["FECHA_ALTA"].map(fecha_str)
-    df["PERIODO"] = df["PERIODO"].map(normalizar_texto)
-
+    df["DNI"]       = df["DNI"].map(normalizar_dni)
+    df["FECHA_ALTA"]= df["FECHA_ALTA"].map(fecha_str)
+    df["PERIODO"]   = df["PERIODO"].map(normalizar_texto)
     df = df[df["PERIODO"].astype(str).eq(periodo)].copy()
     if razon_usuario and razon_usuario.upper() != "ALL" and "RAZON SOCIAL" in df.columns:
         df = df[df["RAZON SOCIAL"].map(normalizar_razon).eq(normalizar_razon(razon_usuario))].copy()
-
     df["KEY"] = df["DNI"].astype(str) + "|" + df["FECHA_ALTA"].astype(str) + "|" + df["PERIODO"].astype(str)
     df[col_dia] = df[col_dia].map(limpiar_marca)
     return df, headers
@@ -307,17 +277,14 @@ def leer_asistencia(hoja_asistencia, periodo: str, col_dia: str, razon_usuario: 
 def vista_live(hoja_colaboradores, hoja_asistencia, periodo: str, col_dia: str, razon_usuario: str = "ALL") -> tuple:
     base = construir_base_colaboradores(hoja_colaboradores, periodo, razon_usuario)
     asis_p, headers = leer_asistencia(hoja_asistencia, periodo, col_dia, razon_usuario)
-
-    if not asis_p.empty:
-        marcas = asis_p[["KEY", "ROW_SHEET", col_dia]].drop_duplicates("KEY", keep="last")
-    else:
-        marcas = pd.DataFrame(columns=["KEY", "ROW_SHEET", col_dia])
-
+    marcas = (
+        asis_p[["KEY", "ROW_SHEET", col_dia]].drop_duplicates("KEY", keep="last")
+        if not asis_p.empty
+        else pd.DataFrame(columns=["KEY", "ROW_SHEET", col_dia])
+    )
     live = base.merge(marcas, on="KEY", how="left", suffixes=("", "_ASIS"))
     live[col_dia] = live.get(col_dia, "").map(limpiar_marca)
-    if "ROW_SHEET" not in live.columns:
-        live["ROW_SHEET"] = ""
-    live["ROW_SHEET"] = live["ROW_SHEET"].fillna("")
+    live["ROW_SHEET"] = live.get("ROW_SHEET", "").fillna("")
     return live, headers
 
 
@@ -328,25 +295,22 @@ def vista_live(hoja_colaboradores, hoja_asistencia, periodo: str, col_dia: str, 
 def opciones(df, col):
     if col not in df.columns:
         return ["TODOS"]
-    vals = sorted([v for v in df[col].dropna().astype(str).map(normalizar_texto).unique().tolist() if v])
+    vals = sorted([v for v in df[col].dropna().astype(str).map(normalizar_texto).unique() if v])
     return ["TODOS"] + vals
 
 
 def filtrar(df, razon, sup, coord, dep, prov, estado):
     r = df.copy()
-    filtros = [
-        ("RAZON SOCIAL", razon), ("SUPERVISOR", sup), ("COORDINADOR", coord),
-        ("DEPARTAMENTO", dep), ("PROVINCIA", prov), ("ESTADO", estado)
-    ]
-    for col, val in filtros:
+    for col, val in [("RAZON SOCIAL", razon), ("SUPERVISOR", sup), ("COORDINADOR", coord),
+                     ("DEPARTAMENTO", dep), ("PROVINCIA", prov), ("ESTADO", estado)]:
         if val and val != "TODOS" and col in r.columns:
             r = r[r[col].astype(str).map(normalizar_texto).eq(val)].copy()
     return r
 
 
-def editable_en_fecha(row, fecha_sel: date):
-    alta = parse_fecha(row.get("FECHA_ALTA"))
-    cese = parse_fecha(row.get("FECHA_CESE"))
+def editable_en_fecha(row, fecha_sel: date) -> bool:
+    alta  = parse_fecha(row.get("FECHA_ALTA"))
+    cese  = parse_fecha(row.get("FECHA_CESE"))
     estado = normalizar_texto(row.get("ESTADO")).upper()
     if alta and fecha_sel < alta:
         return False
@@ -361,7 +325,7 @@ def periodos_disponibles():
     h = hoy_lima()
     periodos = []
     y, m = h.year, h.month
-    for i in range(0, 4):
+    for i in range(4):
         yy, mm = y, m - i
         while mm <= 0:
             yy -= 1
@@ -372,12 +336,11 @@ def periodos_disponibles():
 
 def fecha_desde_periodo_dia(periodo: str, dia: int) -> date:
     y, m = map(int, periodo.split("-"))
-    ultimo = calendar.monthrange(y, m)[1]
-    return date(y, m, min(int(dia), ultimo))
+    return date(y, m, min(int(dia), calendar.monthrange(y, m)[1]))
 
 
 # =============================================================================
-# Escritura puntual: solo al guardar
+# Escritura
 # =============================================================================
 
 def guardar_sustento(row, periodo, dia, archivo):
@@ -387,16 +350,17 @@ def guardar_sustento(row, periodo, dia, archivo):
     mime = archivo.type or "application/octet-stream"
     ext = "pdf" if mime == "application/pdf" else "jpg"
     dni = normalizar_dni(row.get("DNI"))
-    ts = datetime.now(TZ_LIMA).strftime("%Y%m%d_%H%M%S")
+    ts  = datetime.now(TZ_LIMA).strftime("%Y%m%d_%H%M%S")
     nombre_archivo = f"sustento_ABM_{dni}_{periodo}_DIA_{dia}_{ts}.{ext}"
     link = subir_archivo_drive(nombre_archivo, contenido, mime)
-
-    cols = ["PERIODO", "DIA", "FECHA_ASISTENCIA", "DNI", "NOMBRE", "RAZON SOCIAL", "MOTIVO", "LINK_DOCUMENTO", "FECHA_SUBIDA", "USUARIO_REGISTRO"]
+    cols = ["PERIODO","DIA","FECHA_ASISTENCIA","DNI","NOMBRE","RAZON SOCIAL",
+            "MOTIVO","LINK_DOCUMENTO","FECHA_SUBIDA","USUARIO_REGISTRO"]
     hoja = obtener_o_crear_worksheet(NOMBRE_LIBRO, HOJA_SUSTENTOS, cols)
-    fecha_asistencia = str(fecha_desde_periodo_dia(periodo, dia))
     hoja.append_row([
-        periodo, f"DIA_{dia}", fecha_asistencia, dni, row.get("NOMBRE", ""), row.get("RAZON SOCIAL", ""),
-        "A-BM", link, datetime.now(TZ_LIMA).strftime("%Y-%m-%d %H:%M:%S"), st.session_state.get("usuario", "")
+        periodo, f"DIA_{dia}", str(fecha_desde_periodo_dia(periodo, dia)),
+        dni, row.get("NOMBRE",""), row.get("RAZON SOCIAL",""),
+        "A-BM", link, datetime.now(TZ_LIMA).strftime("%Y-%m-%d %H:%M:%S"),
+        st.session_state.get("usuario","")
     ], value_input_option="USER_ENTERED")
     return link
 
@@ -410,64 +374,79 @@ def garantizar_cabecera_si_vacia(hoja_asistencia, headers: list) -> list:
 
 
 def guardar_marca(hoja_asistencia, row: pd.Series, headers: list, col_dia: str, marca: str):
-    headers = [normalizar_texto(h).upper() for h in headers]
+    headers = [_norm_header(h) for h in headers]
     headers = garantizar_cabecera_si_vacia(hoja_asistencia, headers)
-
     if col_dia not in headers:
         nueva_col = len(headers) + 1
         hoja_asistencia.update_cell(1, nueva_col, col_dia)
         headers.append(col_dia)
         limpiar_cache_asistencia()
-
     row_sheet = normalizar_texto(row.get("ROW_SHEET"))
-    col_idx = headers.index(col_dia) + 1
+    col_idx   = headers.index(col_dia) + 1
     col_letra = _letra_col(col_idx)
-
     if row_sheet.isdigit():
         hoja_asistencia.update_acell(f"{col_letra}{int(row_sheet)}", marca)
         limpiar_cache_asistencia()
         return "actualizado"
-
     nueva = []
     for h in headers:
-        if h in BASE_COLS:
-            nueva.append(row.get(h, ""))
-        elif h == col_dia:
-            nueva.append(marca)
-        else:
-            nueva.append("")
+        nueva.append(row.get(h, "") if h in BASE_COLS else (marca if h == col_dia else ""))
     hoja_asistencia.append_row(nueva, value_input_option="USER_ENTERED")
     limpiar_cache_asistencia()
     return "nuevo"
 
 
 # =============================================================================
-# FUNCIÓN REQUERIDA POR formulario.py al guardar un alta
+# Integración con formulario.py al guardar alta
 # =============================================================================
 
 def registrar_alta_en_asistencia(hoja_asistencia, campos: dict) -> str:
-    """
-    Llamada desde formulario.py al guardar una nueva alta.
-    Solo invalida el caché de asistencia para que la próxima carga
-    desde colaboradores incluya al nuevo promotor.
-    NO escribe directamente en la hoja Asistencia: el registro se crea
-    la primera vez que el usuario guarda la marcación del día.
-    Retorna un mensaje informativo para mostrar al usuario.
-    """
+    """Invalida el caché para que el nuevo promotor aparezca en la próxima carga."""
     try:
         limpiar_cache_asistencia()
-        dni = campos.get("DNI", "")
+        dni    = campos.get("DNI", "")
         nombre = " ".join([
             campos.get("NOMBRES", ""),
             campos.get("APELLIDO PATERNO", ""),
             campos.get("APELLIDO MATERNO", ""),
         ]).strip()
-        return (
-            f"El colaborador (DNI: {dni} – {nombre}) "
-            "ya figura disponible en Presencialidad Dealer para marcar asistencia."
-        )
+        return f"Colaborador DNI {dni} – {nombre} disponible en Presencialidad Dealer."
     except Exception as e:
-        return f"Alta registrada. Recarga Presencialidad para ver al colaborador ({e})."
+        return f"Recarga Presencialidad para ver al colaborador ({e})."
+
+
+# =============================================================================
+# CSS auxiliar para el panel de marcación
+# =============================================================================
+
+_PANEL_CSS = """
+<style>
+.marca-panel {
+    background: var(--wow-purple-50, #FAF3FE);
+    border: 1.5px solid var(--wow-purple-100, #F3E5FA);
+    border-radius: 14px;
+    padding: 18px 20px 14px;
+    margin-bottom: 10px;
+}
+.marca-panel h4 {
+    margin: 0 0 12px;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--wow-purple-700, #4B0067);
+    letter-spacing: 0.3px;
+}
+.marca-badge {
+    display: inline-block;
+    padding: 2px 10px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+}
+.badge-activo  { background:#D1FAE5; color:#065F46; }
+.badge-inactivo{ background:#FEE2E2; color:#991B1B; }
+</style>
+"""
 
 
 # =============================================================================
@@ -475,214 +454,276 @@ def registrar_alta_en_asistencia(hoja_asistencia, campos: dict) -> str:
 # =============================================================================
 
 def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, razon=None):
-    """
-    Módulo liviano de presencialidad.
-    - Al abrir/refrescar: solo LEE Google Sheets (caché 90s).
-    - El botón 🔄 Recargar fuerza re-lectura inmediata.
-    - No sincroniza, no borra, no escribe, no arma tablas editables masivas.
-    - Solo al presionar Guardar Presencialidad se escribe una celda/fila.
-    - Layout: filtros arriba → tabla preview (izq) + selector marcación (der)
-    """
+    st.markdown(_PANEL_CSS, unsafe_allow_html=True)
     st.markdown("<span class='wow-section-title'>🗓️ Presencialidad Dealer</span>", unsafe_allow_html=True)
 
     usuario_razon = normalizar_texto(razon if razon is not None else st.session_state.get("razon", "ALL"))
-    es_dealer = usuario_razon and usuario_razon.upper() != "ALL"
+    es_dealer = bool(usuario_razon and usuario_razon.upper() != "ALL")
 
-    # ── Periodo y día ──────────────────────────────────────────────────────────
-    col_per, col_dia_sel, col_reload = st.columns([1.2, 1.2, 0.7])
-    with col_per:
-        periodo = st.selectbox("PERIODO", periodos_disponibles(), index=0, key="asis_periodo")
+    # ─── Barra superior: Periodo · Día · Recargar ───────────────────────────
+    c_per, c_dia, c_reload = st.columns([1.4, 1.4, 0.6])
+    with c_per:
+        periodo = st.selectbox("📅 Periodo", periodos_disponibles(), index=0, key="asis_periodo")
     y, m = map(int, periodo.split("-"))
     dias = list(range(1, calendar.monthrange(y, m)[1] + 1))
     dia_default = hoy_lima().day if periodo == periodo_lima() and hoy_lima().day in dias else 1
-    with col_dia_sel:
-        dia = st.selectbox("DÍA", dias, index=dias.index(dia_default), key="asis_dia")
-    with col_reload:
-        st.markdown("<div style='height:28px'></div>", unsafe_allow_html=True)
-        if st.button("🔄 Recargar", key="btn_reload_asistencia", help="Fuerza re-lectura de Google Sheets"):
+    with c_dia:
+        dia = st.selectbox("📆 Día", dias, index=dias.index(dia_default), key="asis_dia")
+    with c_reload:
+        st.markdown("<div style='height:26px'></div>", unsafe_allow_html=True)
+        if st.button("🔄 Recargar", key="btn_reload_asistencia",
+                     help="Fuerza re-lectura desde Google Sheets (útil tras altas recientes)"):
             limpiar_cache_asistencia()
             st.rerun()
 
-    col_dia = f"DIA_{dia}"
+    col_dia  = f"DIA_{dia}"
     fecha_sel = fecha_desde_periodo_dia(periodo, dia)
 
-    st.info(
-        f"📅 Periodo: **{periodo}** | Día: **{col_dia}** | "
-        "La información se actualiza al abrir o al presionar 🔄 Recargar. "
-        "Solo se escribe al presionar **💾 Guardar Presencialidad**. "
-        "A-BM requiere sustento adjunto."
+    st.caption(
+        f"Periodo **{periodo}** · columna **{col_dia}** · "
+        "Solo se escribe al presionar 💾 Guardar · A-BM requiere sustento adjunto"
     )
 
-    # ── Carga de datos ─────────────────────────────────────────────────────────
-    try:
-        with st.spinner("Cargando base mínima desde Drive…"):
+    # ─── Carga de datos ─────────────────────────────────────────────────────
+    with st.spinner("⏳ Cargando datos desde Google Drive…"):
+        try:
             df_live, headers = vista_live(
-                hoja_colaboradores,
-                hoja_asistencia,
-                periodo,
-                col_dia,
+                hoja_colaboradores, hoja_asistencia, periodo, col_dia,
                 usuario_razon if es_dealer else "ALL",
             )
-    except Exception as e:
-        st.error(f"No se pudo cargar presencialidad: {e}")
-        return
+        except Exception as e:
+            st.error(f"No se pudo cargar presencialidad: {e}")
+            return
 
     if df_live.empty:
         st.warning(
-            "No hay promotores D2D para mostrar con este usuario/periodo. "
-            "Revisa razón social o cargo del colaborador (debe ser 'Promotor D2D' o 'Promotor D2D - Dealer')."
+            "No hay promotores D2D para este usuario/periodo. "
+            "Verifica la razón social o que el cargo sea 'Promotor D2D' o 'Promotor D2D - Dealer'."
         )
         return
 
-    # ── Filtros en FORM ────────────────────────────────────────────────────────
-    with st.form("form_filtros_presencialidad_busqueda", clear_on_submit=False):
-        st.caption("Filtra para reducir la lista. Presiona Buscar para aplicar.")
-        c0, c1, c2 = st.columns([1.2, 1, 1])
-        with c0:
-            texto_busqueda = st.text_input(
-                "Buscar DNI / nombre / supervisor / coordinador",
-                value="", placeholder="Ej: 76043772 o Kevin"
-            )
-        with c1:
-            f_sup = st.selectbox("Supervisor", opciones(df_live, "SUPERVISOR"), index=0)
-        with c2:
-            f_coord = st.selectbox("Coordinador", opciones(df_live, "COORDINADOR"), index=0)
+    # ─── Filtros ─────────────────────────────────────────────────────────────
+    with st.expander("🔍 Filtros de búsqueda", expanded=False):
+        with st.form("form_filtros_asis", clear_on_submit=False):
+            r0, r1, r2 = st.columns([1.4, 1, 1])
+            with r0:
+                texto_busqueda = st.text_input("Buscar DNI / nombre / supervisor", value="",
+                                               placeholder="Ej: 76043772 o Kevin")
+            with r1:
+                f_sup   = st.selectbox("Supervisor",   opciones(df_live, "SUPERVISOR"),   index=0)
+            with r2:
+                f_coord = st.selectbox("Coordinador",  opciones(df_live, "COORDINADOR"),  index=0)
+            r3, r4, r5 = st.columns(3)
+            with r3:
+                f_dep    = st.selectbox("Departamento", opciones(df_live, "DEPARTAMENTO"), index=0)
+            with r4:
+                f_prov   = st.selectbox("Provincia",    opciones(df_live, "PROVINCIA"),    index=0)
+            with r5:
+                f_estado = st.selectbox("Estado",       opciones(df_live, "ESTADO"),       index=0)
+            st.form_submit_button("🔎 Aplicar filtros", use_container_width=True)
 
-        c3, c4, c5 = st.columns(3)
-        with c3:
-            f_dep = st.selectbox("Departamento", opciones(df_live, "DEPARTAMENTO"), index=0)
-        with c4:
-            f_prov = st.selectbox("Provincia", opciones(df_live, "PROVINCIA"), index=0)
-        with c5:
-            f_estado = st.selectbox("Estado", opciones(df_live, "ESTADO"), index=0)
-
-        st.form_submit_button("🔎 Buscar / aplicar filtros", use_container_width=True)
-
-    # ── Filtrado en memoria ────────────────────────────────────────────────────
+    # ─── Filtrado en memoria ─────────────────────────────────────────────────
     df_f = filtrar(df_live, "TODOS", f_sup, f_coord, f_dep, f_prov, f_estado)
     q = normalizar_texto(texto_busqueda).upper()
     if q:
-        cols_busqueda = ["DNI", "NOMBRE", "SUPERVISOR", "COORDINADOR", "DEPARTAMENTO", "PROVINCIA"]
         mask = pd.Series(False, index=df_f.index)
-        for c in cols_busqueda:
+        for c in ["DNI", "NOMBRE", "SUPERVISOR", "COORDINADOR", "DEPARTAMENTO", "PROVINCIA"]:
             if c in df_f.columns:
-                mask = mask | df_f[c].astype(str).str.upper().str.contains(q, na=False)
+                mask |= df_f[c].astype(str).str.upper().str.contains(q, na=False)
         df_f = df_f[mask].copy()
 
     if df_f.empty:
-        st.warning("No hay registros con la búsqueda/filtros seleccionados.")
+        st.warning("Sin resultados con los filtros aplicados.")
         return
 
-    df_f["_EDITABLE_FECHA"] = df_f.apply(lambda r: editable_en_fecha(r, fecha_sel), axis=1)
-    df_editables = df_f[df_f["_EDITABLE_FECHA"]].copy()
+    df_f["_EDITABLE"] = df_f.apply(lambda r: editable_en_fecha(r, fecha_sel), axis=1)
+    df_editables = df_f[df_f["_EDITABLE"]].copy()
 
-    st.caption(
-        f"Registros encontrados: **{len(df_f)}** | "
-        f"Editables para el día seleccionado: **{len(df_editables)}**"
-    )
+    # ─── Métricas rápidas ────────────────────────────────────────────────────
+    total    = len(df_f)
+    editables = len(df_editables)
+    marcados  = (df_f.get(col_dia, pd.Series([""] * total)) != "").sum()
+    sin_marca = editables - int((df_editables.get(col_dia, pd.Series()) != "").sum())
 
-    # Columnas del preview SIN col_dia para evitar que Streamlit muestre
-    # celdas editables en la tabla (problema visual de la imagen de referencia).
-    columnas_preview = ["DNI", "NOMBRE", "SUPERVISOR", "COORDINADOR", "FECHA_ALTA", "FECHA_CESE", "ESTADO"]
-    # Para el espejo completo sí incluimos col_dia (solo lectura).
-    columnas_completas = columnas_preview + [col_dia]
-    for c in columnas_completas:
+    mc1, mc2, mc3, mc4 = st.columns(4)
+    mc1.metric("👥 Total filtrado",     total)
+    mc2.metric("✏️ Editables hoy",      editables)
+    mc3.metric("✅ Ya marcados",         marcados)
+    mc4.metric("⏳ Pendientes de marca", sin_marca)
+
+    # ─── Tabla de lista (sin columna DIA_x para evitar celdas editables) ────
+    st.markdown("<span class='wow-section-title'>📋 Lista de personal</span>", unsafe_allow_html=True)
+    cols_preview = ["DNI", "NOMBRE", "SUPERVISOR", "COORDINADOR",
+                    "DEPARTAMENTO", "PROVINCIA", "ESTADO", "FECHA_ALTA", "FECHA_CESE"]
+    for c in cols_preview:
         if c not in df_f.columns:
             df_f[c] = ""
 
-    # ── Sección: Registrar presencialidad ──────────────────────────────────────
-    st.markdown("<span class='wow-section-title'>✏️ Registrar presencialidad</span>", unsafe_allow_html=True)
-    st.info("**Motivos:** " + LEYENDA)
-
-    # Tabla de preview: sin columna DIA_x para evitar render de celdas editables.
-    limite_preview = 50
+    limite = 100
     st.dataframe(
-        df_f[columnas_preview].head(limite_preview),
+        df_f[cols_preview].head(limite).reset_index(drop=True),
         use_container_width=True,
         hide_index=True,
-        height=min(420, 70 + min(len(df_f), limite_preview) * 30),
+        height=min(480, 56 + min(len(df_f), limite) * 35),
+        column_config={
+            "DNI":         st.column_config.TextColumn("DNI"),
+            "NOMBRE":      st.column_config.TextColumn("Nombre completo", width="large"),
+            "SUPERVISOR":  st.column_config.TextColumn("Supervisor"),
+            "COORDINADOR": st.column_config.TextColumn("Coordinador"),
+            "ESTADO":      st.column_config.TextColumn("Estado"),
+            "FECHA_ALTA":  st.column_config.TextColumn("Alta"),
+            "FECHA_CESE":  st.column_config.TextColumn("Cese"),
+        },
     )
-    if len(df_f) > limite_preview:
-        st.caption(f"Se muestran los primeros {limite_preview}. Usa búsqueda por DNI/nombre para ubicar más.")
+    if len(df_f) > limite:
+        st.caption(f"Mostrando {limite} de {len(df_f)}. Usa el filtro para acotar.")
 
-    # ── Marcación: debajo de la tabla, dentro de expander abierto por defecto ──
-    with st.expander("✏️ Marcar asistencia", expanded=True):
+    # ─── Panel de marcación ──────────────────────────────────────────────────
+    st.markdown("<span class='wow-section-title'>✏️ Registrar asistencia</span>", unsafe_allow_html=True)
+    st.caption(f"**Motivos válidos:** {LEYENDA}")
+
+    with st.expander("📝 Abrir panel de marcación", expanded=True):
         if df_editables.empty:
-            st.warning("No hay personal editable para el día seleccionado (fecha de alta/cese o estado inactivo).")
+            st.warning(
+                "No hay personal editable para este día. "
+                "Puede deberse a que todos son INACTIVOS o la fecha cae fuera del rango de alta/cese."
+            )
         else:
+            # Construir opciones del selectbox de colaborador
             opciones_persona = []
-            mapa_persona = {}
+            mapa_persona     = {}
             for idx, r in df_editables.iterrows():
-                dni = normalizar_dni(r.get("DNI"))
-                nombre = normalizar_texto(r.get("NOMBRE"))
-                sup = normalizar_texto(r.get("SUPERVISOR"))
-                etiqueta = f"{dni} | {nombre} | Sup: {sup}"
+                dni     = normalizar_dni(r.get("DNI"))
+                nombre  = normalizar_texto(r.get("NOMBRE"))
+                sup     = normalizar_texto(r.get("SUPERVISOR"))
+                estado  = normalizar_texto(r.get("ESTADO")).upper()
+                marca_actual_row = limpiar_marca(r.get(col_dia, ""))
+                indicador = f" [{marca_actual_row}]" if marca_actual_row else " [—]"
+                etiqueta  = f"{dni} | {nombre} | {sup}{indicador}"
                 if etiqueta not in mapa_persona:
                     mapa_persona[etiqueta] = idx
                     opciones_persona.append(etiqueta)
 
-            col_sel, col_marc = st.columns([2, 1])
-            with col_sel:
-                persona = st.selectbox("Seleccionar colaborador", opciones_persona, index=0, key="asis_persona_sel")
-            with col_marc:
-                marca = st.selectbox(
-                    "Marcación", MARCAS[1:], index=0, key="asis_marca_sel",
-                    help="A-BM habilita sustento obligatorio."
+            col_left, col_right = st.columns([2.2, 1.2])
+
+            with col_left:
+                persona = st.selectbox(
+                    "👤 Seleccionar colaborador",
+                    opciones_persona, index=0,
+                    key="asis_persona_sel",
+                    help="El código entre corchetes es la marcación actual del día. [—] = sin marca."
                 )
 
-            # file_uploader FUERA de st.form: única forma de que funcione
-            # correctamente en Streamlit (los forms no soportan bien file_uploader).
+                # Preview del colaborador seleccionado
+                idx_preview = mapa_persona.get(persona)
+                if idx_preview is not None:
+                    row_prev = df_editables.loc[idx_preview]
+                    estado_p = normalizar_texto(row_prev.get("ESTADO","")).upper()
+                    badge_cls = "badge-activo" if estado_p == "ACTIVO" else "badge-inactivo"
+                    marca_p   = limpiar_marca(row_prev.get(col_dia, ""))
+                    st.markdown(
+                        f"""<div class='marca-panel'>
+                        <h4>📌 Datos del colaborador seleccionado</h4>
+                        <b>DNI:</b> {normalizar_dni(row_prev.get('DNI',''))} &nbsp;
+                        <b>Nombre:</b> {normalizar_texto(row_prev.get('NOMBRE',''))} &nbsp;
+                        <span class='marca-badge {badge_cls}'>{estado_p}</span><br/>
+                        <b>Supervisor:</b> {normalizar_texto(row_prev.get('SUPERVISOR',''))} &nbsp;
+                        <b>Coordinador:</b> {normalizar_texto(row_prev.get('COORDINADOR',''))}<br/>
+                        <b>Alta:</b> {row_prev.get('FECHA_ALTA','—')} &nbsp;
+                        <b>Cese:</b> {row_prev.get('FECHA_CESE','—') or '—'} &nbsp;
+                        <b>Marca actual {col_dia}:</b> <b>{marca_p if marca_p else '—'}</b>
+                        </div>""",
+                        unsafe_allow_html=True
+                    )
+
+            with col_right:
+                # Opciones con etiquetas amigables
+                marcas_opciones = list(MARCAS_LABELS.keys())
+                marcas_display  = [MARCAS_LABELS[k] for k in marcas_opciones]
+                marca_idx = st.selectbox(
+                    "📋 Marcación",
+                    range(len(marcas_opciones)),
+                    format_func=lambda i: marcas_display[i],
+                    index=0,
+                    key="asis_marca_idx",
+                )
+                marca = marcas_opciones[marca_idx]
+
+            # file_uploader fuera de form — obligatorio para A-BM
+            # (st.form + st.file_uploader no es compatible en Streamlit)
             archivo_bm = None
-            marca_actual = st.session_state.get("asis_marca_sel", "")
-            if marca_actual == "A-BM":
+            if marca == "A-BM":
+                st.info("🏥 **Baja Médica seleccionada** — adjunta el documento de sustento para continuar.")
                 archivo_bm = st.file_uploader(
-                    "📎 Adjuntar sustento de Baja Médica (PDF o imagen obligatorio)",
+                    "📎 Documento de sustento (PDF, PNG o JPG)",
                     type=["pdf", "png", "jpg", "jpeg"],
                     key=f"file_abm_{periodo}_{dia}",
                 )
 
-            if st.button("💾 Guardar Presencialidad", key="btn_guardar_pres", use_container_width=True, type="primary"):
+            st.markdown("")
+            guardar = st.button(
+                "💾 Guardar Presencialidad",
+                key="btn_guardar_pres",
+                use_container_width=True,
+                type="primary",
+            )
+
+            if guardar:
                 idx_sel = mapa_persona.get(persona)
                 if idx_sel is None:
-                    st.error("No se pudo identificar el colaborador seleccionado.")
+                    st.error("No se pudo identificar al colaborador.")
                 else:
                     row_sel = df_editables.loc[idx_sel].copy()
                     if fecha_sel != hoy_lima() and marca != "A-BM":
-                        st.error("Para días anteriores/futuros solo se permite A-BM con sustento.")
+                        st.error("⛔ Para días distintos al actual solo se permite A-BM con sustento.")
                     elif marca == "A-BM" and archivo_bm is None:
-                        st.error("Falta adjuntar el sustento obligatorio para A-BM.")
+                        st.error("⛔ Debes adjuntar el documento de sustento para registrar A-BM.")
                     else:
                         try:
                             if marca == "A-BM":
                                 guardar_sustento(row_sel, periodo, dia, archivo_bm)
                             resultado = guardar_marca(hoja_asistencia, row_sel, headers, col_dia, marca)
-                            st.success(f"✅ Presencialidad guardada correctamente ({resultado}).")
+                            st.success(
+                                f"✅ Presencialidad **{marca}** guardada para "
+                                f"{normalizar_texto(row_sel.get('NOMBRE',''))} ({resultado})."
+                            )
                             st.rerun()
                         except Exception as e:
-                            st.error(f"Error guardando presencialidad: {e}")
+                            st.error(f"Error al guardar: {e}")
 
-    # ── Espejo del día: tabla completa con columna DIA_x (solo lectura) ────────
-    with st.expander(f"📊 Ver marcaciones del {col_dia} (espejo completo)", expanded=False):
+    # ─── Espejo del día (marcaciones registradas) ────────────────────────────
+    with st.expander(f"📊 Espejo de marcaciones — {col_dia}", expanded=False):
+        cols_espejo = cols_preview + [col_dia]
+        for c in cols_espejo:
+            if c not in df_f.columns:
+                df_f[c] = ""
         st.dataframe(
-            df_f[columnas_completas].copy(),
+            df_f[cols_espejo].reset_index(drop=True),
             use_container_width=True,
             hide_index=True,
             height=420,
         )
 
-    # ── Jerarquía completa: siempre visible al final, optimizada con caché ─────
+    # ─── Jerarquía completa — desde memoria, sin nueva llamada a Sheets ─────
     st.divider()
-    st.markdown("<span class='wow-section-title'>📋 Jerarquía completa</span>", unsafe_allow_html=True)
-    st.caption("Lista completa de promotores cargada desde colaboradores. Usa los filtros de arriba para acotar.")
-    try:
-        cols_jerarquia = ["RAZON SOCIAL", "DNI", "NOMBRE", "CARGO", "SUPERVISOR", "COORDINADOR",
-                          "DEPARTAMENTO", "PROVINCIA", "ESTADO", "FECHA_ALTA", "FECHA_CESE"]
-        cols_mostrar = [c for c in cols_jerarquia if c in df_live.columns]
-        st.dataframe(
-            df_live[cols_mostrar].reset_index(drop=True),
-            use_container_width=True,
-            hide_index=True,
-            height=480,
-        )
-    except Exception as e:
-        st.warning(f"No se pudo mostrar la jerarquía: {e}")
+    st.markdown("<span class='wow-section-title'>📋 Jerarquía completa de promotores</span>", unsafe_allow_html=True)
+    st.caption(
+        f"Total de promotores D2D cargados: **{len(df_live)}**. "
+        "Tabla desde la misma lectura de Drive — sin llamada adicional."
+    )
+    cols_jerarquia = [
+        "RAZON SOCIAL", "DNI", "NOMBRE", "CARGO", "SUPERVISOR", "COORDINADOR",
+        "DEPARTAMENTO", "PROVINCIA", "ESTADO", "FECHA_ALTA", "FECHA_CESE"
+    ]
+    cols_mostrar = [c for c in cols_jerarquia if c in df_live.columns]
+    st.dataframe(
+        df_live[cols_mostrar].reset_index(drop=True),
+        use_container_width=True,
+        hide_index=True,
+        height=500,
+        column_config={
+            "DNI":    st.column_config.TextColumn("DNI"),
+            "NOMBRE": st.column_config.TextColumn("Nombre", width="large"),
+            "ESTADO": st.column_config.TextColumn("Estado"),
+        },
+    )
