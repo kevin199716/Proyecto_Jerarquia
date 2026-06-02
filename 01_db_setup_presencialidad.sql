@@ -1,4 +1,1 @@
-__pycache__/
-*.pyc
-.venv/
-.env
+3.11.10
