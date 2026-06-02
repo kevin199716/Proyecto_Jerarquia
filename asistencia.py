@@ -1,4 +1,4 @@
-# FIX_ABM_DIALOGO_INMEDIATO_NO_GUARDAR_SIN_SUSTENTO_20260602
+# FIX_ABM_POPUP_SUSTENTO_Y_BOTON_SIEMPRE_20260602
 # Presencialidad Dealer - 3 bloques:
 # 1) Registrar presencialidad desde hoja Asistencia (rápido)
 # 2) Espejo mensual / trazabilidad por día (solo lectura, bajo demanda)
@@ -359,6 +359,35 @@ def guardar_sustento(row: dict, periodo: str, dia: int, archivo) -> str:
     return link
 
 
+def guardar_sustento_payload(row: dict, periodo: str, dia: int, payload: dict) -> str:
+    """Guarda sustento A-BM desde bytes guardados temporalmente en session_state.
+    Esto permite que el popup capture el documento sin perder el botón principal Guardar Presencialidad.
+    """
+    contenido = payload.get("content", b"")
+    mime = payload.get("mime", "application/octet-stream") or "application/octet-stream"
+    nombre_original = nt(payload.get("name", "sustento"))
+    if not contenido:
+        raise ValueError("Sustento vacío")
+    if "pdf" in mime.lower() or nombre_original.lower().endswith(".pdf"):
+        ext = "pdf"
+    elif nombre_original.lower().endswith(".png"):
+        ext = "png"
+    else:
+        ext = "jpg"
+    dni = nd(row.get("DNI", ""))
+    ts = datetime.now(TZ_LIMA).strftime("%Y%m%d_%H%M%S")
+    fname = f"sustento_ABM_{dni}_{periodo}_DIA{dia}_{ts}.{ext}"
+    link = subir_archivo_drive(fname, contenido, mime)
+    hoja = obtener_o_crear_worksheet(NOMBRE_LIBRO, HOJA_SUSTENTOS, SUSTENTO_COLS)
+    hoja.append_row([
+        periodo, f"DIA_{dia}", str(fecha_periodo_dia(periodo, dia)), dni,
+        row.get("NOMBRE", ""), row.get("RAZON SOCIAL", ""), "A-BM", link,
+        datetime.now(TZ_LIMA).strftime("%Y-%m-%d %H:%M:%S"),
+        st.session_state.get("usuario", "")
+    ], value_input_option="USER_ENTERED")
+    return link
+
+
 def guardar_marca(hoja_asistencia, headers: list[str], row: dict, col_dia: str, marca: str):
     headers = ensure_headers(hoja_asistencia, headers)
     h2i = {h: i + 1 for i, h in enumerate(headers)}
@@ -469,38 +498,57 @@ def mostrar_jerarquia_descarga(hoja_colaboradores, razon: str):
 # =============================================================================
 # Diálogo A-BM inmediato
 # =============================================================================
-def _abrir_dialogo_abm(hoja_asistencia, headers, row: dict, periodo: str, dia: int, col_dia: str, reset_key: str):
-    """Abre ventana emergente para A-BM. Guarda sustento + marca en una sola acción.
-    Si se cancela, resetea el editor para que no quede A-BM visual sin documento.
+def _abm_key(row: dict, periodo: str, dia: int) -> str:
+    return f"{nd(row.get('DNI',''))}|{periodo}|DIA_{dia}|{nt(row.get('FILA',''))}"
+
+
+def _abrir_dialogo_abm(row: dict, periodo: str, dia: int, reset_key: str):
+    """Popup inmediato para capturar sustento A-BM.
+    No guarda la asistencia todavía; solo deja el documento listo en memoria.
+    La marcación se confirma recién con el botón principal Guardar Presencialidad.
     """
+    if "abm_sustentos" not in st.session_state:
+        st.session_state["abm_sustentos"] = {}
+
+    key_abm = _abm_key(row, periodo, dia)
+
     def _contenido_dialogo():
         st.markdown("**Baja médica detectada.** Adjunta PDF o imagen para sustentar la marcación.")
-        st.caption("Sin sustento no se registra A-BM. Tamaño máximo depende de Streamlit/servidor; por defecto suele ser 200 MB.")
+        st.caption("Sin sustento no se permitirá guardar A-BM. Tamaño máximo referencial: 200 MB según configuración de Streamlit/servidor.")
         st.info(f"DNI: {row.get('DNI','')} | {row.get('NOMBRE','')} | {periodo} - DIA_{dia}")
+
+        ya = st.session_state.get("abm_sustentos", {}).get(key_abm)
+        if ya:
+            st.success(f"Sustento cargado: {ya.get('name','archivo')}")
+
         archivo = st.file_uploader(
             "📎 Sustento de baja médica",
             type=["pdf", "png", "jpg", "jpeg"],
-            key=f"upload_abm_dialog_{periodo}_{dia}_{row.get('DNI','')}_{row.get('FILA','')}",
+            key=f"upload_abm_dialog_{key_abm}_{int(st.session_state.get(reset_key,0))}",
         )
+
         c1, c2 = st.columns(2)
         with c1:
-            if st.button("✅ Guardar A-BM con sustento", type="primary", use_container_width=True):
+            if st.button("✅ Usar este sustento", type="primary", use_container_width=True):
                 if not archivo:
-                    st.error("Debes adjuntar el sustento para registrar A-BM.")
+                    st.error("Debes adjuntar el sustento para continuar.")
                     return
-                try:
-                    guardar_sustento(row, periodo, dia, archivo)
-                    guardar_marca(hoja_asistencia, headers, row, col_dia, "A-BM")
-                    st.session_state.pop("abm_dialog_data", None)
-                    st.session_state[reset_key] = int(st.session_state.get(reset_key, 0)) + 1
-                    st.success("✅ Baja médica registrada correctamente con sustento.")
-                    st.rerun()
-                except Exception as e:
-                    st.error(f"No se pudo guardar A-BM: {e}")
+                st.session_state.setdefault("abm_sustentos", {})[key_abm] = {
+                    "name": archivo.name,
+                    "mime": archivo.type or "application/octet-stream",
+                    "content": archivo.getvalue(),
+                    "dni": nd(row.get("DNI", "")),
+                    "periodo": periodo,
+                    "dia": dia,
+                    "fila": nt(row.get("FILA", "")),
+                }
+                st.session_state.pop("abm_dialog_data", None)
+                st.success("✅ Sustento cargado. Ahora presiona Guardar Presencialidad para confirmar la marcación.")
+                st.rerun()
         with c2:
             if st.button("Cancelar", use_container_width=True):
+                # No guarda sustento ni asistencia. La validación del botón principal bloqueará A-BM si falta documento.
                 st.session_state.pop("abm_dialog_data", None)
-                st.session_state[reset_key] = int(st.session_state.get(reset_key, 0)) + 1
                 st.rerun()
 
     if hasattr(st, "dialog"):
@@ -643,38 +691,60 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                     continue
                 cambios.append((i, old, new, df_new.iloc[i].to_dict()))
 
-        # A-BM: ventana emergente inmediata. No se permite que quede registrado sin sustento.
+        # A-BM: ventana emergente inmediata para capturar sustento.
+        # Importante: la asistencia NO se confirma aquí; se confirma con el botón principal Guardar Presencialidad.
         bm = [c for c in cambios if c[2] == "A-BM"]
-        if bm:
-            _, _, _, row_bm = bm[0]
+        pendientes_bm = []
+        for _, _, _, row_bm in bm:
+            key_abm = _abm_key(row_bm, periodo, dia)
+            if not st.session_state.get("abm_sustentos", {}).get(key_abm):
+                pendientes_bm.append(row_bm)
+
+        if pendientes_bm:
+            row_bm = pendientes_bm[0]
             st.session_state["abm_dialog_data"] = {
                 "periodo": periodo,
                 "dia": dia,
                 "col_dia": col_dia,
                 "row": row_bm,
             }
-            _abrir_dialogo_abm(hoja_asistencia, headers, row_bm, periodo, dia, col_dia, reset_key)
+            _abrir_dialogo_abm(row_bm, periodo, dia, reset_key)
 
-        # Otras marcas: se guardan con botón normal. A-BM queda excluido porque exige documento.
-        cambios_normales = [c for c in cambios if c[2] != "A-BM"]
-        if cambios_normales:
-            resumen = ", ".join([f"{c[3].get('DNI','')}→{c[2]}" for c in cambios_normales[:8]])
+        if cambios:
+            resumen = ", ".join([f"{c[3].get('DNI','')}→{c[2]}" for c in cambios[:8]])
+            if len(cambios) > 8:
+                resumen += f" (+{len(cambios)-8} más)"
             st.markdown(f"<div class='okbox'>📝 Cambios detectados: {resumen}</div>", unsafe_allow_html=True)
-            if st.button(f"💾 Guardar Presencialidad ({len(cambios_normales)} cambios)", type="primary", use_container_width=True):
+
+            if pendientes_bm:
+                st.markdown("<div class='badbox'>⛔ Hay A-BM pendiente de sustento. Carga el documento en la ventana emergente y luego presiona Guardar Presencialidad.</div>", unsafe_allow_html=True)
+
+            if st.button(f"💾 Guardar Presencialidad ({len(cambios)} cambios)", type="primary", use_container_width=True):
                 ok, err = 0, []
-                for _, _, new, row in cambios_normales:
+                for _, _, new, row in cambios:
                     try:
+                        if new == "A-BM":
+                            key_abm = _abm_key(row, periodo, dia)
+                            payload = st.session_state.get("abm_sustentos", {}).get(key_abm)
+                            if not payload:
+                                err.append(f"{row.get('DNI','')}: falta sustento A-BM.")
+                                continue
+                            guardar_sustento_payload(row, periodo, dia, payload)
                         guardar_marca(hoja_asistencia, headers, row, col_dia, new)
                         ok += 1
                     except Exception as e:
                         err.append(f"{row.get('DNI','')}: {e}")
                 if ok:
+                    # Limpia sustentos usados del día para no duplicar cargas
+                    for _, _, new, row in cambios:
+                        if new == "A-BM":
+                            st.session_state.get("abm_sustentos", {}).pop(_abm_key(row, periodo, dia), None)
                     st.session_state[reset_key] = int(st.session_state.get(reset_key, 0)) + 1
                     st.success(f"✅ Se guardaron {ok} marcaciones correctamente.")
                     st.rerun()
                 for e in err:
                     st.error(e)
-        elif not cambios:
+        else:
             st.caption(f"✔ Sin cambios — edita la columna **{col_dia}** para registrar presencialidad.")
 
     # Bloque 2
