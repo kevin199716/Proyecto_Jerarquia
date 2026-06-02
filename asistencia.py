@@ -1,16 +1,16 @@
-# FIX_PRESENCIALIDAD_FORM_NO_RERUN_ABM_UPLOAD_20260602
+# FIX_RESTORE_FLUIDO_DIALOGO_ABM_SIN_SYNC_20260602
 """
 asistencia.py — Presencialidad Dealer
 Cambios aplicados:
   1. Módulo visible como Presencialidad Dealer desde app_maestra_vendedores.py.
   2. Filtros: Razón Social, Supervisor, Coordinador, Departamento y Provincia.
   3. La hoja Asistencia conserva histórico mensual y no borra registros anteriores.
-  4. Sincroniza activos y también inactivos con cese dentro del mes para respetar historia.
+  4. Modo fluido: solo lee Asistencia al abrir; no cruza colaboradores ni sincroniza automáticamente.
   5. Solo permite editar el día actual. No permite modificar días anteriores ni futuros.
   6. Si un colaborador está inactivo, solo permite marcar hasta su fecha de cese.
   7. Marcajes permitidos: A, A-BM, A-VAC, NA-SA y NA-CA.
-  8. Editor dentro de st.form para que seleccionar asistencia no congele por rerun.
-  9. A-BM habilita adjunto obligatorio dentro del formulario de guardado.
+  8. A-BM vuelve a usar ventana emergente obligatoria para adjuntar sustento.
+  9. Sin botones Sincronizar/Recargar dentro del módulo dealer.
 """
 
 import calendar
@@ -64,7 +64,7 @@ KEY_HEADERS = "asis_headers_cache"
 KEY_LOADED = "asis_loaded"
 KEY_LOAD_TS = "asis_load_timestamp"
 
-CACHE_TTL = 45
+CACHE_TTL = 600
 # Mantener la vista amplia original. Solo pagina si realmente supera este límite.
 MAX_FILAS_EDITOR = 200
 
@@ -91,15 +91,6 @@ def limpiar_texto(valor) -> str:
         return ""
     s = str(valor).strip()
     return "" if s.upper() in ("NONE", "NAN", "NULL") else s
-
-
-def primer_valor(*valores) -> str:
-    """Devuelve el primer valor no vacío."""
-    for v in valores:
-        t = limpiar_texto(v)
-        if t:
-            return t
-    return ""
 
 
 def limpiar_marca(valor) -> str:
@@ -440,7 +431,7 @@ def registrar_alta_en_asistencia(hoja_asistencia, campos: dict) -> str:
     una nueva fila para la nueva alta en lugar de bloquearse por DNI repetido.
     """
     if not validar_o_crear_cabecera(hoja_asistencia):
-        return "Presencialidad pendiente: recrea la cabecera o presiona Sincronizar mes."
+        return "Presencialidad pendiente: revisa la cabecera de Asistencia."
 
     valores = hoja_asistencia.get_all_values()
     if not valores:
@@ -518,72 +509,11 @@ def cache_vencido() -> bool:
     return (time.time() - ts) > CACHE_TTL
 
 
-def cargar_cache_desde_drive(hoja_asistencia, hoja_colaboradores=None, forzar: bool = False) -> None:
-    """Carga la vista viva SIN escribir en Drive.
-
-    - Lee Asistencia como histórico.
-    - Si recibe hoja_colaboradores, cruza contra colaboradores del mes actual.
-    - Si hay altas nuevas en colaboradores que aún no existen en Asistencia,
-      las muestra como filas virtuales con ROW_SHEET vacío.
-    - Al guardar una fila virtual, recién se hace append de esa fila puntual.
-    - No sincroniza, no borra, no usa clear(), no actualiza masivamente.
-    """
+def cargar_cache_desde_drive(hoja_asistencia, forzar: bool = False) -> None:
     if not forzar and st.session_state.get(KEY_LOADED) and not cache_vencido():
         return
-
     with st.spinner("Cargando datos desde Google Drive…"):
         df_total, headers = leer_asistencia_drive(hoja_asistencia)
-
-        if hoja_colaboradores is not None:
-            try:
-                df_colab = leer_colaboradores_drive(hoja_colaboradores)
-                df_vigentes = obtener_promotores_vigentes_mes(df_colab)
-
-                if not df_vigentes.empty:
-                    periodo = periodo_actual()
-                    bases = []
-                    for _, row in df_vigentes.iterrows():
-                        payload = construir_payload_base(row)
-                        if payload.get("DNI"):
-                            bases.append(payload)
-
-                    if bases:
-                        df_base = pd.DataFrame(bases)
-                        for c in COLUMNAS_ASISTENCIA:
-                            if c not in df_base.columns:
-                                df_base[c] = ""
-                        df_base = df_base[COLUMNAS_ASISTENCIA].copy()
-                        df_base["ROW_SHEET"] = ""
-                        df_base["_KEY"] = df_base.apply(lambda r: clave_asistencia(r.get("DNI", ""), r.get("FECHA_ALTA", "")), axis=1)
-
-                        for c in COLUMNAS_ASISTENCIA:
-                            if c not in df_total.columns:
-                                df_total[c] = ""
-                        if "ROW_SHEET" not in df_total.columns:
-                            df_total["ROW_SHEET"] = ""
-
-                        df_total["_KEY"] = df_total.apply(lambda r: clave_asistencia(r.get("DNI", ""), r.get("FECHA_ALTA", "")), axis=1)
-                        mask_mes = df_total["PERIODO"].astype(str).eq(periodo)
-
-                        # Actualiza SOLO EN MEMORIA los datos base actuales para registros ya existentes.
-                        base_map = df_base.drop_duplicates("_KEY", keep="last").set_index("_KEY")
-                        idx_exist = df_total.index[mask_mes & df_total["_KEY"].isin(base_map.index)]
-                        for idx in idx_exist:
-                            k = df_total.at[idx, "_KEY"]
-                            for col in COLUMNAS_BASE:
-                                df_total.at[idx, col] = base_map.at[k, col]
-
-                        # Agrega filas virtuales para altas nuevas que todavía no están en Asistencia.
-                        existentes = set(df_total.loc[mask_mes, "_KEY"].astype(str))
-                        df_faltantes = df_base[~df_base["_KEY"].astype(str).isin(existentes)].copy()
-                        if not df_faltantes.empty:
-                            df_total = pd.concat([df_total, df_faltantes[df_total.columns]], ignore_index=True)
-
-                        if "_KEY" in df_total.columns:
-                            df_total = df_total.drop(columns=["_KEY"])
-            except Exception as e:
-                st.warning(f"No se pudo cruzar colaboradores en memoria: {e}")
-
     st.session_state[KEY_DF_TOTAL] = df_total.copy()
     st.session_state[KEY_DF_ORIGINAL] = df_total.copy()
     st.session_state[KEY_HEADERS] = headers
@@ -704,34 +634,6 @@ def preparar_updates(df_editado: pd.DataFrame, df_original: pd.DataFrame, header
     return updates
 
 
-
-
-def preparar_appends_nuevos(df_editado_raw: pd.DataFrame, df_original_raw: pd.DataFrame, headers: list[str], col_hoy: str) -> list[list]:
-    """Prepara filas nuevas para registros virtuales sin ROW_SHEET.
-    Solo agrega cuando el usuario marcó algo en DIA_X.
-    """
-    if df_editado_raw is None or df_editado_raw.empty:
-        return []
-    headers_up = [limpiar_texto(h).upper() for h in headers]
-    if not headers_up:
-        headers_up = COLUMNAS_ASISTENCIA.copy()
-    filas = []
-    for i in range(len(df_editado_raw)):
-        nuevo = limpiar_marca(df_editado_raw.iloc[i].get(col_hoy, ""))
-        anterior = limpiar_marca(df_original_raw.iloc[i].get(col_hoy, "")) if i < len(df_original_raw) else ""
-        row_sheet = limpiar_texto(df_original_raw.iloc[i].get("ROW_SHEET", "")) if i < len(df_original_raw) else ""
-        if row_sheet.isdigit():
-            continue
-        if not nuevo or nuevo == anterior:
-            continue
-        base = {col: "" for col in headers_up}
-        for col in COLUMNAS_BASE:
-            if col in df_original_raw.columns:
-                base[col] = limpiar_texto(df_original_raw.iloc[i].get(col, ""))
-        base[col_hoy] = nuevo
-        filas.append([base.get(h, "") for h in headers_up])
-    return filas
-
 def actualizar_cache_con_editado(df_editado: pd.DataFrame, col_hoy: str) -> None:
     if KEY_DF_TOTAL not in st.session_state:
         return
@@ -839,10 +741,12 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
 
     st.info(
         f"📅 Periodo: **{periodo}** | Día editable: **{col_hoy}** | "
-        "La información se lee al abrir/refrescar la página. No hay sincronización manual para dealers."
+        "La vista trabaja desde la hoja Asistencia ya sincronizada. No hay botones de sincronización ni recarga para dealers."
     )
 
-    cargar_cache_desde_drive(hoja_asistencia, hoja_colaboradores=hoja_colaboradores)
+    # Carga estable y rápida: solo lee la hoja Asistencia, como el flujo anterior.
+    # No cruza colaboradores al abrir porque eso fue lo que empezó a frizear la pantalla.
+    cargar_cache_desde_drive(hoja_asistencia)
 
     df_total = st.session_state[KEY_DF_TOTAL].copy()
     df_original = st.session_state[KEY_DF_ORIGINAL].copy()
@@ -863,7 +767,7 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
         df_mes = df_mes[df_mes["RAZON SOCIAL"].astype(str).str.strip().str.upper().eq(razon_usuario.upper())].copy()
 
     if df_mes.empty:
-        st.warning("⚠️ No hay registros del periodo actual para mostrar. Revisa que existan colaboradores activos de este dealer o actualiza/refresca la página.")
+        st.warning("⚠️ No hay registros activos del periodo actual para este dealer. Revisa la hoja Asistencia o que el alta haya sido registrada correctamente.")
         return
 
     # =====================================================
@@ -880,25 +784,40 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
 
     def _valor_guardado(clave, opciones):
         valor = st.session_state.get(clave, "TODOS")
-        if valor in opciones:
-            return valor
-        return opciones[0] if opciones else "TODOS"
+        return valor if valor in opciones else "TODOS"
 
-    # Filtros con etiquetas visibles. Sin st.form para evitar Missing Submit Button.
-    f1, f2, f3, f4, f5, f6 = st.columns(6)
-    with f1:
-        filtro_razon = st.selectbox("Razón Social", op_razon, index=op_razon.index(_valor_guardado("asis_filtro_razon", op_razon)), key="asis_filtro_razon")
-    with f2:
-        filtro_supervisor = st.selectbox("Supervisor", op_supervisor, index=op_supervisor.index(_valor_guardado("asis_filtro_supervisor", op_supervisor)), key="asis_filtro_supervisor")
-    with f3:
-        filtro_coord = st.selectbox("Coordinador", op_coordinador, index=op_coordinador.index(_valor_guardado("asis_filtro_coord", op_coordinador)), key="asis_filtro_coord")
-    with f4:
-        filtro_dep = st.selectbox("Departamento", op_departamento, index=op_departamento.index(_valor_guardado("asis_filtro_dep", op_departamento)), key="asis_filtro_dep")
-    with f5:
-        filtro_prov = st.selectbox("Provincia", op_provincia, index=op_provincia.index(_valor_guardado("asis_filtro_prov", op_provincia)), key="asis_filtro_prov")
-    with f6:
-        filtro_estado = st.selectbox("Estado", ["ACTIVO"], index=0, key="asis_filtro_estado", disabled=True)
+    with st.form("form_filtros_presencialidad"):
+        # IMPORTANTE: etiquetas visibles. No usar label_visibility="collapsed".
+        f1, f2, f3, f4, f5, f6 = st.columns(6)
+        with f1:
+            tmp_razon = st.selectbox("Razón Social", op_razon, index=op_razon.index(_valor_guardado("asis_filtro_razon", op_razon)), key="asis_tmp_razon")
+        with f2:
+            tmp_supervisor = st.selectbox("Supervisor", op_supervisor, index=op_supervisor.index(_valor_guardado("asis_filtro_supervisor", op_supervisor)), key="asis_tmp_supervisor")
+        with f3:
+            tmp_coord = st.selectbox("Coordinador", op_coordinador, index=op_coordinador.index(_valor_guardado("asis_filtro_coord", op_coordinador)), key="asis_tmp_coord")
+        with f4:
+            tmp_dep = st.selectbox("Departamento", op_departamento, index=op_departamento.index(_valor_guardado("asis_filtro_dep", op_departamento)), key="asis_tmp_dep")
+        with f5:
+            tmp_prov = st.selectbox("Provincia", op_provincia, index=op_provincia.index(_valor_guardado("asis_filtro_prov", op_provincia)), key="asis_tmp_prov")
+        with f6:
+            tmp_estado = st.selectbox("Estado", op_estado, index=op_estado.index(_valor_guardado("asis_filtro_estado", op_estado)), key="asis_tmp_estado")
 
+        aplicar_filtros = st.form_submit_button("🔎 Aplicar filtros", use_container_width=True)
+
+    if aplicar_filtros:
+        st.session_state["asis_filtro_razon"] = tmp_razon
+        st.session_state["asis_filtro_supervisor"] = tmp_supervisor
+        st.session_state["asis_filtro_coord"] = tmp_coord
+        st.session_state["asis_filtro_dep"] = tmp_dep
+        st.session_state["asis_filtro_prov"] = tmp_prov
+        st.session_state["asis_filtro_estado"] = tmp_estado
+
+    filtro_razon = _valor_guardado("asis_filtro_razon", op_razon)
+    filtro_supervisor = _valor_guardado("asis_filtro_supervisor", op_supervisor)
+    filtro_coord = _valor_guardado("asis_filtro_coord", op_coordinador)
+    filtro_dep = _valor_guardado("asis_filtro_dep", op_departamento)
+    filtro_prov = _valor_guardado("asis_filtro_prov", op_provincia)
+    filtro_estado = _valor_guardado("asis_filtro_estado", op_estado)
 
     df_filtrado = filtrar_df(df_mes, filtro_razon, filtro_supervisor, filtro_coord, filtro_dep, filtro_prov, filtro_estado)
     # Seguridad operativa: el registro de presencialidad SOLO trabaja ACTIVO.
@@ -948,69 +867,78 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
         df_editor[col_hoy] = df_editor[col_hoy].apply(limpiar_marca)
 
         # =====================================================
-        # EDITOR EN FORMULARIO: evita rerun/frizado por cada selección
+        # DETECCIÓN EN TIEMPO REAL: marca A-BM sin sustento
         # =====================================================
+        cambios = st.session_state.get("editor_presencialidad_dia_actual", {}).get("edited_rows", {})
+        if cambios:
+            # Limpiar sustentos huérfanos si cambiaron de A-BM a otra cosa
+            sustentos_cargados = st.session_state.get("sustentos_pendientes", {})
+            if sustentos_cargados:
+                dni_en_baja = set()
+                for r_str, cols in cambios.items():
+                    r_idx = int(r_str)
+                    if col_hoy in cols and cols[col_hoy] == "A-BM":
+                        if r_idx < len(df_editor):
+                            dni_en_baja.add(df_editor.iloc[r_idx]["DNI"])
+                for dni in list(sustentos_cargados.keys()):
+                    if dni not in dni_en_baja:
+                        del st.session_state["sustentos_pendientes"][dni]
+
+            # Verificar si hay alguna selección nueva de A-BM que requiera sustento
+            for r_str, cols in cambios.items():
+                r_idx = int(r_str)
+                if col_hoy in cols and cols[col_hoy] == "A-BM":
+                    if r_idx < len(df_editor):
+                        row_data = df_editor.iloc[r_idx]
+                        dni = row_data["DNI"]
+                        nombre = row_data["NOMBRE"]
+                        row_sheet = row_data["ROW_SHEET"]
+                        
+                        if dni not in st.session_state.get("sustentos_pendientes", {}):
+                            mostrar_dialogo_sustento(dni, nombre, row_sheet, col_hoy, df_editor)
+
         disabled_cols = [col for col in df_editor.columns if col != col_hoy]
-        # Mantengo ROW_SHEET visible como FILA técnica para evitar errores React
-        # y conservar la referencia exacta para guardar en Sheets.
+        # Mantengo ROW_SHEET visible como FILA técnica para evitar el error React #185
+        # que aparece a veces cuando se oculta una columna usada para guardar.
         column_config = {
             "ROW_SHEET": st.column_config.NumberColumn("FILA", width="small", disabled=True),
             col_hoy: st.column_config.SelectboxColumn(col_hoy, options=MARCAS_PRESENCIALIDAD, width="small"),
         }
 
-        st.caption("Selecciona la marca en la columna del día y recién presiona Guardar. La pantalla no debe recalcular por cada selección.")
+        editado = st.data_editor(
+            df_editor,
+            use_container_width=True,
+            height=min(460, 50 + len(df_editor) * 32),
+            hide_index=True,
+            disabled=disabled_cols,
+            column_config=column_config,
+            num_rows="fixed",
+            key="editor_presencialidad_dia_actual",
+        )
 
-        with st.form("form_presencialidad_guardado", clear_on_submit=False):
-            editado = st.data_editor(
-                df_editor,
-                use_container_width=True,
-                height=min(460, 50 + len(df_editor) * 32),
-                hide_index=True,
-                disabled=disabled_cols,
-                column_config=column_config,
-                num_rows="fixed",
-                key="editor_presencialidad_dia_actual_form",
-            )
-
-            archivo_abm = st.file_uploader(
-                "📎 Sustento médico para A-BM (solo si marcaste Baja Médica)",
-                type=["pdf", "png", "jpg", "jpeg"],
-                key="archivo_abm_unico_form",
-                help="Solo es obligatorio si alguna fila fue marcada como A-BM. Si son varios casos, adjunta un PDF consolidado o guarda uno por uno.",
-            )
-
-            guardar_pres = st.form_submit_button("💾 Guardar Presencialidad", use_container_width=True)
+        guardar_pres = st.button("💾 Guardar Presencialidad", key="btn_guardar_presencialidad")
 
         if guardar_pres:
             with st.spinner("Guardando en Google Drive…"):
                 try:
-                    editado_raw = pd.DataFrame(editado).fillna("")
-                    df_editado = normalizar_para_guardado(editado_raw, col_hoy)
-
-                    if df_editado.empty or "ROW_SHEET" not in editado_raw.columns:
+                    df_editado = normalizar_para_guardado(pd.DataFrame(editado).fillna(""), col_hoy)
+                    if df_editado.empty or "ROW_SHEET" not in df_editado.columns:
                         st.warning("No se pudo leer la tabla del editor. Recarga la página.")
                     else:
-                        # Detectar cambios comparando tabla editada vs tabla original visible.
-                        cambios_detectados = []
-                        for i in range(min(len(editado_raw), len(df_editor))):
-                            nuevo = limpiar_marca(editado_raw.iloc[i].get(col_hoy, ""))
-                            anterior = limpiar_marca(df_editor.iloc[i].get(col_hoy, ""))
-                            if nuevo != anterior:
-                                cambios_detectados.append({
-                                    "idx": i,
-                                    "dni": normalizar_dni(df_editor.iloc[i].get("DNI", "")),
-                                    "nombre": limpiar_texto(df_editor.iloc[i].get("NOMBRE", "")),
-                                    "marca": nuevo,
-                                    "row": df_editor.iloc[i],
-                                })
+                        # 1. Validación de seguridad final para marcas A-BM sin sustento
+                        cambios_actuales = st.session_state.get("editor_presencialidad_dia_actual", {}).get("edited_rows", {})
+                        for r_str, cols in cambios_actuales.items():
+                            r_idx = int(r_str)
+                            if col_hoy in cols and cols[col_hoy] == "A-BM":
+                                if r_idx < len(df_editor):
+                                    dni = df_editor.iloc[r_idx]["DNI"]
+                                    if dni not in st.session_state.get("sustentos_pendientes", {}):
+                                        st.error(f"❌ Falta el sustento médico obligatorio para {df_editor.iloc[r_idx]['NOMBRE']}.")
+                                        st.stop()
 
-                        cambios_abm = [c for c in cambios_detectados if c["marca"] == "A-BM"]
-                        if cambios_abm and archivo_abm is None:
-                            st.error("❌ Has marcado A-BM. Debes adjuntar el sustento médico antes de guardar.")
-                            st.stop()
-
-                        # Subir sustento una sola vez y registrar histórico para cada DNI A-BM.
-                        if cambios_abm and archivo_abm is not None:
+                        # 2. Subida de certificados a Google Drive y registro de auditoría en Sheets
+                        sustentos = st.session_state.get("sustentos_pendientes", {})
+                        if sustentos:
                             columnas_defecto = [
                                 "PERIODO",
                                 "FECHA_ASISTENCIA",
@@ -1020,39 +948,45 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                                 "MOTIVO",
                                 "LINK_DOCUMENTO",
                                 "FECHA_SUBIDA",
-                                "USUARIO_REGISTRO",
+                                "USUARIO_REGISTRO"
                             ]
                             hoja_sustentos = obtener_o_crear_worksheet("maestra_vendedores", "Sustentos_Bajas", columnas_defecto)
-
-                            contenido = archivo_abm.getvalue()
-                            mime_type = archivo_abm.type or "application/octet-stream"
-                            extension = "pdf" if "pdf" in mime_type else "jpg"
-                            ts_nombre = datetime.now().strftime("%Y%m%d_%H%M%S")
-                            nombre_archivo_drive = f"sustento_ABM_{periodo}_{col_hoy}_{ts_nombre}.{extension}"
-
-                            link_drive = subir_archivo_drive(
-                                nombre_archivo=nombre_archivo_drive,
-                                contenido_bytes=contenido,
-                                mime_type=mime_type,
-                            )
-
+                            
+                            filas_nuevas = []
                             user_activo = st.session_state.get("usuario", "desconocido")
-                            timestamp_lima = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-                            filas_sustentos = []
-                            for c in cambios_abm:
-                                filas_sustentos.append([
+                            tz_lima = pytz.timezone("America/Lima")
+                            timestamp_lima = datetime.now(tz_lima).strftime("%Y-%m-%d %H:%M:%S")
+                            
+                            for dni, datos in list(sustentos.items()):
+                                extension = "pdf" if datos["mime_type"] == "application/pdf" else "jpg"
+                                nombre_archivo_drive = f"sustento_{dni}_{hoy_actual()}.{extension}"
+                                
+                                link_drive = subir_archivo_drive(
+                                    nombre_archivo=nombre_archivo_drive,
+                                    contenido_bytes=datos["contenido_bytes"],
+                                    mime_type=datos["mime_type"]
+                                )
+                                
+                                row_vendedor = df_editor[df_editor["DNI"] == dni].iloc[0]
+                                razon_social = row_vendedor.get("RAZON SOCIAL", "")
+                                
+                                filas_nuevas.append([
                                     periodo,
                                     str(hoy_actual()),
-                                    c["dni"],
-                                    c["nombre"],
-                                    limpiar_texto(c["row"].get("RAZON SOCIAL", "")),
+                                    dni,
+                                    datos["nombre"],
+                                    razon_social,
                                     "A-BM (Baja Médica)",
                                     link_drive,
                                     timestamp_lima,
-                                    user_activo,
+                                    user_activo
                                 ])
-                            if filas_sustentos:
-                                hoja_sustentos.append_rows(filas_sustentos, value_input_option="USER_ENTERED")
+                            
+                            if filas_nuevas:
+                                hoja_sustentos.append_rows(filas_nuevas, value_input_option="USER_ENTERED")
+                            
+                            # Limpiar memoria de sustentos procesados
+                            st.session_state["sustentos_pendientes"] = {}
 
                         updates = preparar_updates(
                             df_editado=df_editado,
@@ -1060,23 +994,15 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                             headers=headers,
                             col_hoy=col_hoy,
                         )
-                        appends = preparar_appends_nuevos(editado_raw, df_editor.fillna(""), headers, col_hoy)
-
-                        if not updates and not appends:
+                        if not updates:
                             st.info("ℹ️ No se detectaron cambios para guardar.")
                         else:
-                            if updates:
-                                for i in range(0, len(updates), 100):
-                                    hoja_asistencia.batch_update(updates[i:i + 100], value_input_option="USER_ENTERED")
-                                    if i + 100 < len(updates):
-                                        time.sleep(0.10)
-                            if appends:
-                                hoja_asistencia.append_rows(appends, value_input_option="USER_ENTERED")
+                            for i in range(0, len(updates), 100):
+                                hoja_asistencia.batch_update(updates[i:i + 100], value_input_option="USER_ENTERED")
+                                if i + 100 < len(updates):
+                                    time.sleep(0.10)
                             actualizar_cache_con_editado(df_editado, col_hoy)
-                            for k in [KEY_DF_TOTAL, KEY_DF_ORIGINAL, KEY_HEADERS, KEY_LOADED, KEY_LOAD_TS]:
-                                if k in st.session_state:
-                                    del st.session_state[k]
-                            st.session_state["asis_guardado_msg"] = f"✅ Presencialidad guardada. Actualizados: {len(updates)} | Nuevos: {len(appends)}"
+                            st.session_state["asis_guardado_msg"] = f"✅ Presencialidad guardada. Celdas actualizadas: {len(updates)}"
                             st.rerun()
                 except Exception as e:
                     st.error(f"❌ Error guardando presencialidad: {e}")
