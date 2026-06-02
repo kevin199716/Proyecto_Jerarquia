@@ -105,99 +105,6 @@ MOTIVOS = [
 
 
 # =========================
-# ORDEN VISUAL DE MATRIZ
-# =========================
-ORDEN_MATRIZ = [
-    "FECHA MOV",
-    "RAZON SOCIAL",
-    "CANAL",
-    "SUB CANAL",
-    "REGION",
-    "DEPARTAMENTO",
-    "PROVINCIA",
-    "SUPERVISOR A CARGO",
-    "DNI SUPERVISOR",
-    "COORDINADOR",
-    "DNI COORDINADOR",
-    "CARGO (ROL)",
-    "NOMBRES",
-    "APELLIDO PATERNO",
-    "APELLIDO MATERNO",
-    "CELULAR",
-    "TIPO DE DOC",
-    "DNI",
-    "CORREO (USUARIO SGC/PRONTO)",
-    "ESTADO",
-    "TIPO DE CONTRATO",
-    "FECHA DE CREACION USUARIO",
-    "FECHA DE CESE",
-    "MOTIVO",
-    "CONTRATO FIRMADO",
-    "TIPO_GESTION",
-    "CAPACITADOR",
-    "ORIGEN_INGRESO",
-    "FUENTE_INGRESO",
-    "FECHA_ALTA_REGISTRO",
-    "FECHA_BAJA_REGISTRO",
-    "USUARIO_ALTA",
-    "USUARIO_BAJA",
-    "REACTIVACIONES",
-    "USUARIO ZYTRUST",
-    "ID (SGC/PRONTO)",
-    "NUEVO_GERENTE",
-    "Estado_Usuario",
-    "ZONA_1",
-]
-
-
-def _serie_col(df: pd.DataFrame, col: str) -> pd.Series:
-    """Devuelve siempre una Series aunque haya columnas repetidas."""
-    if col not in df.columns:
-        return pd.Series([""] * len(df), index=df.index)
-    s = df[col]
-    if isinstance(s, pd.DataFrame):
-        # Si hay cabeceras repetidas, usa la primera con data real.
-        for c in s.columns:
-            cand = s[c]
-            if cand.astype(str).str.strip().ne("").any():
-                return cand
-        return s.iloc[:, 0]
-    return s
-
-
-def ordenar_matriz(df: pd.DataFrame) -> pd.DataFrame:
-    """Ordena la matriz y evita columnas duplicadas/auxiliares desordenadas."""
-    if df.empty:
-        return df
-    df = df.copy()
-
-    # Completar supervisor final cuando la hoja viene con una columna SUPERVISOR vacía
-    # y la columna real es SUPERVISOR A CARGO.
-    if "SUPERVISOR A CARGO" in df.columns:
-        sup_real = _serie_col(df, "SUPERVISOR A CARGO").astype(str)
-        if "SUPERVISOR" in df.columns:
-            sup_aux = _serie_col(df, "SUPERVISOR").astype(str)
-            if sup_aux.str.strip().eq("").all():
-                df = df.drop(columns=[c for c in df.columns if c == "SUPERVISOR"], errors="ignore")
-        # no renombramos, mantenemos el nombre operativo correcto
-
-    # Quitar columnas repetidas manteniendo la primera aparición útil.
-    columnas_finales = []
-    vistos = set()
-    for c in df.columns:
-        cu = str(c).strip().upper()
-        if not cu or cu in vistos:
-            continue
-        vistos.add(cu)
-        columnas_finales.append(c)
-    df = df[columnas_finales].copy()
-
-    orden_presentes = [c for c in ORDEN_MATRIZ if c in df.columns]
-    extras = [c for c in df.columns if c not in orden_presentes and not str(c).upper().endswith("_NORM")]
-    return df[orden_presentes + extras].copy()
-
-
-# =========================
 # TABLA
 # =========================
 def _opciones_filtro(df: pd.DataFrame, columna: str) -> list[str]:
@@ -279,14 +186,13 @@ def mostrar_tabla(hoja, razon_usuario=None):
             df_vista = df_vista[mask].copy()
 
     st.caption(f"Registros mostrados: **{len(df_vista)}** de **{len(df)}**")
-    df_vista = ordenar_matriz(df_vista)
     cols_texto = {
         c: st.column_config.TextColumn(c)
         for c in df_vista.columns
         if "DNI" in str(c).upper() or "CELULAR" in str(c).upper() or str(c).upper().startswith("ID")
     }
-    st.dataframe(df_vista, use_container_width=True, height=520, column_config=cols_texto, hide_index=True)
-    return ordenar_matriz(df)
+    st.dataframe(df_vista, use_container_width=True, height=520, column_config=cols_texto)
+    return df
 
 
 # =========================
