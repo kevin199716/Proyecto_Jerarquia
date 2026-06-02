@@ -1,4 +1,4 @@
-# FIX_RESTORE_FLUIDO_DIALOGO_ABM_ESTADO_FIX_20260602
+# FIX_ESPEJO_STYLER_JERARQUIA_ORDEN_20260602
 """
 asistencia.py — Presencialidad Dealer
 Cambios aplicados:
@@ -574,17 +574,45 @@ def estilo_asistencia(valor: str) -> str:
     return "text-align:center;"
 
 def mostrar_espejo_mes(df: pd.DataFrame, dias_validos: list[int]) -> None:
+    """Muestra el espejo mensual completo sin romper por versión de pandas.
+
+    Pandas 3 retiró Styler.applymap(); algunas versiones de Render ya no
+    lo tienen. Por eso usamos Styler.map() cuando exista y dejamos fallback
+    sin estilo para no tumbar el módulo.
+    """
     if df.empty:
         st.info("No hay datos para mostrar.")
         return
+
     cols_dias_validos = [f"DIA_{d}" for d in dias_validos]
     columnas = COLUMNAS_FIJAS_EDITOR + cols_dias_validos
     for c in columnas:
         if c not in df.columns:
             df[c] = ""
-    df_vista = df[columnas].copy()
-    styler = df_vista.style.applymap(estilo_asistencia, subset=cols_dias_validos)
-    st.dataframe(styler, use_container_width=True, height=400)
+
+    # Evita columnas duplicadas si la hoja trae cabeceras repetidas o campos auxiliares.
+    columnas_unicas = []
+    for c in columnas:
+        if c not in columnas_unicas:
+            columnas_unicas.append(c)
+
+    df_vista = df[columnas_unicas].copy().fillna("")
+
+    # Deja las marcas limpias para que el color aplique bien.
+    for c in cols_dias_validos:
+        if c in df_vista.columns:
+            df_vista[c] = df_vista[c].map(limpiar_marca)
+
+    try:
+        styler = df_vista.style
+        if hasattr(styler, "map"):
+            styler = styler.map(estilo_asistencia, subset=[c for c in cols_dias_validos if c in df_vista.columns])
+        else:
+            styler = styler.applymap(estilo_asistencia, subset=[c for c in cols_dias_validos if c in df_vista.columns])
+        st.dataframe(styler, use_container_width=True, height=430)
+    except Exception:
+        # Fallback seguro: no colorea, pero muestra la trazabilidad completa.
+        st.dataframe(df_vista, use_container_width=True, height=430, hide_index=True)
 
 
 # =====================================================
