@@ -1,30 +1,50 @@
-# Proyecto Jerarquía WOW
+ORDEN CORRECTO DE COLUMNAS - colaboradores
 
-Archivos listos para subir a GitHub y desplegar en Render.
+Deja SOLO una columna TIPO_GESTION. Debe estar antes de SUPERVISOR.
+Elimina/renombra cualquier segunda columna TIPO_GESTION que esté después de ID (SGC/PRONTO).
 
-## Archivos principales
-- `app_maestra_vendedores.py`: app principal Streamlit.
-- `formulario.py`: módulo Alta optimizado, sin insertar/mover columnas para evitar límite de 10M de celdas.
-- `asistencia.py`: Presencialidad Dealer con caché, estados, motivos y sustentos históricos.
-- `registro_mod.py`: bajas y matriz con filtros rápidos.
-- `sheets.py`: conexión Google Sheets/Drive.
-- `auth.py`: login por `usuarios.json` local o secret `/etc/secrets/USUARIOS_CONTRASENAS` en Render.
+FECHA MOV
+RAZON SOCIAL
+CANAL
+SUB CANAL
+REGION
+DEPARTAMENTO
+PROVINCIA
+SUPERVISOR A CARGO
+DNI SUPERVISOR
+COORDINADOR
+DNI COORDINADOR
+CARGO (ROL)
+NOMBRES
+APELLIDO PATERNO
+APELLIDO MATERNO
+CELULAR
+TIPO DE DOC
+DNI
+CORREO (USUARIO SGC/PRONTO)
+ESTADO
+TIPO DE CONTRATO
+FECHA DE CREACION USUARIO
+FECHA DE CESE
+MOTIVO
+CONTRATO FIRMADO
+TIPO_GESTION
+SUPERVISOR
+CAPACITADOR
+ORIGEN_INGRESO
+FUENTE_INGRESO
+FECHA_ALTA_REGISTRO
+FECHA_BAJA_REGISTRO
+USUARIO_ALTA
+USUARIO_BAJA
+REACTIVACIONES
+USUARIO ZYTRUST
+ID (SGC/PRONTO)
+NUEVO_GERENTE
+Estado_Usuario
+ZONA_1
 
-## Importante para GitHub
-No subir credenciales reales. Este paquete ignora:
-- `credenciales.json`
-- `usuarios.json`
-- `.streamlit/secrets.toml`
-
-Para local, copia `usuarios.json.example` como `usuarios.json` y cambia las claves.
-Para Render, configura:
-- `GOOGLE_CREDENTIALS` con el JSON de la cuenta de servicio.
-- `USUARIOS_CONTRASENAS` como secret file si usas el flujo actual de `auth.py`.
-
-## Orden de columnas
-Revisa `ORDEN_COLUMNAS_COLABORADORES.txt` antes de probar altas nuevas.
-
-
-## Fix V19
-- Lectura robusta de Google Sheets aunque exista una cabecera repetida en colaboradores.
-- Evita el error de gspread: `the header row in the worksheet is not unique`.
+Reglas:
+- VENTAS INDIRECTAS: TIPO_GESTION = CAMPO y se muestra bloqueado en el formulario.
+- VENTAS DIRECTAS: TIPO_GESTION = vacío y NO se muestra en el formulario.
+- FECHA MOV: vacío en altas; solo se llena en bajas.

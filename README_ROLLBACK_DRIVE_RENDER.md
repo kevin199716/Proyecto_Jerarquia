@@ -1,11 +1,30 @@
-# Rollback urgente - versión Drive/Google Sheets
+# Proyecto Jerarquía WOW
 
-Esta carpeta restaura el proyecto a la versión que trabaja con Google Sheets/Drive.
+Archivos listos para subir a GitHub y desplegar en Render.
 
-Pasos:
-1. Subir estos archivos a GitHub reemplazando los actuales.
-2. En Render mantener/crear GOOGLE_CREDENTIALS con el JSON completo de Google.
-3. DATABASE_URL puede quedar, pero esta versión no la usa para presencialidad.
-4. Ejecutar Manual Deploy -> Clear build cache & deploy.
+## Archivos principales
+- `app_maestra_vendedores.py`: app principal Streamlit.
+- `formulario.py`: módulo Alta optimizado, sin insertar/mover columnas para evitar límite de 10M de celdas.
+- `asistencia.py`: Presencialidad Dealer con caché, estados, motivos y sustentos históricos.
+- `registro_mod.py`: bajas y matriz con filtros rápidos.
+- `sheets.py`: conexión Google Sheets/Drive.
+- `auth.py`: login por `usuarios.json` local o secret `/etc/secrets/USUARIOS_CONTRASENAS` en Render.
 
-Objetivo: volver a levantar Alta, Bajas y Presencialidad con el flujo anterior mientras se define una solución real de red para BD.
+## Importante para GitHub
+No subir credenciales reales. Este paquete ignora:
+- `credenciales.json`
+- `usuarios.json`
+- `.streamlit/secrets.toml`
+
+Para local, copia `usuarios.json.example` como `usuarios.json` y cambia las claves.
+Para Render, configura:
+- `GOOGLE_CREDENTIALS` con el JSON de la cuenta de servicio.
+- `USUARIOS_CONTRASENAS` como secret file si usas el flujo actual de `auth.py`.
+
+## Orden de columnas
+Revisa `ORDEN_COLUMNAS_COLABORADORES.txt` antes de probar altas nuevas.
+
+
+## Fix V19
+- Lectura robusta de Google Sheets aunque exista una cabecera repetida en colaboradores.
+- Evita el error de gspread: `the header row in the worksheet is not unique`.

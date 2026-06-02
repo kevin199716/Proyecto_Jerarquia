@@ -1,26 +1,26 @@
 {
   "admin": {
-    "password": "CAMBIAR_CLAVE",
+    "password": "1234@wow",
     "rol": "backoffice",
     "estado": "activo",
     "razon": "ALL"
   },
-  "editor1": {
-    "password": "CAMBIAR_CLAVE",
-    "rol": "editor",
-    "estado": "activo",
-    "razon": "ALL"
-  },
-  "presencialidad1": {
-    "password": "CAMBIAR_CLAVE",
+  "interconexion_presencialidad": {
+    "password": "Inter360@123",
     "rol": "presencialidad",
     "estado": "activo",
-    "razon": "ALL"
+    "razon": "INTERCONEXION 360 SAC"
   },
-  "presencialidad2": {
-    "password": "CAMBIAR_CLAVE",
+  "multiforce_presencialidad": {
+    "password": "MultiForce@123",
     "rol": "presencialidad",
     "estado": "activo",
-    "razon": "ALL"
+    "razon": "MULTIPLE FORCE SAC"
+  },
+  "nogales_presencialidad": {
+    "password": "Nogales@123",
+    "rol": "presencialidad",
+    "estado": "activo",
+    "razon": "NOGALES HIGH SAC"
   }
 }
