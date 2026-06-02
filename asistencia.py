@@ -1,4 +1,4 @@
-# FIX_ETIQUETAS_FILTROS_SOLO_ACTIVOS_20260602
+# FIX_PRESENCIALIDAD_SIN_BOTONES_NO_BORRA_ACTIVOS_20260602
 """
 asistencia.py — Presencialidad Dealer
 Cambios aplicados:
@@ -63,7 +63,7 @@ KEY_HEADERS = "asis_headers_cache"
 KEY_LOADED = "asis_loaded"
 KEY_LOAD_TS = "asis_load_timestamp"
 
-CACHE_TTL = 600
+CACHE_TTL = 45
 # Mantener la vista amplia original. Solo pagina si realmente supera este límite.
 MAX_FILAS_EDITOR = 200
 
@@ -227,17 +227,7 @@ def validar_o_crear_cabecera(hoja_asistencia) -> bool:
         st.markdown("**Estructura correcta:**")
         st.code(" | ".join(COLUMNAS_ASISTENCIA), language="text")
 
-        with st.expander("🧹 Recrear estructura de Asistencia desde la app"):
-            st.info("Esto borra únicamente la pestaña Asistencia y crea la cabecera correcta. Luego presiona Sincronizar mes para cargar colaboradores vigentes.")
-            confirmar = st.checkbox("Confirmo que deseo borrar SOLO la hoja Asistencia y recrear la cabecera", key="confirm_reset_asistencia")
-            if confirmar and st.button("🧹 Borrar Asistencia y crear cabecera", key="btn_reset_asistencia"):
-                hoja_asistencia.clear()
-                hoja_asistencia.append_row(COLUMNAS_ASISTENCIA, value_input_option="USER_ENTERED")
-                for k in [KEY_DF_TOTAL, KEY_DF_ORIGINAL, KEY_HEADERS, KEY_LOADED, KEY_LOAD_TS]:
-                    if k in st.session_state:
-                        del st.session_state[k]
-                st.success("✅ Hoja Asistencia recreada. Ahora presiona Sincronizar mes.")
-                st.rerun()
+        st.info("Por seguridad, desde la app NO se borra ni se recrea la hoja Asistencia. Corrige la cabecera manualmente si corresponde.")
         return False
 
     return True
@@ -518,11 +508,72 @@ def cache_vencido() -> bool:
     return (time.time() - ts) > CACHE_TTL
 
 
-def cargar_cache_desde_drive(hoja_asistencia, forzar: bool = False) -> None:
+def cargar_cache_desde_drive(hoja_asistencia, hoja_colaboradores=None, forzar: bool = False) -> None:
+    """Carga la vista viva SIN escribir en Drive.
+
+    - Lee Asistencia como histórico.
+    - Si recibe hoja_colaboradores, cruza contra colaboradores del mes actual.
+    - Si hay altas nuevas en colaboradores que aún no existen en Asistencia,
+      las muestra como filas virtuales con ROW_SHEET vacío.
+    - Al guardar una fila virtual, recién se hace append de esa fila puntual.
+    - No sincroniza, no borra, no usa clear(), no actualiza masivamente.
+    """
     if not forzar and st.session_state.get(KEY_LOADED) and not cache_vencido():
         return
+
     with st.spinner("Cargando datos desde Google Drive…"):
         df_total, headers = leer_asistencia_drive(hoja_asistencia)
+
+        if hoja_colaboradores is not None:
+            try:
+                df_colab = leer_colaboradores_drive(hoja_colaboradores)
+                df_vigentes = obtener_promotores_vigentes_mes(df_colab)
+
+                if not df_vigentes.empty:
+                    periodo = periodo_actual()
+                    bases = []
+                    for _, row in df_vigentes.iterrows():
+                        payload = construir_payload_base(row)
+                        if payload.get("DNI"):
+                            bases.append(payload)
+
+                    if bases:
+                        df_base = pd.DataFrame(bases)
+                        for c in COLUMNAS_ASISTENCIA:
+                            if c not in df_base.columns:
+                                df_base[c] = ""
+                        df_base = df_base[COLUMNAS_ASISTENCIA].copy()
+                        df_base["ROW_SHEET"] = ""
+                        df_base["_KEY"] = df_base.apply(lambda r: clave_asistencia(r.get("DNI", ""), r.get("FECHA_ALTA", "")), axis=1)
+
+                        for c in COLUMNAS_ASISTENCIA:
+                            if c not in df_total.columns:
+                                df_total[c] = ""
+                        if "ROW_SHEET" not in df_total.columns:
+                            df_total["ROW_SHEET"] = ""
+
+                        df_total["_KEY"] = df_total.apply(lambda r: clave_asistencia(r.get("DNI", ""), r.get("FECHA_ALTA", "")), axis=1)
+                        mask_mes = df_total["PERIODO"].astype(str).eq(periodo)
+
+                        # Actualiza SOLO EN MEMORIA los datos base actuales para registros ya existentes.
+                        base_map = df_base.drop_duplicates("_KEY", keep="last").set_index("_KEY")
+                        idx_exist = df_total.index[mask_mes & df_total["_KEY"].isin(base_map.index)]
+                        for idx in idx_exist:
+                            k = df_total.at[idx, "_KEY"]
+                            for col in COLUMNAS_BASE:
+                                df_total.at[idx, col] = base_map.at[k, col]
+
+                        # Agrega filas virtuales para altas nuevas que todavía no están en Asistencia.
+                        existentes = set(df_total.loc[mask_mes, "_KEY"].astype(str))
+                        df_faltantes = df_base[~df_base["_KEY"].astype(str).isin(existentes)].copy()
+                        if not df_faltantes.empty:
+                            df_total = pd.concat([df_total, df_faltantes[df_total.columns]], ignore_index=True)
+
+                        if "_KEY" in df_total.columns:
+                            df_total = df_total.drop(columns=["_KEY"])
+            except Exception as e:
+                st.warning(f"No se pudo cruzar colaboradores en memoria: {e}")
+
     st.session_state[KEY_DF_TOTAL] = df_total.copy()
     st.session_state[KEY_DF_ORIGINAL] = df_total.copy()
     st.session_state[KEY_HEADERS] = headers
@@ -643,6 +694,34 @@ def preparar_updates(df_editado: pd.DataFrame, df_original: pd.DataFrame, header
     return updates
 
 
+
+
+def preparar_appends_nuevos(df_editado_raw: pd.DataFrame, df_original_raw: pd.DataFrame, headers: list[str], col_hoy: str) -> list[list]:
+    """Prepara filas nuevas para registros virtuales sin ROW_SHEET.
+    Solo agrega cuando el usuario marcó algo en DIA_X.
+    """
+    if df_editado_raw is None or df_editado_raw.empty:
+        return []
+    headers_up = [limpiar_texto(h).upper() for h in headers]
+    if not headers_up:
+        headers_up = COLUMNAS_ASISTENCIA.copy()
+    filas = []
+    for i in range(len(df_editado_raw)):
+        nuevo = limpiar_marca(df_editado_raw.iloc[i].get(col_hoy, ""))
+        anterior = limpiar_marca(df_original_raw.iloc[i].get(col_hoy, "")) if i < len(df_original_raw) else ""
+        row_sheet = limpiar_texto(df_original_raw.iloc[i].get("ROW_SHEET", "")) if i < len(df_original_raw) else ""
+        if row_sheet.isdigit():
+            continue
+        if not nuevo or nuevo == anterior:
+            continue
+        base = {col: "" for col in headers_up}
+        for col in COLUMNAS_BASE:
+            if col in df_original_raw.columns:
+                base[col] = limpiar_texto(df_original_raw.iloc[i].get(col, ""))
+        base[col_hoy] = nuevo
+        filas.append([base.get(h, "") for h in headers_up])
+    return filas
+
 def actualizar_cache_con_editado(df_editado: pd.DataFrame, col_hoy: str) -> None:
     if KEY_DF_TOTAL not in st.session_state:
         return
@@ -748,36 +827,12 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
     hoy_dia = dia_actual()
     col_hoy = f"DIA_{hoy_dia}"
 
-    c1, c2, c3 = st.columns([1.25, 1.15, 5])
+    st.info(
+        f"📅 Periodo: **{periodo}** | Día editable: **{col_hoy}** | "
+        "La información se lee al abrir/refrescar la página. No hay sincronización manual para dealers."
+    )
 
-    with c1:
-        if st.button("🔄 Sincronizar mes", key="btn_sync_asistencia"):
-            with st.spinner("Sincronizando con colaboradores…"):
-                try:
-                    nuevos, actualizados = sincronizar_mes(hoja_asistencia, hoja_colaboradores)
-                    cargar_cache_desde_drive(hoja_asistencia, forzar=True)
-                    st.success(f"✅ Mes sincronizado. Nuevos: {nuevos} | Datos base actualizados: {actualizados}")
-                except Exception as e:
-                    st.error(f"Error sincronizando: {e}")
-                    return
-
-    with c2:
-        if st.button("♻️ Recargar Drive", key="btn_reload_asistencia"):
-            with st.spinner("Recargando desde Drive…"):
-                try:
-                    cargar_cache_desde_drive(hoja_asistencia, forzar=True)
-                    st.success("✅ Datos actualizados.")
-                except Exception as e:
-                    st.error(f"Error recargando: {e}")
-                    return
-
-    with c3:
-        st.info(
-            f"📅 Periodo: **{periodo}** | Día editable: **{col_hoy}** | "
-            "Los días anteriores y futuros quedan bloqueados."
-        )
-
-    cargar_cache_desde_drive(hoja_asistencia)
+    cargar_cache_desde_drive(hoja_asistencia, hoja_colaboradores=hoja_colaboradores)
 
     df_total = st.session_state[KEY_DF_TOTAL].copy()
     df_original = st.session_state[KEY_DF_ORIGINAL].copy()
@@ -798,7 +853,7 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
         df_mes = df_mes[df_mes["RAZON SOCIAL"].astype(str).str.strip().str.upper().eq(razon_usuario.upper())].copy()
 
     if df_mes.empty:
-        st.warning("⚠️ No hay registros del periodo actual. Presiona **Sincronizar mes**.")
+        st.warning("⚠️ No hay registros del periodo actual para mostrar. Revisa que existan colaboradores activos de este dealer o actualiza/refresca la página.")
         return
 
     # =====================================================
@@ -815,40 +870,25 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
 
     def _valor_guardado(clave, opciones):
         valor = st.session_state.get(clave, "TODOS")
-        return valor if valor in opciones else "TODOS"
+        if valor in opciones:
+            return valor
+        return opciones[0] if opciones else "TODOS"
 
-    with st.form("form_filtros_presencialidad"):
-        # IMPORTANTE: etiquetas visibles. No usar label_visibility="collapsed".
-        f1, f2, f3, f4, f5, f6 = st.columns(6)
-        with f1:
-            tmp_razon = st.selectbox("Razón Social", op_razon, index=op_razon.index(_valor_guardado("asis_filtro_razon", op_razon)), key="asis_tmp_razon")
-        with f2:
-            tmp_supervisor = st.selectbox("Supervisor", op_supervisor, index=op_supervisor.index(_valor_guardado("asis_filtro_supervisor", op_supervisor)), key="asis_tmp_supervisor")
-        with f3:
-            tmp_coord = st.selectbox("Coordinador", op_coordinador, index=op_coordinador.index(_valor_guardado("asis_filtro_coord", op_coordinador)), key="asis_tmp_coord")
-        with f4:
-            tmp_dep = st.selectbox("Departamento", op_departamento, index=op_departamento.index(_valor_guardado("asis_filtro_dep", op_departamento)), key="asis_tmp_dep")
-        with f5:
-            tmp_prov = st.selectbox("Provincia", op_provincia, index=op_provincia.index(_valor_guardado("asis_filtro_prov", op_provincia)), key="asis_tmp_prov")
-        with f6:
-            tmp_estado = st.selectbox("Estado", op_estado, index=op_estado.index(_valor_guardado("asis_filtro_estado", op_estado)), key="asis_tmp_estado")
+    # Filtros con etiquetas visibles. Sin st.form para evitar Missing Submit Button.
+    f1, f2, f3, f4, f5, f6 = st.columns(6)
+    with f1:
+        filtro_razon = st.selectbox("Razón Social", op_razon, index=op_razon.index(_valor_guardado("asis_filtro_razon", op_razon)), key="asis_filtro_razon")
+    with f2:
+        filtro_supervisor = st.selectbox("Supervisor", op_supervisor, index=op_supervisor.index(_valor_guardado("asis_filtro_supervisor", op_supervisor)), key="asis_filtro_supervisor")
+    with f3:
+        filtro_coord = st.selectbox("Coordinador", op_coordinador, index=op_coordinador.index(_valor_guardado("asis_filtro_coord", op_coordinador)), key="asis_filtro_coord")
+    with f4:
+        filtro_dep = st.selectbox("Departamento", op_departamento, index=op_departamento.index(_valor_guardado("asis_filtro_dep", op_departamento)), key="asis_filtro_dep")
+    with f5:
+        filtro_prov = st.selectbox("Provincia", op_provincia, index=op_provincia.index(_valor_guardado("asis_filtro_prov", op_provincia)), key="asis_filtro_prov")
+    with f6:
+        filtro_estado = st.selectbox("Estado", ["ACTIVO"], index=0, key="asis_filtro_estado", disabled=True)
 
-        aplicar_filtros = st.form_submit_button("🔎 Aplicar filtros", use_container_width=True)
-
-    if aplicar_filtros:
-        st.session_state["asis_filtro_razon"] = tmp_razon
-        st.session_state["asis_filtro_supervisor"] = tmp_supervisor
-        st.session_state["asis_filtro_coord"] = tmp_coord
-        st.session_state["asis_filtro_dep"] = tmp_dep
-        st.session_state["asis_filtro_prov"] = tmp_prov
-        st.session_state["asis_filtro_estado"] = tmp_estado
-
-    filtro_razon = _valor_guardado("asis_filtro_razon", op_razon)
-    filtro_supervisor = _valor_guardado("asis_filtro_supervisor", op_supervisor)
-    filtro_coord = _valor_guardado("asis_filtro_coord", op_coordinador)
-    filtro_dep = _valor_guardado("asis_filtro_dep", op_departamento)
-    filtro_prov = _valor_guardado("asis_filtro_prov", op_provincia)
-    filtro_estado = _valor_guardado("asis_filtro_estado", op_estado)
 
     df_filtrado = filtrar_df(df_mes, filtro_razon, filtro_supervisor, filtro_coord, filtro_dep, filtro_prov, filtro_estado)
     # Seguridad operativa: el registro de presencialidad SOLO trabaja ACTIVO.
@@ -1025,15 +1065,23 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                             headers=headers,
                             col_hoy=col_hoy,
                         )
-                        if not updates:
+                        appends = preparar_appends_nuevos(pd.DataFrame(editado).fillna(""), df_editor.fillna(""), headers, col_hoy)
+
+                        if not updates and not appends:
                             st.info("ℹ️ No se detectaron cambios para guardar.")
                         else:
-                            for i in range(0, len(updates), 100):
-                                hoja_asistencia.batch_update(updates[i:i + 100], value_input_option="USER_ENTERED")
-                                if i + 100 < len(updates):
-                                    time.sleep(0.10)
+                            if updates:
+                                for i in range(0, len(updates), 100):
+                                    hoja_asistencia.batch_update(updates[i:i + 100], value_input_option="USER_ENTERED")
+                                    if i + 100 < len(updates):
+                                        time.sleep(0.10)
+                            if appends:
+                                hoja_asistencia.append_rows(appends, value_input_option="USER_ENTERED")
                             actualizar_cache_con_editado(df_editado, col_hoy)
-                            st.session_state["asis_guardado_msg"] = f"✅ Presencialidad guardada. Celdas actualizadas: {len(updates)}"
+                            for k in [KEY_DF_TOTAL, KEY_DF_ORIGINAL, KEY_HEADERS, KEY_LOADED, KEY_LOAD_TS]:
+                                if k in st.session_state:
+                                    del st.session_state[k]
+                            st.session_state["asis_guardado_msg"] = f"✅ Presencialidad guardada. Actualizados: {len(updates)} | Nuevos: {len(appends)}"
                             st.rerun()
                 except Exception as e:
                     st.error(f"❌ Error guardando presencialidad: {e}")
