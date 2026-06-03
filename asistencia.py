@@ -1083,7 +1083,14 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
 
         _col_bm = f"DIA_{_dia_bm}"
         _df_periodo = df_historico[df_historico["PERIODO"].astype(str).eq(_per_bm)].copy()
-        if filtro_razon and filtro_razon != op_razon[0] and "RAZON SOCIAL" in _df_periodo.columns:
+
+        # Solo mostrar personas que YA tienen A-BM marcado en ese día
+        if _col_bm in _df_periodo.columns:
+            _df_periodo = _df_periodo[_df_periodo[_col_bm].astype(str).str.contains("A-BM", na=False)]
+        else:
+            _df_periodo = pd.DataFrame()
+
+        if filtro_razon and filtro_razon != op_razon[0] and not _df_periodo.empty and "RAZON SOCIAL" in _df_periodo.columns:
             _df_periodo = _df_periodo[_df_periodo["RAZON SOCIAL"].astype(str).str.strip().eq(filtro_razon)]
 
         if _df_periodo.empty:
