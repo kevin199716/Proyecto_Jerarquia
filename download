@@ -4,8 +4,8 @@ fileWatcherType = "none"
 runOnSave = false
 enableCORS = false
 enableXsrfProtection = true
-maxUploadSize = 10
-maxMessageSize = 50
+maxUploadSize = 50
+maxMessageSize = 100
 
 [browser]
 gatherUsageStats = false
