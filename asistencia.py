@@ -1059,7 +1059,7 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
         if df_editor_base.empty:
             st.warning("Sin registros ACTIVOS para hoy.")
         else:
-            columnas_hoy = ["RAZON SOCIAL", "DNI", "NOMBRE", col_hoy]
+            columnas_hoy = ["RAZON SOCIAL", "SUPERVISOR", "COORDINADOR", "DEPARTAMENTO", "PROVINCIA", "ESTADO", "DNI", "NOMBRE", col_hoy]
             df_hoy = df_editor_base[columnas_hoy].copy().fillna("")
             
             with st.form(key="form_hoy"):
@@ -1068,7 +1068,7 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                     use_container_width=True,
                     height=min(380, 50 + len(df_hoy) * 32),
                     hide_index=True,
-                    disabled=["RAZON SOCIAL", "DNI", "NOMBRE"],
+                    disabled=["RAZON SOCIAL", "SUPERVISOR", "COORDINADOR", "DEPARTAMENTO", "PROVINCIA", "ESTADO", "DNI", "NOMBRE"],
                     column_config={col_hoy: st.column_config.SelectboxColumn(col_hoy, options=MARCAS_PRESENCIALIDAD)},
                     num_rows="fixed",
                     key="editor_hoy",
