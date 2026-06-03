@@ -159,10 +159,6 @@ def _leer_matriz_cached(_hoja):
 
 
 def mostrar_tabla(hoja, razon_usuario=None):
-    key_reload = f"matriz_reload_{st.session_state.get('rol', '')}_{str(razon_usuario or 'ALL').replace(' ', '_')}"
-    if st.button("♻️ Recargar matriz", key=key_reload):
-        _leer_matriz_cached.clear()
-
     df = _leer_matriz_cached(hoja)
     if df.empty:
         st.info("No hay datos")

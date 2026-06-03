@@ -957,8 +957,8 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
     # Historia completa para espejo y BM retroactivo
     df_historico, _ = _leer_asistencia_cached(hoja_asistencia)
 
-    # Auto-sync ESTADO siempre al entrar al módulo — sin botón, sin acción del usuario.
-    # Lee colaboradores fresco de Drive y actualiza ESTADO en asistencia.
+    # SYNC AUTOMÁTICO SILENCIOSO: sin botones, sin spinners, sin acciones del usuario.
+    # Corre una vez por sesión al entrar al módulo.
     if not st.session_state.get("asis_estado_sync"):
         try:
             leer_colaboradores_drive.clear()
@@ -966,9 +966,22 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
             if not _dc.empty and "DNI" in _dc.columns and "ESTADO" in _dc.columns:
                 _dc["DNI"] = _dc["DNI"].apply(normalizar_dni)
                 _em = _dc.drop_duplicates("DNI").set_index("DNI")["ESTADO"].to_dict()
+                # Actualizar ESTADO en registros existentes
                 df_total["ESTADO"] = df_total["DNI"].apply(
                     lambda d: _em.get(normalizar_dni(str(d)), "ACTIVO")
                 ).str.strip().str.upper()
+                # Agregar filas para nuevos activos que no están en asistencia
+                _dnis_existentes = set(df_total["DNI"].apply(normalizar_dni).tolist())
+                _activos_nuevos = _dc[
+                    (_dc["ESTADO"].str.upper() == "ACTIVO") &
+                    (~_dc["DNI"].isin(_dnis_existentes))
+                ]
+                if not _activos_nuevos.empty:
+                    sincronizar_mes(hoja_asistencia, hoja_colaboradores)
+                    _leer_asistencia_cached.clear()
+                    st.session_state.pop(KEY_LOADED, None)
+                    st.session_state["asis_estado_sync"] = True
+                    st.rerun()
                 st.session_state[KEY_DF_TOTAL] = df_total
                 st.session_state[KEY_DF_ORIGINAL] = df_total
                 del _dc, _em
@@ -1005,25 +1018,6 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
     op_estado = lista_opciones(df_mes, "ESTADO")
 
     # Botón recargar: fuerza lectura fresca de Drive y sincroniza filas nuevas
-    col_reload, col_info = st.columns([1, 4])
-    with col_reload:
-        if st.button("🔄 Recargar datos Drive", key="btn_recargar_datos_drive"):
-            with st.spinner("Sincronizando con Drive..."):
-                # Limpiar TODOS los cachés y flags
-                _leer_asistencia_cached.clear()
-                leer_colaboradores_drive.clear()
-                for key in ["asis_estado_sync", KEY_LOADED, KEY_DF_TOTAL, KEY_DF_ORIGINAL]:
-                    st.session_state.pop(key, None)
-                # Sincronizar mes: crea filas para nuevos activos en asistencia
-                try:
-                    sincronizar_mes(hoja_asistencia, hoja_colaboradores)
-                    st.success("✅ Sincronizado. Los cambios se reflejan ahora.")
-                except Exception as e:
-                    st.warning(f"Sync parcial: {e}")
-                st.rerun()
-    with col_info:
-        st.caption("Presiona si activaste/inactivaste alguien en colaboradores y no aparece aquí.")
-
     def _valor_guardado(clave, opciones):
         valor = st.session_state.get(clave, "TODOS")
         return valor if valor in opciones else "TODOS"
