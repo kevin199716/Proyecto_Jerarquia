@@ -573,6 +573,7 @@ def cargar_cache_desde_drive(hoja_asistencia, forzar: bool = False) -> None:
         return
     if forzar:
         _leer_asistencia_cached.clear()
+        st.session_state.pop("asis_estado_sync", None)
     df_total, headers = _leer_asistencia_cached(hoja_asistencia)
     # Una sola copia de trabajo por sesión. El "original" referencia el mismo
     # objeto; el diff de guardado ya hace su propia copia cuando la necesita.
@@ -966,6 +967,9 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                 df_total["ESTADO"] = df_total["DNI"].apply(
                     lambda d: _em.get(normalizar_dni(str(d)), "ACTIVO")
                 ).str.strip().str.upper()
+                # CRÍTICO: guardar de vuelta en session_state
+                st.session_state[KEY_DF_TOTAL] = df_total
+                st.session_state[KEY_DF_ORIGINAL] = df_total
                 del _dc, _em
         except Exception:
             pass
