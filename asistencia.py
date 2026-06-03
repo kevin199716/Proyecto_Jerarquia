@@ -957,36 +957,10 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
     # Historia completa para espejo y BM retroactivo
     df_historico, _ = _leer_asistencia_cached(hoja_asistencia)
 
-    # SYNC AUTOMÁTICO SILENCIOSO: sin botones, sin spinners, sin acciones del usuario.
-    # Corre una vez por sesión al entrar al módulo.
+    # El filtrado de activos usa colaboradores directamente como fuente de verdad.
+    # Solo limpiamos el caché de colaboradores una vez por sesión para que siempre esté fresco.
     if not st.session_state.get("asis_estado_sync"):
-        try:
-            leer_colaboradores_drive.clear()
-            _dc = leer_colaboradores_drive(hoja_colaboradores)
-            if not _dc.empty and "DNI" in _dc.columns and "ESTADO" in _dc.columns:
-                _dc["DNI"] = _dc["DNI"].apply(normalizar_dni)
-                _em = _dc.drop_duplicates("DNI").set_index("DNI")["ESTADO"].to_dict()
-                # Actualizar ESTADO en registros existentes
-                df_total["ESTADO"] = df_total["DNI"].apply(
-                    lambda d: _em.get(normalizar_dni(str(d)), "")
-                ).str.strip().str.upper()
-                # Agregar filas para nuevos activos que no están en asistencia
-                _dnis_existentes = set(df_total["DNI"].apply(normalizar_dni).tolist())
-                _activos_nuevos = _dc[
-                    (_dc["ESTADO"].str.upper() == "ACTIVO") &
-                    (~_dc["DNI"].isin(_dnis_existentes))
-                ]
-                if not _activos_nuevos.empty:
-                    sincronizar_mes(hoja_asistencia, hoja_colaboradores)
-                    _leer_asistencia_cached.clear()
-                    st.session_state.pop(KEY_LOADED, None)
-                    st.session_state["asis_estado_sync"] = True
-                    st.rerun()
-                st.session_state[KEY_DF_TOTAL] = df_total
-                st.session_state[KEY_DF_ORIGINAL] = df_total
-                del _dc, _em
-        except Exception:
-            pass
+        leer_colaboradores_drive.clear()
         st.session_state["asis_estado_sync"] = True
 
     for col in COLUMNAS_ASISTENCIA:
@@ -1061,7 +1035,21 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
         return
 
     # Editor solo para personas vigentes hoy.
-    df_editor_base = df_filtrado[df_filtrado.apply(fila_editable_hoy, axis=1)].copy()
+    # FUENTE DE VERDAD: colaboradores define quién es ACTIVO, no asistencia.
+    # Leer colaboradores (cacheado) y filtrar solo los DNI activos hoy.
+    try:
+        _dc = leer_colaboradores_drive(hoja_colaboradores)
+        if not _dc.empty and "DNI" in _dc.columns and "ESTADO" in _dc.columns:
+            _dc["DNI"] = _dc["DNI"].apply(normalizar_dni)
+            _activos = set(_dc[_dc["ESTADO"].str.upper().str.strip() == "ACTIVO"]["DNI"].tolist())
+        else:
+            _activos = None
+    except Exception:
+        _activos = None
+
+    df_editor_base = df_filtrado[
+        df_filtrado["DNI"].apply(normalizar_dni).isin(_activos)
+    ].copy() if _activos is not None else df_filtrado[df_filtrado.apply(fila_editable_hoy, axis=1)].copy()
     total_filtrado = len(df_editor_base)
 
     st.caption(f"Registros editables hoy: **{total_filtrado}** | Registros en espejo mensual: **{len(df_filtrado)}**")
