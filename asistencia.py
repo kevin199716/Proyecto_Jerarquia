@@ -1009,17 +1009,20 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
     with col_reload:
         if st.button("🔄 Recargar datos Drive", key="btn_recargar_datos_drive"):
             with st.spinner("Sincronizando con Drive..."):
+                # Limpiar TODOS los cachés y flags
                 _leer_asistencia_cached.clear()
                 leer_colaboradores_drive.clear()
-                st.session_state.pop("asis_estado_sync", None)
-                st.session_state.pop(KEY_LOADED, None)
+                for key in ["asis_estado_sync", KEY_LOADED, KEY_DF_TOTAL, KEY_DF_ORIGINAL]:
+                    st.session_state.pop(key, None)
+                # Sincronizar mes: crea filas para nuevos activos en asistencia
                 try:
                     sincronizar_mes(hoja_asistencia, hoja_colaboradores)
-                except Exception:
-                    pass
+                    st.success("✅ Sincronizado. Los cambios se reflejan ahora.")
+                except Exception as e:
+                    st.warning(f"Sync parcial: {e}")
                 st.rerun()
     with col_info:
-        st.caption("Presiona para ver activos/inactivos nuevos o cambios recientes en colaboradores.")
+        st.caption("Presiona si activaste/inactivaste alguien en colaboradores y no aparece aquí.")
 
     def _valor_guardado(clave, opciones):
         valor = st.session_state.get(clave, "TODOS")

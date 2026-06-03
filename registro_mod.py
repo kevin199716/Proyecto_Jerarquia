@@ -215,28 +215,6 @@ def mostrar_tabla(hoja, razon_usuario=None):
 
     st.caption(f"Registros mostrados: **{len(df_vista)}** de **{len(df)}**")
 
-    # Descarga directa: un solo clic, datos del cache actual (actualizado cada 3 min o al recargar)
-    import io as _io
-    _buf = _io.BytesIO()
-    try:
-        df.to_excel(_buf, index=False, engine="openpyxl")
-        _mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-        _ext = "xlsx"
-    except Exception:
-        _buf = _io.BytesIO()
-        df.to_csv(_buf, index=False, encoding="utf-8-sig")
-        _mime = "text/csv"
-        _ext = "csv"
-    _buf.seek(0)
-    st.download_button(
-        label="⬇️ Descargar Excel",
-        data=_buf.getvalue(),
-        file_name=f"jerarquia.{_ext}",
-        mime=_mime,
-        key="dl_jerarquia_directo",
-        use_container_width=False,
-    )
-
     cols_texto = {
         c: st.column_config.TextColumn(c)
         for c in df_vista.columns
