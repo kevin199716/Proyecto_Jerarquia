@@ -563,8 +563,7 @@ def cache_vencido() -> bool:
 
 @st.cache_data(ttl=CACHE_TTL, show_spinner=False)
 def _leer_asistencia_cached(_hoja_asistencia):
-    """Lee y normaliza la hoja de Asistencia UNA sola vez y la comparte entre
-    todas las sesiones (antes cada usuario leía Drive y guardaba 2 copias)."""
+    """Lee TODA la asistencia UNA vez, compartida entre sesiones."""
     return leer_asistencia_drive(_hoja_asistencia)
 
 
@@ -574,11 +573,12 @@ def cargar_cache_desde_drive(hoja_asistencia, forzar: bool = False) -> None:
     if forzar:
         _leer_asistencia_cached.clear()
     df_total, headers = _leer_asistencia_cached(hoja_asistencia)
-    # Una sola copia de trabajo por sesión. El "original" referencia el mismo
-    # objeto; el diff de guardado ya hace su propia copia cuando la necesita.
-    df_total = df_total.copy()
-    st.session_state[KEY_DF_TOTAL] = df_total
-    st.session_state[KEY_DF_ORIGINAL] = df_total
+    # Guardar SOLO el mes actual en session_state para ahorrar RAM.
+    # La historia completa vive solo en el cache global compartido.
+    periodo_actual_str = periodo_actual()
+    df_mes = df_total[df_total["PERIODO"].astype(str).eq(periodo_actual_str)].copy()
+    st.session_state[KEY_DF_TOTAL] = df_mes
+    st.session_state[KEY_DF_ORIGINAL] = df_mes
     st.session_state[KEY_HEADERS] = headers
     st.session_state[KEY_LOADED] = True
     st.session_state[KEY_LOAD_TS] = time.time()
@@ -949,26 +949,17 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
 
     cargar_cache_desde_drive(hoja_asistencia)
 
-    df_total = st.session_state[KEY_DF_TOTAL].copy()
+    # Session state tiene SOLO el mes actual (ahorra RAM).
+    # Para histórico/retroactivo usamos el cache global.
+    df_total = st.session_state[KEY_DF_TOTAL]
     df_original = df_total
     headers = st.session_state.get(KEY_HEADERS, COLUMNAS_ASISTENCIA)
+    # Cache global para secciones históricas (espejo + BM retroactivo)
+    df_historico, _ = _leer_asistencia_cached(hoja_asistencia)
 
     for col in COLUMNAS_ASISTENCIA:
         if col not in df_total.columns:
             df_total[col] = ""
-
-    # SINCRONIZACIÓN AUTOMÁTICA: actualiza ESTADO en asistencia con el estado
-    # actual de colaboradores. Sin esto, las bajas aplicadas no se reflejan.
-    try:
-        df_colab_actual = leer_colaboradores_drive(hoja_colaboradores)
-        if not df_colab_actual.empty and "DNI" in df_colab_actual.columns and "ESTADO" in df_colab_actual.columns:
-            df_colab_actual["DNI"] = df_colab_actual["DNI"].apply(normalizar_dni)
-            estado_por_dni = df_colab_actual.drop_duplicates("DNI").set_index("DNI")["ESTADO"].to_dict()
-            df_total["ESTADO"] = df_total["DNI"].apply(
-                lambda d: estado_por_dni.get(normalizar_dni(str(d)), "")
-            ).str.strip().str.upper()
-    except Exception:
-        pass  # Si falla, usa los datos de asistencia tal como están
 
     df_mes = df_total[df_total["PERIODO"].astype(str).eq(periodo)].copy()
 
@@ -1161,13 +1152,13 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
 
     col_p, col_d = st.columns(2)
     with col_p:
-        periodos_disponibles = sorted([str(p) for p in df_total["PERIODO"].unique() if str(p).strip()], reverse=True)
+        periodos_disponibles = sorted([str(p) for p in df_historico["PERIODO"].unique() if str(p).strip()], reverse=True)
         periodo_bm_retro = st.selectbox("📅 Período", periodos_disponibles, key="bm_retro_periodo")
     with col_d:
         dia_bm_retro = st.selectbox("📆 Día", list(range(1, 32)), key="bm_retro_dia")
 
     col_bm_retro = f"DIA_{dia_bm_retro}"
-    df_bm_retro = df_total[df_total["PERIODO"].astype(str).eq(periodo_bm_retro)].copy()
+    df_bm_retro = df_historico[df_historico["PERIODO"].astype(str).eq(periodo_bm_retro)].copy()
 
     if col_bm_retro in df_bm_retro.columns:
         df_bm_retro = df_bm_retro[df_bm_retro[col_bm_retro].astype(str).str.contains("A-BM", na=False)]
