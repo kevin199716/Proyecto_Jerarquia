@@ -64,7 +64,7 @@ KEY_LOAD_TS = "asis_load_timestamp"
 
 CACHE_TTL = 600
 # Mantener la vista amplia original. Solo pagina si realmente supera este límite.
-MAX_FILAS_EDITOR = 200
+MAX_FILAS_EDITOR = 50
 
 MARCAS_PRESENCIALIDAD = ["", "A", "A-BM", "A-VAC", "NA-SA", "NA-CA"]
 LEYENDA_MARCAS = {
@@ -1055,17 +1055,13 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
         st.info("**Motivos de validación:** A = Asistió · A-BM = No Asistió por Baja Médica · A-VAC = No Asistió por Vacaciones · NA-SA = No Asistió - Sin aviso · NA-CA = No Asistió - Con aviso")
         st.caption(f"Solo está habilitada la columna **{col_hoy}** para personal ACTIVO. Los INACTIVOS quedan visibles en el espejo histórico, pero no se pueden marcar.")
 
-        # OPTIMIZACIÓN: Editor dentro de un form() para evitar rererenderizado en cada clic.
-        # Mostrar solo columnas esenciales: RAZON SOCIAL, DNI, NOMBRE, DIA_HOY, ROW_SHEET.
-        columnas_editor_min = ["RAZON SOCIAL", "DNI", "NOMBRE", col_hoy, "ROW_SHEET"]
-        df_editor_build = df_editor_base[["RAZON SOCIAL", "DNI", "NOMBRE", "ROW_SHEET"] + ([col_hoy] if col_hoy in df_editor_base.columns else [])].copy()
-        for col in columnas_editor_min:
+        columnas_editor = COLUMNAS_FIJAS_EDITOR + [col_hoy, "ROW_SHEET"]
+        df_editor_build = df_editor_base.copy()
+        for col in columnas_editor:
             if col not in df_editor_build.columns:
                 df_editor_build[col] = ""
-
-        df_editor = df_editor_build[columnas_editor_min].fillna("").replace({"None": "", "nan": ""})
-        if col_hoy in df_editor.columns:
-            df_editor[col_hoy] = df_editor[col_hoy].apply(limpiar_marca)
+        df_editor = df_editor_build[columnas_editor].copy().fillna("").replace({"None": "", "nan": ""})
+        df_editor[col_hoy] = df_editor[col_hoy].apply(limpiar_marca)
 
         disabled_cols = [col for col in df_editor.columns if col != col_hoy]
         column_config = {
