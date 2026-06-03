@@ -1124,10 +1124,11 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
             if _guardar_bm:
                 with st.spinner("⏳ Guardando..."):
                     try:
-                        _df_res = pd.DataFrame(_editado_bm).fillna("")
+                        _df_res = pd.DataFrame(_editado_bm).fillna("").reset_index(drop=True)
+                        _df_orig = _df_bm_ed.reset_index(drop=True)
                         _cambios = []
                         for _i, _row in _df_res.iterrows():
-                            _orig = str(_df_bm_ed.iloc[_i][_col_bm]).strip()
+                            _orig = str(_df_orig.iloc[_i][_col_bm]).strip() if _i < len(_df_orig) else ""
                             _nuevo = str(_row[_col_bm]).strip()
                             if _nuevo and _nuevo != _orig:
                                 _cambios.append((_i, _row, _nuevo))
