@@ -968,7 +968,7 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                 _em = _dc.drop_duplicates("DNI").set_index("DNI")["ESTADO"].to_dict()
                 # Actualizar ESTADO en registros existentes
                 df_total["ESTADO"] = df_total["DNI"].apply(
-                    lambda d: _em.get(normalizar_dni(str(d)), "ACTIVO")
+                    lambda d: _em.get(normalizar_dni(str(d)), "")
                 ).str.strip().str.upper()
                 # Agregar filas para nuevos activos que no están en asistencia
                 _dnis_existentes = set(df_total["DNI"].apply(normalizar_dni).tolist())
