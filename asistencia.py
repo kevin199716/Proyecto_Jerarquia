@@ -957,9 +957,11 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
     # Historia completa para espejo y BM retroactivo
     df_historico, _ = _leer_asistencia_cached(hoja_asistencia)
 
-    # Auto-sync ESTADO una vez por sesión (no en cada render)
+    # Auto-sync ESTADO siempre al entrar al módulo — sin botón, sin acción del usuario.
+    # Lee colaboradores fresco de Drive y actualiza ESTADO en asistencia.
     if not st.session_state.get("asis_estado_sync"):
         try:
+            leer_colaboradores_drive.clear()
             _dc = leer_colaboradores_drive(hoja_colaboradores)
             if not _dc.empty and "DNI" in _dc.columns and "ESTADO" in _dc.columns:
                 _dc["DNI"] = _dc["DNI"].apply(normalizar_dni)
@@ -967,7 +969,6 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                 df_total["ESTADO"] = df_total["DNI"].apply(
                     lambda d: _em.get(normalizar_dni(str(d)), "ACTIVO")
                 ).str.strip().str.upper()
-                # CRÍTICO: guardar de vuelta en session_state
                 st.session_state[KEY_DF_TOTAL] = df_total
                 st.session_state[KEY_DF_ORIGINAL] = df_total
                 del _dc, _em
@@ -1006,18 +1007,6 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
     def _valor_guardado(clave, opciones):
         valor = st.session_state.get(clave, "TODOS")
         return valor if valor in opciones else "TODOS"
-
-    # Botón recargar: fuerza lectura fresca de Drive
-    col_reload, col_info = st.columns([1, 4])
-    with col_reload:
-        if st.button("🔄 Recargar datos Drive", key="btn_recargar_datos_drive"):
-            _leer_asistencia_cached.clear()
-            leer_colaboradores_drive.clear()
-            st.session_state.pop("asis_estado_sync", None)
-            st.session_state.pop(KEY_LOADED, None)
-            st.rerun()
-    with col_info:
-        st.caption("Presiona si hiciste cambios en la hoja colaboradores y quieres verlos reflejados aquí inmediatamente.")
 
     with st.form("form_filtros_presencialidad"):
         f1, f2, f3, f4, f5, f6 = st.columns(6)
