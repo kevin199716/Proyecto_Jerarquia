@@ -1070,10 +1070,10 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
             df_editor_base = df_editor_base.iloc[inicio: inicio + MAX_FILAS_EDITOR].copy()
             st.caption(f"Mostrando filas {inicio + 1}–{min(inicio + MAX_FILAS_EDITOR, total_filtrado)} de {total_filtrado}")
 
-        # ======= BM RETROACTIVO: ARRIBA DEL EDITOR =======
+        # ======= SLICERS BM: controlan editor retroactivo =======
         st.divider()
-        st.markdown("<span class='wow-section-title'>📋 Cargar Sustento A-BM (cualquier fecha)</span>", unsafe_allow_html=True)
-        st.caption("Selecciona período y día para ver la asistencia de ese día. Solo puedes cambiar a **A-BM** adjuntando el documento médico.")
+        st.markdown("<span class=\'wow-section-title\'>📋 Cargar Sustento A-BM (cualquier fecha)</span>", unsafe_allow_html=True)
+        st.caption("Selecciona período y día. Muestra la asistencia de ese día. Solo puedes marcar **A-BM** + adjuntar documento.")
         _col_p, _col_d = st.columns(2)
         with _col_p:
             _periodos = sorted([str(p) for p in df_historico["PERIODO"].unique() if str(p).strip()], reverse=True)
@@ -1082,83 +1082,93 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
             _dia_bm = st.selectbox("📆 Día", list(range(1, 32)), key="bm_retro_dia")
 
         _col_bm = f"DIA_{_dia_bm}"
-        _df_periodo = df_historico[df_historico["PERIODO"].astype(str).eq(_per_bm)].copy()
+        _es_hoy = (_per_bm == str(periodo_actual())) and (_col_bm == col_hoy)
+        _df_sel = df_historico[df_historico["PERIODO"].astype(str).eq(_per_bm)].copy()
+        if filtro_razon and filtro_razon != op_razon[0] and "RAZON SOCIAL" in _df_sel.columns:
+            _df_sel = _df_sel[_df_sel["RAZON SOCIAL"].astype(str).str.strip().eq(filtro_razon)]
+        if not _df_sel.empty and _col_bm not in _df_sel.columns:
+            _df_sel[_col_bm] = ""
 
-        # Solo mostrar personas que YA tienen A-BM marcado en ese día
-        if _col_bm in _df_periodo.columns:
-            _df_periodo = _df_periodo[_df_periodo[_col_bm].astype(str).str.contains("A-BM", na=False)]
+        if _df_sel.empty:
+            st.info(f"Sin registros en {_per_bm}")
         else:
-            _df_periodo = pd.DataFrame()
+            columnas_bm_ed = COLUMNAS_FIJAS_EDITOR + [_col_bm, "ROW_SHEET"]
+            _df_bm_b = _df_sel.copy()
+            for _c in columnas_bm_ed:
+                if _c not in _df_bm_b.columns:
+                    _df_bm_b[_c] = ""
+            _df_bm_ed = _df_bm_b[columnas_bm_ed].fillna("").astype(str).replace({"nan":"","None":""})
+            _df_bm_ed[_col_bm] = _df_bm_ed[_col_bm].apply(limpiar_marca)
+            _opciones_col = MARCAS_PRESENCIALIDAD if _es_hoy else ["", "A-BM"]
+            _disabled_bm = [c for c in _df_bm_ed.columns if c != _col_bm]
+            _cfg_bm = {
+                "ROW_SHEET": st.column_config.TextColumn("FILA", width="small", disabled=True),
+                _col_bm: st.column_config.SelectboxColumn(
+                    f"{_col_bm}{' ← HOY' if _es_hoy else ' ← Solo A-BM'}",
+                    options=_opciones_col, width="small"),
+            }
+            st.caption(f"**{len(_df_bm_ed)} registros** | {_per_bm} / DÍA {_dia_bm} {'— Todas las marcas disponibles (es HOY)' if _es_hoy else '— Solo A-BM editable'}")
+            _editado_bm = st.data_editor(
+                _df_bm_ed, use_container_width=True,
+                height=min(380, 50 + len(_df_bm_ed) * 35),
+                hide_index=True, disabled=_disabled_bm,
+                column_config=_cfg_bm, num_rows="fixed",
+                key=f"editor_bm_{_per_bm}_{_dia_bm}",
+            )
+            _ca, _cb = st.columns([2, 1])
+            with _ca:
+                _arch_bm = st.file_uploader("📎 Documento médico (obligatorio para A-BM)", type=["pdf","png","jpg","jpeg"], key=f"arch_bm_{_per_bm}_{_dia_bm}")
+            with _cb:
+                _guardar_bm = st.button("💾 Guardar A-BM", key=f"btn_gbm_{_per_bm}_{_dia_bm}", use_container_width=True)
 
-        if filtro_razon and filtro_razon != op_razon[0] and not _df_periodo.empty and "RAZON SOCIAL" in _df_periodo.columns:
-            _df_periodo = _df_periodo[_df_periodo["RAZON SOCIAL"].astype(str).str.strip().eq(filtro_razon)]
-
-        if _df_periodo.empty:
-            st.info(f"ℹ️ Sin registros en {_per_bm}")
-        else:
-            _buscar_bm = st.text_input("🔍 Filtrar por DNI o nombre (opcional)", key="bm_buscar", placeholder="Deja vacío para ver todos...").strip()
-            if _buscar_bm:
-                _mask = (
-                    _df_periodo["DNI"].astype(str).str.contains(_buscar_bm, na=False, regex=False) |
-                    _df_periodo["NOMBRE"].astype(str).str.upper().str.contains(_buscar_bm.upper(), na=False, regex=False)
-                )
-                _df_periodo = _df_periodo[_mask]
-
-            if _df_periodo.empty:
-                st.info("Sin resultados.")
-            else:
-                st.write(f"**{len(_df_periodo)} colaborador(es)** — {_per_bm} / DÍA {_dia_bm}")
-                for _idx, _fb in _df_periodo.head(50).iterrows():
-                    _dni = normalizar_dni(str(_fb.get("DNI", "")))
-                    _nom = limpiar_texto(str(_fb.get("NOMBRE", "")))
-                    _raz = limpiar_texto(str(_fb.get("RAZON SOCIAL", "")))
-                    _marca = str(_fb.get(_col_bm, "")).strip() if _col_bm in _df_periodo.columns else ""
-                    _marca_limpia = _marca if _marca not in ["", "None", "nan"] else "Sin marca"
-                    _uid = f"{_idx}_{_dni}"  # Clave única por índice
-
-                    if "A-BM" in _marca:
-                        _icono = "🟡"
-                    elif _marca_limpia == "Sin marca":
-                        _icono = "⚪"
-                    else:
-                        _icono = "🟢"
-
-                    with st.expander(f"{_icono} {_nom} (DNI: {_dni}) — Marca DÍA {_dia_bm}: **{_marca_limpia}**"):
-                        st.caption("Puedes cargar Baja Médica independientemente de la marca actual.")
-                        _arch = st.file_uploader(
-                            f"Documento médico",
-                            type=["pdf","png","jpg","jpeg"],
-                            key=f"bm_{_uid}_{_per_bm}_{_dia_bm}",
-                            help="Máx 200MB"
-                        )
-                        if st.button("✅ Registrar A-BM + guardar documento", key=f"sbm_{_uid}_{_per_bm}_{_dia_bm}"):
-                            if not _arch:
-                                st.error("❌ Adjunta el documento médico primero.")
-                            else:
-                                with st.spinner("⏳ Subiendo documento..."):
-                                    try:
-                                        _tz = pytz.timezone("America/Lima")
-                                        _usr = st.session_state.get("usuario","")
-                                        _st2 = datetime.now(_tz).strftime("%Y%m%d_%H%M%S")
-                                        _ext = extension_archivo(_arch.name, _arch.type)
-                                        _url = subir_archivo_drive(f"bm_{_dni}_{_per_bm}_d{_dia_bm}_{_st2}.{_ext}", _arch.read(), _arch.type)
-                                        _hs = obtener_o_crear_worksheet("maestra_vendedores","Sustentos_Bajas",COLUMNAS_SUSTENTOS_BM)
-                                        _hs.append_row([
-                                            _per_bm, f"{_per_bm}-{str(_dia_bm).zfill(2)}",
-                                            _dni, _nom, _raz,
-                                            "A-BM (No Asistió por Baja Médica)",
-                                            _url,
-                                            datetime.now(_tz).strftime("%Y-%m-%d %H:%M:%S"),
-                                            _usr
-                                        ], value_input_option="USER_ENTERED")
-                                        _leer_asistencia_cached.clear()
-                                        st.session_state.pop(KEY_LOADED, None)
-                                        st.success(f"✅ A-BM registrado: {_nom} | {_per_bm}/DÍA {_dia_bm} | [Ver documento]({_url})")
-                                        st.rerun()
-                                    except Exception as _e:
-                                        st.error(f"❌ Error: {_e}")
+            if _guardar_bm:
+                with st.spinner("⏳ Guardando..."):
+                    try:
+                        _df_res = pd.DataFrame(_editado_bm).fillna("")
+                        _cambios = []
+                        for _i, _row in _df_res.iterrows():
+                            _orig = str(_df_bm_ed.iloc[_i][_col_bm]).strip()
+                            _nuevo = str(_row[_col_bm]).strip()
+                            if _nuevo and _nuevo != _orig:
+                                _cambios.append((_i, _row, _nuevo))
+                        _url_doc = None
+                        if _arch_bm:
+                            _tz2 = pytz.timezone("America/Lima")
+                            _st3 = datetime.now(_tz2).strftime("%Y%m%d_%H%M%S")
+                            _ext3 = extension_archivo(_arch_bm.name, _arch_bm.type)
+                            _url_doc = subir_archivo_drive(f"bm_{_per_bm}_d{_dia_bm}_{_st3}.{_ext3}", _arch_bm.read(), _arch_bm.type)
+                        if _cambios or _url_doc:
+                            _hdrs = st.session_state.get(KEY_HEADERS, COLUMNAS_ASISTENCIA)
+                            from gspread.cell import Cell as _Cell
+                            _cw = []
+                            _hs2 = obtener_o_crear_worksheet("maestra_vendedores","Sustentos_Bajas",COLUMNAS_SUSTENTOS_BM)
+                            for _i, _row, _nuevo in _cambios:
+                                _rs = int(float(str(_row.get("ROW_SHEET",0) or 0)))
+                                if _rs and _col_bm in _hdrs:
+                                    _cw.append(_Cell(_rs, _hdrs.index(_col_bm)+1, _nuevo))
+                                if _url_doc:
+                                    _tz3 = pytz.timezone("America/Lima")
+                                    _hs2.append_row([_per_bm, f"{_per_bm}-{str(_dia_bm).zfill(2)}",
+                                        normalizar_dni(str(_row.get("DNI",""))),
+                                        limpiar_texto(str(_row.get("NOMBRE",""))),
+                                        limpiar_texto(str(_row.get("RAZON SOCIAL",""))),
+                                        "A-BM", _url_doc,
+                                        datetime.now(_tz3).strftime("%Y-%m-%d %H:%M:%S"),
+                                        st.session_state.get("usuario","")
+                                    ], value_input_option="USER_ENTERED")
+                            if _cw:
+                                hoja_asistencia.update_cells(_cw, value_input_option="USER_ENTERED")
+                            _leer_asistencia_cached.clear()
+                            st.session_state.pop(KEY_LOADED, None)
+                            st.success(f"✅ {len(_cambios)} cambios guardados" + (f" | [Ver documento]({_url_doc})" if _url_doc else ""))
+                            st.rerun()
+                        else:
+                            st.info("Sin cambios ni documento.")
+                    except Exception as _e:
+                        st.error(f"❌ Error: {_e}")
         st.divider()
-        # ======= FIN BM RETROACTIVO =======
+        # ======= FIN SLICERS BM =======
+
 
         st.markdown("<span class='wow-section-title'>✏️ Registrar presencialidad de hoy</span>", unsafe_allow_html=True)
         st.info("**Motivos de validación:** A = Asistió · A-BM = No Asistió por Baja Médica · A-VAC = No Asistió por Vacaciones · NA-SA = No Asistió - Sin aviso · NA-CA = No Asistió - Con aviso")
