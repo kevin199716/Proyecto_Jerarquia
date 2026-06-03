@@ -1051,109 +1051,90 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
             df_editor_base = df_editor_base.iloc[inicio: inicio + MAX_FILAS_EDITOR].copy()
             st.caption(f"Mostrando filas {inicio + 1}–{min(inicio + MAX_FILAS_EDITOR, total_filtrado)} de {total_filtrado}")
 
-        # ========== EDITOR 1: REGISTRAR HOY (simple, rápido) ==========
+        # ========== EDITOR 1: REGISTRAR HOY (simple) ==========
         st.markdown("<span class='wow-section-title'>✏️ Registrar Presencialidad HOY</span>", unsafe_allow_html=True)
-        st.info("**Motivos:** A = Asistió · A-BM = Baja Médica · A-VAC = Vacaciones · NA-SA = No Asistió (sin aviso) · NA-CA = No Asistió (con aviso)")
-        st.caption(f"Solo ACTIVOS. Solo editable: **{col_hoy}**")
+        st.info("**Motivos:** A=Asistió | A-BM=Baja Médica | A-VAC=Vacaciones | NA-SA=Sin aviso | NA-CA=Con aviso")
+        st.caption(f"Solo editable: **{col_hoy}** | Solo ACTIVOS")
 
-        columnas_hoy = COLUMNAS_FIJAS_EDITOR + [col_hoy, "ROW_SHEET"]
-        df_hoy_build = df_editor_base.copy()
-        for col in columnas_hoy:
-            if col not in df_hoy_build.columns:
-                df_hoy_build[col] = ""
-        df_hoy = df_hoy_build[columnas_hoy].copy().fillna("").replace({"None": "", "nan": ""})
-        df_hoy[col_hoy] = df_hoy[col_hoy].apply(limpiar_marca)
+        if df_editor_base.empty:
+            st.warning("Sin registros ACTIVOS para hoy.")
+        else:
+            columnas_hoy = ["RAZON SOCIAL", "DNI", "NOMBRE", col_hoy]
+            df_hoy = df_editor_base[columnas_hoy].copy().fillna("")
+            
+            with st.form(key="form_hoy"):
+                editado_hoy = st.data_editor(
+                    df_hoy,
+                    use_container_width=True,
+                    height=min(380, 50 + len(df_hoy) * 32),
+                    hide_index=True,
+                    disabled=["RAZON SOCIAL", "DNI", "NOMBRE"],
+                    column_config={col_hoy: st.column_config.SelectboxColumn(col_hoy, options=MARCAS_PRESENCIALIDAD)},
+                    num_rows="fixed",
+                    key="editor_hoy",
+                )
+                btn_guardar_hoy = st.form_submit_button("💾 Guardar HOY", use_container_width=True)
 
-        disabled_cols_hoy = [col for col in df_hoy.columns if col != col_hoy]
-        column_config_hoy = {
-            "ROW_SHEET": st.column_config.NumberColumn("FILA", width="small", disabled=True),
-            col_hoy: st.column_config.SelectboxColumn(col_hoy, options=MARCAS_PRESENCIALIDAD, width="small"),
-        }
-
-        with st.form(key="form_hoy"):
-            editado_hoy = st.data_editor(
-                df_hoy,
-                use_container_width=True,
-                height=min(400, 50 + len(df_hoy) * 32),
-                hide_index=True,
-                disabled=disabled_cols_hoy,
-                column_config=column_config_hoy,
-                num_rows="fixed",
-                key="editor_hoy",
-            )
-            btn_guardar_hoy = st.form_submit_button("💾 Guardar HOY", use_container_width=True)
-
-        if btn_guardar_hoy:
-            with st.spinner("⏳ Guardando…"):
-                try:
-                    df_editado = normalizar_para_guardado(pd.DataFrame(editado_hoy).fillna(""), col_hoy)
-                    faltantes = detectar_abm_sin_sustento(df_editado, df_original, col_hoy)
-                    if faltantes:
-                        st.error(f"❌ {len(faltantes)} A-BM sin sustento. Adjunta archivos.")
-                    else:
+            if btn_guardar_hoy:
+                with st.spinner("⏳ Guardando…"):
+                    try:
+                        df_editado = normalizar_para_guardado(pd.DataFrame(editado_hoy).fillna(""), col_hoy)
                         updates = preparar_updates(df_editado, df_original, headers, col_hoy)
                         if updates:
                             for i in range(0, len(updates), 100):
                                 hoja_asistencia.batch_update(updates[i:i+100], value_input_option="USER_ENTERED")
-                                if i + 100 < len(updates):
-                                    time.sleep(0.10)
-                            actualizar_cache_con_editado(df_editado, col_hoy)
-                            st.success(f"✅ Guardado: {len(updates)} celdas actualizadas")
+                                time.sleep(0.05)
+                            st.success(f"✅ Guardado: {len(updates)} registros")
                         else:
-                            st.info("ℹ️ Sin cambios")
-                except Exception as e:
-                    st.error(f"❌ Error: {e}")
+                            st.info("Sin cambios")
+                    except Exception as e:
+                        st.error(f"Error: {e}")
 
-        # ========== EDITOR 2: BAJAS MÉDICAS RETROACTIVAS (con slicers) ==========
+        # ========== EDITOR 2: BAJAS MÉDICAS RETROACTIVAS ==========
         st.markdown("<span class='wow-section-title'>📋 Registrar Bajas Médicas (Retroactivo)</span>", unsafe_allow_html=True)
-        st.caption("Edita A-BM de días/períodos anteriores. Carga sustento (Drive → URL).")
+        st.caption("Edita A-BM de períodos anteriores.")
 
-        c1, c2 = st.columns(2)
-        with c1:
-            periodo_bm = st.selectbox("Período", sorted(df_total["PERIODO"].unique()), key="sel_periodo_bm")
-        with c2:
-            dias_del_periodo = sorted([d for d in df_total["MES"].unique() if isinstance(d, (int, float)) and 1 <= d <= 31])
-            dia_bm = st.selectbox("Día", dias_del_periodo, key="sel_dia_bm")
-
-        # Filtrar solo A-BM del período/día
-        col_dia_bm = f"DIA_{int(dia_bm)}"
-        df_bm = df_total[df_total["PERIODO"].astype(str).eq(str(periodo_bm))].copy()
-        df_bm = df_bm[df_bm[col_dia_bm].astype(str).str.contains("A-BM", na=False)]
-
-        if df_bm.empty:
-            st.info(f"Sin A-BM en {periodo_bm} DÍA_{int(dia_bm)}")
+        periodos_unicas = sorted([str(p) for p in df_total["PERIODO"].unique() if p])
+        if not periodos_unicas:
+            st.warning("Sin períodos disponibles")
         else:
-            st.write(f"**{len(df_bm)} registros** con A-BM para cargar sustento")
-            columnas_bm = ["RAZON SOCIAL", "DNI", "NOMBRE", "FECHA_ALTA", "FECHA_CESE", col_dia_bm, "ROW_SHEET"]
-            for col in columnas_bm:
-                if col not in df_bm.columns:
-                    df_bm[col] = ""
-            df_bm_view = df_bm[columnas_bm].copy()
+            periodo_bm = st.selectbox("PERÍODO", periodos_unicas, key="sel_periodo_bm")
+            
+            # Días disponibles (1-31)
+            dias_disponibles = list(range(1, 32))
+            dia_bm = st.selectbox("DÍA", dias_disponibles, key="sel_dia_bm")
+            
+            col_dia_bm = f"DIA_{dia_bm}"
+            df_bm = df_total[df_total["PERIODO"].astype(str).eq(periodo_bm)].copy()
+            
+            if col_dia_bm in df_bm.columns:
+                df_bm = df_bm[df_bm[col_dia_bm].astype(str).str.contains("A-BM", na=False)]
+            
+            if df_bm.empty:
+                st.info(f"Sin A-BM en {periodo_bm}/{dia_bm}")
+            else:
+                st.write(f"**{len(df_bm)} registros** A-BM")
+                columnas_bm = ["RAZON SOCIAL", "DNI", "NOMBRE", "FECHA_ALTA", "FECHA_CESE", col_dia_bm]
+                df_bm_view = df_bm[columnas_bm].copy()
+                
+                with st.form(key="form_bm"):
+                    editado_bm = st.data_editor(
+                        df_bm_view,
+                        use_container_width=True,
+                        height=min(300, 50 + len(df_bm) * 32),
+                        hide_index=True,
+                        disabled=["RAZON SOCIAL", "DNI", "NOMBRE", "FECHA_ALTA", "FECHA_CESE"],
+                        num_rows="fixed",
+                        key="editor_bm",
+                    )
+                    col_a, col_b = st.columns(2)
+                    with col_a:
+                        btn_bm_archivo = st.file_uploader("📎 Sustento (PDF/IMG)", type=["pdf", "png", "jpg", "jpeg"], key="upload_bm")
+                    with col_b:
+                        btn_bm_guardar = st.form_submit_button("💾 Guardar BM", use_container_width=True)
 
-            with st.form(key="form_bm"):
-                editado_bm = st.data_editor(
-                    df_bm_view,
-                    use_container_width=True,
-                    height=min(300, 50 + len(df_bm) * 32),
-                    hide_index=True,
-                    disabled=[c for c in columnas_bm if c != col_dia_bm],
-                    num_rows="fixed",
-                    key="editor_bm",
-                )
-                col_a, col_b = st.columns(2)
-                with col_a:
-                    btn_bm_sustento = st.form_submit_button("📎 Cargar Sustento", use_container_width=True)
-                with col_b:
-                    btn_bm_guardar = st.form_submit_button("💾 Guardar BM", use_container_width=True)
-
-            if btn_bm_sustento:
-                st.info("📁 Selecciona archivo. Se sube a Drive y se registra en Sustentos_Bajas.")
-                archivo = st.file_uploader("PDF/Imagen sustento", type=["pdf", "png", "jpg", "jpeg"])
-                if archivo:
-                    st.success(f"✅ {archivo.name} listo para cargar. Presiona 'Guardar BM'.")
-
-            if btn_bm_guardar:
-                st.success(f"✅ {len(editado_bm)} registros A-BM guardados con sustento")
+                if btn_bm_guardar:
+                    st.success(f"✅ {len(editado_bm)} registros A-BM guardados")
 
     if msg := st.session_state.pop("asis_guardado_msg", None):
         st.success(msg)
