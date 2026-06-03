@@ -1084,6 +1084,10 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                 key="editor_presencialidad_dia_actual",
             )
 
+            guardar_pres = st.form_submit_button("💾 Guardar Presencialidad", use_container_width=True)
+
+        # Validación y diálogo de sustento FUERA del form (después de presionar guardar)
+        if guardar_pres:
             faltantes_sustento = detectar_abm_sin_sustento(pd.DataFrame(editado).fillna(""), df_original, col_hoy)
             if faltantes_sustento:
                 primero = faltantes_sustento[0]
@@ -1096,9 +1100,8 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                         primero["razon_social"],
                         primero["row_sheet"],
                     )
-
-            guardar_pres = st.form_submit_button("💾 Guardar Presencialidad", use_container_width=True)
-
+                    st.stop()
+        
         if guardar_pres:
             with st.spinner("Guardando en Google Drive…"):
                 try:
