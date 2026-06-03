@@ -98,21 +98,25 @@ def subir_archivo_drive(nombre_archivo: str, contenido_bytes: bytes, mime_type: 
 def obtener_o_crear_worksheet(nombre_hoja: str, nombre_worksheet: str, columnas_defecto: list[str]):
     """
     Busca una pestaña específica en un libro de Sheets.
-    Si no existe, la crea con las columnas por defecto especificadas.
+    Si no existe, la crea con las columnas por defecto.
+    Si existe pero no tiene cabeceras, las agrega.
     """
     try:
         spreadsheet = _abrir_spreadsheet(nombre_hoja)
         try:
             worksheet = spreadsheet.worksheet(nombre_worksheet)
+            # Verificar que la primera fila tenga cabeceras correctas
+            primera_fila = worksheet.row_values(1)
+            if not primera_fila or primera_fila[0] != columnas_defecto[0]:
+                # Insertar fila de cabeceras al inicio
+                worksheet.insert_row(columnas_defecto, index=1, value_input_option="USER_ENTERED")
             return worksheet
         except gspread.exceptions.WorksheetNotFound:
-            # Crear la pestaña con las dimensiones correctas
             worksheet = spreadsheet.add_worksheet(
                 title=nombre_worksheet,
                 rows="1000",
                 cols=str(len(columnas_defecto))
             )
-            # Agregar cabecera por defecto
             worksheet.append_row(columnas_defecto, value_input_option="USER_ENTERED")
             return worksheet
     except Exception as e:

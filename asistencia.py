@@ -1026,6 +1026,12 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
         st.warning("No hay registros con los filtros seleccionados.")
         return
 
+    # Si Admin no filtró y hay demasiados registros → pedir que filtre primero
+    if total_filtrado > 200 and filtro_razon == op_razon[0]:
+        st.warning(f"⚠️ Hay {total_filtrado} registros. **Selecciona una Razón Social** en los filtros de arriba y presiona 'Aplicar filtros' para ver el editor.")
+        st.info("💡 Cada dealer tiene su propia Razón Social. Filtra para ver solo su personal.")
+        return
+
     # Editor solo para personas vigentes hoy.
     df_editor_base = df_filtrado[df_filtrado.apply(fila_editable_hoy, axis=1)].copy()
     total_filtrado = len(df_editor_base)
@@ -1135,6 +1141,83 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
 
     if msg := st.session_state.pop("asis_guardado_msg", None):
         st.success(msg)
+
+    # =====================================================
+    # SECCIÓN A-BM RETROACTIVO: cargar sustento en cualquier fecha
+    # =====================================================
+    st.divider()
+    st.markdown("<span class='wow-section-title'>📋 Cargar Sustento de Baja Médica (cualquier fecha)</span>", unsafe_allow_html=True)
+    st.caption("Aquí puedes adjuntar el documento de Baja Médica para cualquier período y día anterior. Solo se permite A-BM.")
+
+    col_p, col_d = st.columns(2)
+    with col_p:
+        periodos_disponibles = sorted([str(p) for p in df_total["PERIODO"].unique() if str(p).strip()], reverse=True)
+        periodo_bm_retro = st.selectbox("📅 Período", periodos_disponibles, key="bm_retro_periodo")
+    with col_d:
+        dia_bm_retro = st.selectbox("📆 Día", list(range(1, 32)), key="bm_retro_dia")
+
+    col_bm_retro = f"DIA_{dia_bm_retro}"
+    df_bm_retro = df_total[df_total["PERIODO"].astype(str).eq(periodo_bm_retro)].copy()
+
+    if col_bm_retro in df_bm_retro.columns:
+        df_bm_retro = df_bm_retro[df_bm_retro[col_bm_retro].astype(str).str.contains("A-BM", na=False)]
+    else:
+        df_bm_retro = pd.DataFrame()
+
+    # Aplicar filtro de razón social si está activo
+    if filtro_razon and filtro_razon != op_razon[0] and "RAZON SOCIAL" in df_bm_retro.columns:
+        df_bm_retro = df_bm_retro[df_bm_retro["RAZON SOCIAL"].astype(str).str.strip().eq(filtro_razon)]
+
+    if df_bm_retro.empty:
+        st.info(f"ℹ️ No hay registros A-BM en {periodo_bm_retro} / DÍA {dia_bm_retro}")
+    else:
+        st.write(f"**{len(df_bm_retro)} colaborador(es)** con A-BM en {periodo_bm_retro} / DÍA {dia_bm_retro}")
+
+        for _, fila_bm in df_bm_retro.iterrows():
+            dni_bm = normalizar_dni(str(fila_bm.get("DNI", "")))
+            nombre_bm = limpiar_texto(str(fila_bm.get("NOMBRE", "")))
+            razon_bm = limpiar_texto(str(fila_bm.get("RAZON SOCIAL", "")))
+            row_bm = int(fila_bm.get("ROW_SHEET", 0)) if fila_bm.get("ROW_SHEET") else 0
+
+            with st.expander(f"📎 {nombre_bm} — DNI {dni_bm} ({razon_bm})"):
+                archivo_bm = st.file_uploader(
+                    f"Sustento médico para {nombre_bm}",
+                    type=["pdf", "png", "jpg", "jpeg"],
+                    key=f"upload_bm_retro_{dni_bm}_{periodo_bm_retro}_{dia_bm_retro}",
+                )
+                if st.button(f"✅ Guardar sustento", key=f"btn_guardar_bm_retro_{dni_bm}_{periodo_bm_retro}_{dia_bm_retro}"):
+                    if archivo_bm is None:
+                        st.error("❌ Debes adjuntar el documento primero.")
+                    else:
+                        with st.spinner("⏳ Subiendo documento y registrando..."):
+                            try:
+                                tz_lima = pytz.timezone("America/Lima")
+                                usuario = st.session_state.get("usuario", "")
+                                stamp = datetime.now(tz_lima).strftime("%Y%m%d_%H%M%S")
+                                ext = extension_archivo(archivo_bm.name, archivo_bm.type)
+                                nombre_archivo = f"sustento_bm_{dni_bm}_{periodo_bm_retro}_dia{dia_bm_retro}_{stamp}.{ext}"
+                                link = subir_archivo_drive(nombre_archivo, archivo_bm.read(), archivo_bm.type)
+
+                                hoja_sustentos = obtener_o_crear_worksheet(
+                                    "maestra_vendedores",
+                                    "Sustentos_Bajas",
+                                    COLUMNAS_SUSTENTOS_BM,
+                                )
+                                fila_nueva = [
+                                    periodo_bm_retro,
+                                    f"{periodo_bm_retro}-{str(dia_bm_retro).zfill(2)}",
+                                    dni_bm,
+                                    nombre_bm,
+                                    razon_bm,
+                                    "A-BM (No Asistió por Baja Médica)",
+                                    link,
+                                    datetime.now(tz_lima).strftime("%Y-%m-%d %H:%M:%S"),
+                                    usuario,
+                                ]
+                                hoja_sustentos.append_row(fila_nueva, value_input_option="USER_ENTERED")
+                                st.success(f"✅ Sustento guardado: {nombre_bm} | {periodo_bm_retro}/DÍA {dia_bm_retro} | [Ver documento]({link})")
+                            except Exception as e:
+                                st.error(f"❌ Error: {e}")
 
     # Espejo mensual completo: muestra todo el mes y mantiene histórico.
     df_total_actual = st.session_state[KEY_DF_TOTAL]
