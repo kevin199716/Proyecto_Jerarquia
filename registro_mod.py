@@ -215,38 +215,27 @@ def mostrar_tabla(hoja, razon_usuario=None):
 
     st.caption(f"Registros mostrados: **{len(df_vista)}** de **{len(df)}**")
 
-    # Botón descarga: lee Drive en tiempo real y exporta TODAS las columnas
-    col_dl, col_esp = st.columns([1, 4])
-    with col_dl:
-        if st.button("⬇️ Descargar Excel actualizado", key="btn_export_matriz"):
-            with st.spinner("Leyendo datos actualizados de Drive..."):
-                _leer_matriz_cached.clear()
-                df_export = _leer_matriz_cached(hoja)
-                if rol != "backoffice" and razon_usuario and "RAZON SOCIAL" in df_export.columns:
-                    df_export = df_export[df_export["RAZON SOCIAL"].astype(str).str.strip().eq(razon_usuario)]
-                try:
-                    import io
-                    buf = io.BytesIO()
-                    df_export.to_excel(buf, index=False, engine="openpyxl")
-                    buf.seek(0)
-                    st.download_button(
-                        label="📥 Confirmar descarga Excel",
-                        data=buf.getvalue(),
-                        file_name=f"jerarquia_{ahora_peru_fecha_hora().replace(' ','_').replace(':','-')}.xlsx",
-                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                        key="dl_excel_jerarquia"
-                    )
-                except Exception:
-                    buf = io.BytesIO()
-                    df_export.to_csv(buf, index=False, encoding="utf-8-sig")
-                    buf.seek(0)
-                    st.download_button(
-                        label="📥 Confirmar descarga CSV",
-                        data=buf.getvalue(),
-                        file_name=f"jerarquia_{ahora_peru_fecha_hora().replace(' ','_').replace(':','-')}.csv",
-                        mime="text/csv",
-                        key="dl_csv_jerarquia"
-                    )
+    # Descarga directa: un solo clic, datos del cache actual (actualizado cada 3 min o al recargar)
+    import io as _io
+    _buf = _io.BytesIO()
+    try:
+        df.to_excel(_buf, index=False, engine="openpyxl")
+        _mime = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        _ext = "xlsx"
+    except Exception:
+        _buf = _io.BytesIO()
+        df.to_csv(_buf, index=False, encoding="utf-8-sig")
+        _mime = "text/csv"
+        _ext = "csv"
+    _buf.seek(0)
+    st.download_button(
+        label="⬇️ Descargar Excel",
+        data=_buf.getvalue(),
+        file_name=f"jerarquia.{_ext}",
+        mime=_mime,
+        key="dl_jerarquia_directo",
+        use_container_width=False,
+    )
 
     cols_texto = {
         c: st.column_config.TextColumn(c)

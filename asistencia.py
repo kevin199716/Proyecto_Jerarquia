@@ -1004,6 +1004,23 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
     op_provincia = lista_opciones(df_mes, "PROVINCIA")
     op_estado = lista_opciones(df_mes, "ESTADO")
 
+    # Botón recargar: fuerza lectura fresca de Drive y sincroniza filas nuevas
+    col_reload, col_info = st.columns([1, 4])
+    with col_reload:
+        if st.button("🔄 Recargar datos Drive", key="btn_recargar_datos_drive"):
+            with st.spinner("Sincronizando con Drive..."):
+                _leer_asistencia_cached.clear()
+                leer_colaboradores_drive.clear()
+                st.session_state.pop("asis_estado_sync", None)
+                st.session_state.pop(KEY_LOADED, None)
+                try:
+                    sincronizar_mes(hoja_asistencia, hoja_colaboradores)
+                except Exception:
+                    pass
+                st.rerun()
+    with col_info:
+        st.caption("Presiona para ver activos/inactivos nuevos o cambios recientes en colaboradores.")
+
     def _valor_guardado(clave, opciones):
         valor = st.session_state.get(clave, "TODOS")
         return valor if valor in opciones else "TODOS"
