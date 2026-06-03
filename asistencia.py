@@ -316,7 +316,6 @@ def leer_asistencia_drive(hoja_asistencia) -> tuple[pd.DataFrame, list[str]]:
     return df, headers
 
 
-@st.cache_data(ttl=CACHE_TTL, show_spinner=False)
 def leer_colaboradores_drive(_hoja_colaboradores) -> pd.DataFrame:
     try:
         valores = _hoja_colaboradores.get_all_values()
@@ -957,11 +956,8 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
     # Historia completa para espejo y BM retroactivo
     df_historico, _ = _leer_asistencia_cached(hoja_asistencia)
 
-    # El filtrado de activos usa colaboradores directamente como fuente de verdad.
-    # Solo limpiamos el caché de colaboradores una vez por sesión para que siempre esté fresco.
-    if not st.session_state.get("asis_estado_sync"):
-        leer_colaboradores_drive.clear()
-        st.session_state["asis_estado_sync"] = True
+    # Colaboradores siempre se lee directo de Drive (sin caché) para reflejar
+    # cambios inmediatamente sin cerrar sesión.
 
     for col in COLUMNAS_ASISTENCIA:
         if col not in df_total.columns:
@@ -1116,7 +1112,11 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                                     _hs.append_row([_per_bm, f"{_per_bm}-{str(_dia_bm).zfill(2)}", _dni, _nom, _raz,
                                         "A-BM (No Asistió por Baja Médica)", _url,
                                         datetime.now(_tz).strftime("%Y-%m-%d %H:%M:%S"), _usr], value_input_option="USER_ENTERED")
+                                    # Refrescar caché para ver cambio sin cerrar sesión
+                                    _leer_asistencia_cached.clear()
+                                    st.session_state.pop(KEY_LOADED, None)
                                     st.success(f"✅ Guardado: {_nom} | {_per_bm}/DÍA {_dia_bm} | [Ver documento]({_url})")
+                                    st.rerun()
                                 except Exception as _e:
                                     st.error(f"❌ Error: {_e}")
         st.divider()

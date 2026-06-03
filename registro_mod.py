@@ -182,19 +182,19 @@ def mostrar_tabla(hoja, razon_usuario=None):
 
     f5, f6, f7 = st.columns(3)
     with f5:
-        filtro_region = st.selectbox("Región", _opciones_filtro(df, "REGION"), key="matriz_filtro_region")
+        col_region = "NUEVA_REGION" if "NUEVA_REGION" in df.columns else "REGION"
+        filtro_region = st.selectbox("Nueva Región", _opciones_filtro(df, col_region), key="matriz_filtro_region")
     with f6:
         filtro_dep = st.selectbox("Departamento", _opciones_filtro(df, "DEPARTAMENTO"), key="matriz_filtro_dep")
     with f7:
         filtro_prov = st.selectbox("Provincia", _opciones_filtro(df, "PROVINCIA"), key="matriz_filtro_prov")
 
-    # Vista por referencia: solo se materializa una copia cuando un filtro está activo.
     df_vista = df
     for columna, valor in [
         ("ESTADO", filtro_estado),
         ("RAZON SOCIAL", filtro_razon),
         ("CANAL", filtro_canal),
-        ("REGION", filtro_region),
+        (col_region, filtro_region),
         ("DEPARTAMENTO", filtro_dep),
         ("PROVINCIA", filtro_prov),
     ]:
@@ -209,20 +209,31 @@ def mostrar_tabla(hoja, razon_usuario=None):
                 mask = mask | df_vista[c].astype(str).str.upper().str.contains(patron, na=False, regex=False)
             df_vista = df_vista[mask]
 
-    st.caption(f"Registros mostrados: **{len(df_vista)}** de **{len(df)}**")
+    total = len(df_vista)
+    st.caption(f"Registros mostrados: **{total}** de **{len(df)}**")
 
     cols_texto = {
         c: st.column_config.TextColumn(c)
         for c in df_vista.columns
         if "DNI" in str(c).upper() or "CELULAR" in str(c).upper() or str(c).upper().startswith("ID")
     }
-    # La tabla completa va dentro de un desplegable cerrado: no se renderiza
-    # en cada clic (era uno de los mayores consumos de memoria y red del navegador).
+
     abierto = bool(buscar) or any(
         v != "TODOS" for v in [filtro_estado, filtro_razon, filtro_canal, filtro_region, filtro_dep, filtro_prov]
     )
+
+    # Paginación: máximo 300 filas por vista para no freezear el navegador
+    MAX_VISTA = 300
+    if total > MAX_VISTA:
+        n_pags = -(-total // MAX_VISTA)
+        pag = st.selectbox(f"Página (mostrando {MAX_VISTA} de {total})", list(range(1, n_pags + 1)), key="matriz_pag")
+        inicio = (pag - 1) * MAX_VISTA
+        df_pag = df_vista.iloc[inicio:inicio + MAX_VISTA]
+    else:
+        df_pag = df_vista
+
     with st.expander("📋 Ver matriz de jerarquía", expanded=abierto):
-        st.dataframe(df_vista, use_container_width=True, height=520, column_config=cols_texto)
+        st.dataframe(df_pag, use_container_width=True, height=520, column_config=cols_texto)
     return df
 
 
