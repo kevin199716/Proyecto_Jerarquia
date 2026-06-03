@@ -1117,7 +1117,7 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
             )
             _ca, _cb = st.columns([2, 1])
             with _ca:
-                _arch_bm = st.file_uploader("📎 Documento médico (obligatorio para A-BM)", type=["pdf","png","jpg","jpeg"], key=f"arch_bm_{_per_bm}_{_dia_bm}")
+                _arch_bm = st.file_uploader("📎 Documento médico sustento", type=["pdf","png","jpg","jpeg"], key=f"arch_bm_{_per_bm}_{_dia_bm}")
             with _cb:
                 _guardar_bm = st.button("💾 Guardar A-BM", key=f"btn_gbm_{_per_bm}_{_dia_bm}", use_container_width=True)
 
@@ -1169,86 +1169,6 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                         st.error(f"❌ Error: {_e}")
         st.divider()
         # ======= FIN SLICERS BM =======
-
-
-        st.markdown("<span class='wow-section-title'>✏️ Registrar presencialidad de hoy</span>", unsafe_allow_html=True)
-        st.info("**Motivos de validación:** A = Asistió · A-BM = No Asistió por Baja Médica · A-VAC = No Asistió por Vacaciones · NA-SA = No Asistió - Sin aviso · NA-CA = No Asistió - Con aviso")
-        st.caption(f"Solo está habilitada la columna **{col_hoy}** para personal ACTIVO. Los INACTIVOS quedan visibles en el espejo histórico, pero no se pueden marcar.")
-
-        # Editor con TODAS las columnas del slicer + DIA_HOY
-        columnas_editor = COLUMNAS_FIJAS_EDITOR + [col_hoy, "ROW_SHEET"]
-        df_editor_build = df_editor_base.copy()
-        for col in columnas_editor:
-            if col not in df_editor_build.columns:
-                df_editor_build[col] = ""
-        df_editor = df_editor_build[columnas_editor].fillna("").astype(str).replace({"nan": "", "None": ""})
-        df_editor[col_hoy] = df_editor[col_hoy].apply(limpiar_marca)
-
-        disabled_cols = [col for col in df_editor.columns if col != col_hoy]
-        column_config = {
-            "ROW_SHEET": st.column_config.NumberColumn("FILA", width="small", disabled=True),
-            col_hoy: st.column_config.SelectboxColumn(col_hoy, options=MARCAS_PRESENCIALIDAD, width="small"),
-        }
-
-        editado = st.data_editor(
-            df_editor,
-            use_container_width=True,
-            height=min(520, 50 + len(df_editor) * 35),
-            hide_index=True,
-            disabled=disabled_cols,
-            column_config=column_config,
-            num_rows="fixed",
-            key="editor_presencialidad_dia_actual",
-        )
-
-        faltantes_sustento = detectar_abm_sin_sustento(pd.DataFrame(editado).fillna(""), df_original, col_hoy)
-        if faltantes_sustento:
-            primero = faltantes_sustento[0]
-            st.warning(f"⚠️ {len(faltantes_sustento)} A-BM pendiente(s) sin sustento — **{primero['nombre']}** (DNI {primero['dni']})")
-            if st.button("📎 Adjuntar sustento A-BM", key="btn_abrir_dialogo_sustento_bm"):
-                dialogo_sustento_bm(
-                    primero["clave"],
-                    primero["dni"],
-                    primero["nombre"],
-                    primero["razon_social"],
-                    primero["row_sheet"],
-                )
-
-        guardar_pres = st.button("💾 Guardar Presencialidad", key="btn_guardar_presencialidad", use_container_width=True)
-
-        if guardar_pres:
-            with st.spinner("Guardando en Google Drive…"):
-                try:
-                    df_editado = normalizar_para_guardado(pd.DataFrame(editado).fillna(""), col_hoy)
-                    if df_editado.empty or "ROW_SHEET" not in df_editado.columns:
-                        st.warning("No se pudo leer la tabla del editor. Recarga la página.")
-                    else:
-                        faltantes = detectar_abm_sin_sustento(df_editado, df_original, col_hoy)
-                        if faltantes:
-                            st.error("❌ Hay marcas A-BM sin sustento. Adjunta el archivo antes de guardar presencialidad.")
-                            st.stop()
-
-                        sustentos_guardados = guardar_sustentos_bm_en_historico(df_editado, col_hoy)
-
-                        updates = preparar_updates(
-                            df_editado=df_editado,
-                            df_original=df_original,
-                            headers=headers,
-                            col_hoy=col_hoy,
-                        )
-                        if not updates:
-                            st.info("ℹ️ No se detectaron cambios para guardar.")
-                        else:
-                            for i in range(0, len(updates), 100):
-                                hoja_asistencia.batch_update(updates[i:i + 100], value_input_option="USER_ENTERED")
-                                if i + 100 < len(updates):
-                                    time.sleep(0.10)
-                            actualizar_cache_con_editado(df_editado, col_hoy)
-                            _leer_asistencia_cached.clear()
-                            st.session_state["asis_guardado_msg"] = f"✅ Presencialidad guardada. Celdas actualizadas: {len(updates)} | Sustentos BM registrados: {sustentos_guardados}"
-                            st.rerun()
-                except Exception as e:
-                    st.error(f"❌ Error guardando presencialidad: {e}")
 
     if msg := st.session_state.pop("asis_guardado_msg", None):
         st.success(msg)
