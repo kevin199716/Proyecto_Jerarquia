@@ -1101,14 +1101,14 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                 st.info("Sin resultados.")
             else:
                 st.write(f"**{len(_df_periodo)} colaborador(es)** — {_per_bm} / DÍA {_dia_bm}")
-                for _, _fb in _df_periodo.head(50).iterrows():
+                for _idx, _fb in _df_periodo.head(50).iterrows():
                     _dni = normalizar_dni(str(_fb.get("DNI", "")))
                     _nom = limpiar_texto(str(_fb.get("NOMBRE", "")))
                     _raz = limpiar_texto(str(_fb.get("RAZON SOCIAL", "")))
                     _marca = str(_fb.get(_col_bm, "")).strip() if _col_bm in _df_periodo.columns else ""
                     _marca_limpia = _marca if _marca not in ["", "None", "nan"] else "Sin marca"
+                    _uid = f"{_idx}_{_dni}"  # Clave única por índice
 
-                    # Ícono según marca actual
                     if "A-BM" in _marca:
                         _icono = "🟡"
                     elif _marca_limpia == "Sin marca":
@@ -1117,14 +1117,14 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                         _icono = "🟢"
 
                     with st.expander(f"{_icono} {_nom} (DNI: {_dni}) — Marca DÍA {_dia_bm}: **{_marca_limpia}**"):
-                        st.caption("Puedes cargar Baja Médica independientemente de la marca actual. El documento quedará registrado en el historial.")
+                        st.caption("Puedes cargar Baja Médica independientemente de la marca actual.")
                         _arch = st.file_uploader(
                             f"Documento médico",
                             type=["pdf","png","jpg","jpeg"],
-                            key=f"bm_{_dni}_{_per_bm}_{_dia_bm}",
-                            help="Máx 200MB — PDF, PNG, JPG, JPEG"
+                            key=f"bm_{_uid}_{_per_bm}_{_dia_bm}",
+                            help="Máx 200MB"
                         )
-                        if st.button("✅ Registrar A-BM + guardar documento", key=f"sbm_{_dni}_{_per_bm}_{_dia_bm}"):
+                        if st.button("✅ Registrar A-BM + guardar documento", key=f"sbm_{_uid}_{_per_bm}_{_dia_bm}"):
                             if not _arch:
                                 st.error("❌ Adjunta el documento médico primero.")
                             else:
