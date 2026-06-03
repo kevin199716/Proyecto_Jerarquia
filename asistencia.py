@@ -1072,54 +1072,84 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
 
         # ======= BM RETROACTIVO: ARRIBA DEL EDITOR =======
         st.divider()
-        st.markdown("<span class=\'wow-section-title\'>📋 Cargar Sustento A-BM (cualquier fecha)</span>", unsafe_allow_html=True)
-        st.caption("Adjunta documento A-BM para cualquier período y día. Solo se permite A-BM.")
+        st.markdown("<span class='wow-section-title'>📋 Cargar Sustento A-BM (cualquier fecha)</span>", unsafe_allow_html=True)
+        st.caption("Selecciona período y día para ver la asistencia de ese día. Solo puedes cambiar a **A-BM** adjuntando el documento médico.")
         _col_p, _col_d = st.columns(2)
         with _col_p:
             _periodos = sorted([str(p) for p in df_historico["PERIODO"].unique() if str(p).strip()], reverse=True)
             _per_bm = st.selectbox("📅 Período", _periodos, key="bm_retro_periodo")
         with _col_d:
             _dia_bm = st.selectbox("📆 Día", list(range(1, 32)), key="bm_retro_dia")
+
         _col_bm = f"DIA_{_dia_bm}"
-        _df_bm = df_historico[df_historico["PERIODO"].astype(str).eq(_per_bm)].copy()
-        if _col_bm in _df_bm.columns:
-            _df_bm = _df_bm[_df_bm[_col_bm].astype(str).str.contains("A-BM", na=False)]
+        _df_periodo = df_historico[df_historico["PERIODO"].astype(str).eq(_per_bm)].copy()
+        if filtro_razon and filtro_razon != op_razon[0] and "RAZON SOCIAL" in _df_periodo.columns:
+            _df_periodo = _df_periodo[_df_periodo["RAZON SOCIAL"].astype(str).str.strip().eq(filtro_razon)]
+
+        if _df_periodo.empty:
+            st.info(f"ℹ️ Sin registros en {_per_bm}")
         else:
-            _df_bm = pd.DataFrame()
-        if filtro_razon and filtro_razon != op_razon[0] and not _df_bm.empty:
-            _df_bm = _df_bm[_df_bm.get("RAZON SOCIAL", pd.Series()).astype(str).str.strip().eq(filtro_razon)]
-        if _df_bm.empty:
-            st.info(f"ℹ️ Sin registros A-BM en {_per_bm} / DÍA {_dia_bm}")
-        else:
-            st.write(f"**{len(_df_bm)} colaborador(es)** con A-BM")
-            for _, _fb in _df_bm.iterrows():
-                _dni = normalizar_dni(str(_fb.get("DNI", "")))
-                _nom = limpiar_texto(str(_fb.get("NOMBRE", "")))
-                _raz = limpiar_texto(str(_fb.get("RAZON SOCIAL", "")))
-                with st.expander(f"📎 {_nom} — DNI {_dni} ({_raz})"):
-                    _arch = st.file_uploader(f"Sustento: {_nom}", type=["pdf","png","jpg","jpeg"], key=f"bm_{_dni}_{_per_bm}_{_dia_bm}")
-                    if st.button("✅ Guardar sustento", key=f"sbm_{_dni}_{_per_bm}_{_dia_bm}"):
-                        if not _arch:
-                            st.error("❌ Adjunta el documento primero.")
-                        else:
-                            with st.spinner("⏳ Subiendo..."):
-                                try:
-                                    _tz = pytz.timezone("America/Lima")
-                                    _usr = st.session_state.get("usuario","")
-                                    _st = datetime.now(_tz).strftime("%Y%m%d_%H%M%S")
-                                    _ext = extension_archivo(_arch.name, _arch.type)
-                                    _url = subir_archivo_drive(f"bm_{_dni}_{_per_bm}_d{_dia_bm}_{_st}.{_ext}", _arch.read(), _arch.type)
-                                    _hs = obtener_o_crear_worksheet("maestra_vendedores","Sustentos_Bajas",COLUMNAS_SUSTENTOS_BM)
-                                    _hs.append_row([_per_bm, f"{_per_bm}-{str(_dia_bm).zfill(2)}", _dni, _nom, _raz,
-                                        "A-BM (No Asistió por Baja Médica)", _url,
-                                        datetime.now(_tz).strftime("%Y-%m-%d %H:%M:%S"), _usr], value_input_option="USER_ENTERED")
-                                    # Refrescar caché para ver cambio sin cerrar sesión
-                                    _leer_asistencia_cached.clear()
-                                    st.session_state.pop(KEY_LOADED, None)
-                                    st.success(f"✅ Guardado: {_nom} | {_per_bm}/DÍA {_dia_bm} | [Ver documento]({_url})")
-                                    st.rerun()
-                                except Exception as _e:
-                                    st.error(f"❌ Error: {_e}")
+            _buscar_bm = st.text_input("🔍 Filtrar por DNI o nombre (opcional)", key="bm_buscar", placeholder="Deja vacío para ver todos...").strip()
+            if _buscar_bm:
+                _mask = (
+                    _df_periodo["DNI"].astype(str).str.contains(_buscar_bm, na=False, regex=False) |
+                    _df_periodo["NOMBRE"].astype(str).str.upper().str.contains(_buscar_bm.upper(), na=False, regex=False)
+                )
+                _df_periodo = _df_periodo[_mask]
+
+            if _df_periodo.empty:
+                st.info("Sin resultados.")
+            else:
+                st.write(f"**{len(_df_periodo)} colaborador(es)** — {_per_bm} / DÍA {_dia_bm}")
+                for _, _fb in _df_periodo.head(50).iterrows():
+                    _dni = normalizar_dni(str(_fb.get("DNI", "")))
+                    _nom = limpiar_texto(str(_fb.get("NOMBRE", "")))
+                    _raz = limpiar_texto(str(_fb.get("RAZON SOCIAL", "")))
+                    _marca = str(_fb.get(_col_bm, "")).strip() if _col_bm in _df_periodo.columns else ""
+                    _marca_limpia = _marca if _marca not in ["", "None", "nan"] else "Sin marca"
+
+                    # Ícono según marca actual
+                    if "A-BM" in _marca:
+                        _icono = "🟡"
+                    elif _marca_limpia == "Sin marca":
+                        _icono = "⚪"
+                    else:
+                        _icono = "🟢"
+
+                    with st.expander(f"{_icono} {_nom} (DNI: {_dni}) — Marca DÍA {_dia_bm}: **{_marca_limpia}**"):
+                        st.caption("Puedes cargar Baja Médica independientemente de la marca actual. El documento quedará registrado en el historial.")
+                        _arch = st.file_uploader(
+                            f"Documento médico",
+                            type=["pdf","png","jpg","jpeg"],
+                            key=f"bm_{_dni}_{_per_bm}_{_dia_bm}",
+                            help="Máx 200MB — PDF, PNG, JPG, JPEG"
+                        )
+                        if st.button("✅ Registrar A-BM + guardar documento", key=f"sbm_{_dni}_{_per_bm}_{_dia_bm}"):
+                            if not _arch:
+                                st.error("❌ Adjunta el documento médico primero.")
+                            else:
+                                with st.spinner("⏳ Subiendo documento..."):
+                                    try:
+                                        _tz = pytz.timezone("America/Lima")
+                                        _usr = st.session_state.get("usuario","")
+                                        _st2 = datetime.now(_tz).strftime("%Y%m%d_%H%M%S")
+                                        _ext = extension_archivo(_arch.name, _arch.type)
+                                        _url = subir_archivo_drive(f"bm_{_dni}_{_per_bm}_d{_dia_bm}_{_st2}.{_ext}", _arch.read(), _arch.type)
+                                        _hs = obtener_o_crear_worksheet("maestra_vendedores","Sustentos_Bajas",COLUMNAS_SUSTENTOS_BM)
+                                        _hs.append_row([
+                                            _per_bm, f"{_per_bm}-{str(_dia_bm).zfill(2)}",
+                                            _dni, _nom, _raz,
+                                            "A-BM (No Asistió por Baja Médica)",
+                                            _url,
+                                            datetime.now(_tz).strftime("%Y-%m-%d %H:%M:%S"),
+                                            _usr
+                                        ], value_input_option="USER_ENTERED")
+                                        _leer_asistencia_cached.clear()
+                                        st.session_state.pop(KEY_LOADED, None)
+                                        st.success(f"✅ A-BM registrado: {_nom} | {_per_bm}/DÍA {_dia_bm} | [Ver documento]({_url})")
+                                        st.rerun()
+                                    except Exception as _e:
+                                        st.error(f"❌ Error: {_e}")
         st.divider()
         # ======= FIN BM RETROACTIVO =======
 
