@@ -1085,20 +1085,21 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                 key="editor_presencialidad_dia_actual",
             )
 
-            faltantes_sustento = detectar_abm_sin_sustento(pd.DataFrame(editado).fillna(""), df_original, col_hoy)
-            if faltantes_sustento:
-                primero = faltantes_sustento[0]
-                st.warning(f"⚠️ Hay {len(faltantes_sustento)} marca(s) A-BM pendiente(s) de sustento. Primero valida el archivo del colaborador mostrado.")
-                if st.button("📎 Adjuntar sustento A-BM pendiente", key="btn_abrir_dialogo_sustento_bm"):
-                    dialogo_sustento_bm(
-                        primero["clave"],
-                        primero["dni"],
-                        primero["nombre"],
-                        primero["razon_social"],
-                        primero["row_sheet"],
-                    )
-
             guardar_pres = st.form_submit_button("💾 Guardar Presencialidad", use_container_width=True)
+
+        # Sustento A-BM FUERA del form (st.button no puede ir dentro de form)
+        faltantes_sustento = detectar_abm_sin_sustento(pd.DataFrame(editado).fillna(""), df_original, col_hoy)
+        if faltantes_sustento:
+            primero = faltantes_sustento[0]
+            st.warning(f"⚠️ Hay {len(faltantes_sustento)} marca(s) A-BM pendiente(s) de sustento. Primero valida el archivo del colaborador mostrado.")
+            if st.button("📎 Adjuntar sustento A-BM pendiente", key="btn_abrir_dialogo_sustento_bm"):
+                dialogo_sustento_bm(
+                    primero["clave"],
+                    primero["dni"],
+                    primero["nombre"],
+                    primero["razon_social"],
+                    primero["row_sheet"],
+                )
 
         if guardar_pres:
             with st.spinner("Guardando en Google Drive…"):
