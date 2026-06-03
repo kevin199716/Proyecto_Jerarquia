@@ -1,24 +1,12 @@
 {
-  "admin": {
-    "password": "CAMBIAR_CLAVE",
-    "rol": "backoffice",
-    "estado": "activo",
-    "razon": "ALL"
-  },
-  "editor1": {
-    "password": "CAMBIAR_CLAVE",
-    "rol": "editor",
-    "estado": "activo",
-    "razon": "ALL"
-  },
   "presencialidad1": {
-    "password": "CAMBIAR_CLAVE",
+    "password": "1234",
     "rol": "presencialidad",
     "estado": "activo",
     "razon": "ALL"
   },
   "presencialidad2": {
-    "password": "CAMBIAR_CLAVE",
+    "password": "1234",
     "rol": "presencialidad",
     "estado": "activo",
     "razon": "ALL"
