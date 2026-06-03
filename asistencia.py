@@ -1141,32 +1141,31 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
             col_hoy: st.column_config.SelectboxColumn(col_hoy, options=MARCAS_PRESENCIALIDAD, width="small"),
         }
 
-        with st.form(key="form_presencialidad", clear_on_submit=False):
-            editado = st.data_editor(
-                df_editor,
-                use_container_width=True,
-                height=min(460, 50 + len(df_editor) * 32),
-                hide_index=True,
-                disabled=disabled_cols,
-                column_config=column_config,
-                num_rows="fixed",
-                key="editor_presencialidad_dia_actual",
-            )
+        editado = st.data_editor(
+            df_editor,
+            use_container_width=True,
+            height=min(520, 50 + len(df_editor) * 35),
+            hide_index=True,
+            disabled=disabled_cols,
+            column_config=column_config,
+            num_rows="fixed",
+            key="editor_presencialidad_dia_actual",
+        )
 
-            faltantes_sustento = detectar_abm_sin_sustento(pd.DataFrame(editado).fillna(""), df_original, col_hoy)
-            if faltantes_sustento:
-                primero = faltantes_sustento[0]
-                st.warning(f"⚠️ Hay {len(faltantes_sustento)} marca(s) A-BM pendiente(s) de sustento. Primero valida el archivo del colaborador mostrado.")
-                if st.button("📎 Adjuntar sustento A-BM pendiente", key="btn_abrir_dialogo_sustento_bm"):
-                    dialogo_sustento_bm(
-                        primero["clave"],
-                        primero["dni"],
-                        primero["nombre"],
-                        primero["razon_social"],
-                        primero["row_sheet"],
-                    )
+        faltantes_sustento = detectar_abm_sin_sustento(pd.DataFrame(editado).fillna(""), df_original, col_hoy)
+        if faltantes_sustento:
+            primero = faltantes_sustento[0]
+            st.warning(f"⚠️ {len(faltantes_sustento)} A-BM pendiente(s) sin sustento — **{primero['nombre']}** (DNI {primero['dni']})")
+            if st.button("📎 Adjuntar sustento A-BM", key="btn_abrir_dialogo_sustento_bm"):
+                dialogo_sustento_bm(
+                    primero["clave"],
+                    primero["dni"],
+                    primero["nombre"],
+                    primero["razon_social"],
+                    primero["row_sheet"],
+                )
 
-            guardar_pres = st.form_submit_button("💾 Guardar Presencialidad", use_container_width=True)
+        guardar_pres = st.button("💾 Guardar Presencialidad", key="btn_guardar_presencialidad", use_container_width=True)
 
         if guardar_pres:
             with st.spinner("Guardando en Google Drive…"):
