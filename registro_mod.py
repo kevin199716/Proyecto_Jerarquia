@@ -212,6 +212,18 @@ def mostrar_tabla(hoja, razon_usuario=None):
     total = len(df_vista)
     st.caption(f"Registros mostrados: **{total}** de **{len(df)}**")
 
+    # Descarga siempre exporta TODOS los registros filtrados (no solo la página)
+    import io as _io
+    _buf = _io.StringIO()
+    df_vista.to_csv(_buf, index=False, encoding="utf-8-sig")
+    st.download_button(
+        label=f"⬇️ Descargar todo ({total} registros)",
+        data=_buf.getvalue().encode("utf-8-sig"),
+        file_name="jerarquia_completa.csv",
+        mime="text/csv",
+        key="dl_jerarquia_all",
+    )
+
     cols_texto = {
         c: st.column_config.TextColumn(c)
         for c in df_vista.columns
@@ -233,7 +245,17 @@ def mostrar_tabla(hoja, razon_usuario=None):
         df_pag = df_vista
 
     with st.expander("📋 Ver matriz de jerarquía", expanded=abierto):
-        st.dataframe(df_pag, use_container_width=True, height=520, column_config=cols_texto)
+        st.dataframe(df_pag, use_container_width=True, height=480, column_config=cols_texto)
+        import io as _io
+        _buf = _io.StringIO()
+        df_vista.to_csv(_buf, index=False, encoding="utf-8-sig")
+        st.download_button(
+            "⬇️ Descargar TODOS los registros (CSV)",
+            data=_buf.getvalue().encode("utf-8-sig"),
+            file_name="jerarquia_completa.csv",
+            mime="text/csv",
+            key="dl_full_csv"
+        )
     return df
 
 

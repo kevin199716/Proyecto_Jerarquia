@@ -153,6 +153,7 @@ def leer_ubicaciones(hoja_ubicaciones, forzar=False):
     return _leer_ubicaciones_cached(hoja_ubicaciones)
 
 
+@st.cache_data(ttl=60, show_spinner=False)
 def _leer_colaboradores_cached(_hoja_colaboradores):
     valores = _hoja_colaboradores.get_all_values()
     if not valores:

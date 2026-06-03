@@ -316,6 +316,7 @@ def leer_asistencia_drive(hoja_asistencia) -> tuple[pd.DataFrame, list[str]]:
     return df, headers
 
 
+@st.cache_data(ttl=60, show_spinner=False)
 def leer_colaboradores_drive(_hoja_colaboradores) -> pd.DataFrame:
     try:
         valores = _hoja_colaboradores.get_all_values()
