@@ -1007,6 +1007,18 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
         valor = st.session_state.get(clave, "TODOS")
         return valor if valor in opciones else "TODOS"
 
+    # Botón recargar: fuerza lectura fresca de Drive
+    col_reload, col_info = st.columns([1, 4])
+    with col_reload:
+        if st.button("🔄 Recargar datos Drive", key="btn_recargar_datos_drive"):
+            _leer_asistencia_cached.clear()
+            leer_colaboradores_drive.clear()
+            st.session_state.pop("asis_estado_sync", None)
+            st.session_state.pop(KEY_LOADED, None)
+            st.rerun()
+    with col_info:
+        st.caption("Presiona si hiciste cambios en la hoja colaboradores y quieres verlos reflejados aquí inmediatamente.")
+
     with st.form("form_filtros_presencialidad"):
         f1, f2, f3, f4, f5, f6 = st.columns(6)
         with f1:
