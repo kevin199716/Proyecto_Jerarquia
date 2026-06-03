@@ -950,15 +950,25 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
     cargar_cache_desde_drive(hoja_asistencia)
 
     df_total = st.session_state[KEY_DF_TOTAL].copy()
-    # df_original comparte la misma base (estado guardado). El editor devuelve
-    # un objeto nuevo, así que esta base se mantiene intacta como referencia
-    # para el diff y NO necesita una segunda copia completa.
     df_original = df_total
     headers = st.session_state.get(KEY_HEADERS, COLUMNAS_ASISTENCIA)
 
     for col in COLUMNAS_ASISTENCIA:
         if col not in df_total.columns:
             df_total[col] = ""
+
+    # SINCRONIZACIÓN AUTOMÁTICA: actualiza ESTADO en asistencia con el estado
+    # actual de colaboradores. Sin esto, las bajas aplicadas no se reflejan.
+    try:
+        df_colab_actual = leer_colaboradores_drive(hoja_colaboradores)
+        if not df_colab_actual.empty and "DNI" in df_colab_actual.columns and "ESTADO" in df_colab_actual.columns:
+            df_colab_actual["DNI"] = df_colab_actual["DNI"].apply(normalizar_dni)
+            estado_por_dni = df_colab_actual.drop_duplicates("DNI").set_index("DNI")["ESTADO"].to_dict()
+            df_total["ESTADO"] = df_total["DNI"].apply(
+                lambda d: estado_por_dni.get(normalizar_dni(str(d)), "")
+            ).str.strip().str.upper()
+    except Exception:
+        pass  # Si falla, usa los datos de asistencia tal como están
 
     df_mes = df_total[df_total["PERIODO"].astype(str).eq(periodo)].copy()
 
