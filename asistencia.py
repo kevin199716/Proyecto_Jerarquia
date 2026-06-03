@@ -1027,8 +1027,8 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
         return
 
     # Si Admin no filtró y hay demasiados registros → pedir que filtre primero
-    if total_filtrado > 200 and filtro_razon == op_razon[0]:
-        st.warning(f"⚠️ Hay {total_filtrado} registros. **Selecciona una Razón Social** en los filtros de arriba y presiona 'Aplicar filtros' para ver el editor.")
+    if len(df_filtrado) > 200 and filtro_razon == op_razon[0]:
+        st.warning(f"⚠️ Hay {len(df_filtrado)} registros. **Selecciona una Razón Social** en los filtros y presiona 'Aplicar filtros'.")
         st.info("💡 Cada dealer tiene su propia Razón Social. Filtra para ver solo su personal.")
         return
 
