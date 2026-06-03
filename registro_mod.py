@@ -214,6 +214,40 @@ def mostrar_tabla(hoja, razon_usuario=None):
             df_vista = df_vista[mask]
 
     st.caption(f"Registros mostrados: **{len(df_vista)}** de **{len(df)}**")
+
+    # Botón descarga: lee Drive en tiempo real y exporta TODAS las columnas
+    col_dl, col_esp = st.columns([1, 4])
+    with col_dl:
+        if st.button("⬇️ Descargar Excel actualizado", key="btn_export_matriz"):
+            with st.spinner("Leyendo datos actualizados de Drive..."):
+                _leer_matriz_cached.clear()
+                df_export = _leer_matriz_cached(hoja)
+                if rol != "backoffice" and razon_usuario and "RAZON SOCIAL" in df_export.columns:
+                    df_export = df_export[df_export["RAZON SOCIAL"].astype(str).str.strip().eq(razon_usuario)]
+                try:
+                    import io
+                    buf = io.BytesIO()
+                    df_export.to_excel(buf, index=False, engine="openpyxl")
+                    buf.seek(0)
+                    st.download_button(
+                        label="📥 Confirmar descarga Excel",
+                        data=buf.getvalue(),
+                        file_name=f"jerarquia_{ahora_peru_fecha_hora().replace(' ','_').replace(':','-')}.xlsx",
+                        mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                        key="dl_excel_jerarquia"
+                    )
+                except Exception:
+                    buf = io.BytesIO()
+                    df_export.to_csv(buf, index=False, encoding="utf-8-sig")
+                    buf.seek(0)
+                    st.download_button(
+                        label="📥 Confirmar descarga CSV",
+                        data=buf.getvalue(),
+                        file_name=f"jerarquia_{ahora_peru_fecha_hora().replace(' ','_').replace(':','-')}.csv",
+                        mime="text/csv",
+                        key="dl_csv_jerarquia"
+                    )
+
     cols_texto = {
         c: st.column_config.TextColumn(c)
         for c in df_vista.columns
