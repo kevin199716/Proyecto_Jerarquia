@@ -78,12 +78,14 @@ def conectar_google_drive():
 
 def subir_archivo_drive(nombre_archivo: str, contenido_bytes: bytes, mime_type: str) -> str:
     """Sube el archivo a catbox.moe y retorna la URL pública permanente."""
-    import requests
+    import requests, re
+    # Sanitizar nombre: solo alfanumérico, guiones y puntos
+    nombre_limpio = re.sub(r'[^a-zA-Z0-9._-]', '_', nombre_archivo)
     try:
         response = requests.post(
             "https://catbox.moe/user/api.php",
             data={"reqtype": "fileupload"},
-            files={"fileToUpload": (nombre_archivo, contenido_bytes, mime_type)},
+            files={"fileToUpload": (nombre_limpio, contenido_bytes, mime_type)},
             timeout=60,
         )
         response.raise_for_status()
@@ -92,7 +94,7 @@ def subir_archivo_drive(nombre_archivo: str, contenido_bytes: bytes, mime_type: 
             raise Exception(f"Respuesta inesperada: {url}")
         return url
     except Exception as e:
-        raise Exception(f"Error al subir el archivo '{nombre_archivo}': {e}")
+        raise Exception(f"Error al subir '{nombre_limpio}': {e}")
 
 
 def obtener_o_crear_worksheet(nombre_hoja: str, nombre_worksheet: str, columnas_defecto: list[str]):
