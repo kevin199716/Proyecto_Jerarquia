@@ -950,7 +950,10 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
             "Los días anteriores y futuros quedan bloqueados."
         )
 
-    cargar_cache_desde_drive(hoja_asistencia)
+    # En VPS: forzar lectura fresca de asistencia cada vez que se entra al módulo.
+    # Esto garantiza que Altas/Bajas se reflejen de inmediato.
+    _leer_asistencia_cached.clear()
+    cargar_cache_desde_drive(hoja_asistencia, forzar=True)
 
     df_total = st.session_state[KEY_DF_TOTAL].copy()
     df_original = df_total
@@ -1094,29 +1097,35 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                     _nuevas = []
                     _periodo_act = periodo_actual()
                     _mes_act = str(hoy_peru_fecha().month)
+                    _hdrs_real = st.session_state.get(KEY_HEADERS, COLUMNAS_ASISTENCIA)
                     for _dnif in list(_faltantes)[:50]:
-                        _fila_colab = _dc_dedup[_dc_dedup["DNI"] == _dnif].iloc[0] if _dnif in _dc_dedup["DNI"].values else None
-                        if _fila_colab is not None:
-                            _row_nueva = {col: "" for col in COLUMNAS_ASISTENCIA}
-                            _row_nueva["RAZON SOCIAL"] = str(_fila_colab.get("RAZON SOCIAL", ""))
-                            _row_nueva["DNI"] = _dnif
-                            _row_nueva["NOMBRE"] = str(_fila_colab.get("NOMBRES", "")) or str(_fila_colab.get("NOMBRE", ""))
-                            _row_nueva["SUPERVISOR"] = str(_fila_colab.get("SUPERVISOR A CARGO", ""))
-                            _row_nueva["COORDINADOR"] = str(_fila_colab.get("COORDINADOR A CARGO", ""))
-                            _row_nueva["DEPARTAMENTO"] = str(_fila_colab.get("DEPARTAMENTO", ""))
-                            _row_nueva["PROVINCIA"] = str(_fila_colab.get("PROVINCIA", ""))
-                            _row_nueva["ESTADO"] = "ACTIVO"
-                            _row_nueva["FECHA_ALTA"] = str(_fila_colab.get("FECHA DE CREACION USUARIO", ""))
-                            _row_nueva["MES"] = _mes_act
-                            _row_nueva["PERIODO"] = _periodo_act
-                            _nuevas.append(list(_row_nueva.values()))
+                        _matches = _dc_dedup[_dc_dedup["DNI"] == _dnif]
+                        if _matches.empty:
+                            continue
+                        _fila_colab = _matches.iloc[0]
+                        _mapa = {
+                            "RAZON SOCIAL": str(_fila_colab.get("RAZON SOCIAL", "")),
+                            "DNI": str(_dnif),
+                            "NOMBRE": str(_fila_colab.get("NOMBRES", "") or _fila_colab.get("NOMBRE", "")),
+                            "SUPERVISOR": str(_fila_colab.get("SUPERVISOR A CARGO", "")),
+                            "COORDINADOR": str(_fila_colab.get("COORDINADOR A CARGO", "")),
+                            "DEPARTAMENTO": str(_fila_colab.get("DEPARTAMENTO", "")),
+                            "PROVINCIA": str(_fila_colab.get("PROVINCIA", "")),
+                            "ESTADO": "ACTIVO",
+                            "FECHA_ALTA": str(_fila_colab.get("FECHA DE CREACION USUARIO", "")),
+                            "FECHA_CESE": "",
+                            "MES": _mes_act,
+                            "PERIODO": _periodo_act,
+                        }
+                        _row = [str(_mapa.get(h, "")) for h in _hdrs_real]
+                        _nuevas.append(_row)
                     if _nuevas:
                         hoja_asistencia.append_rows(_nuevas, value_input_option="USER_ENTERED")
                         _leer_asistencia_cached.clear()
                         st.session_state.pop(KEY_LOADED, None)
                         st.rerun()
-                except Exception:
-                    pass
+                except Exception as _sync_err:
+                    st.warning(f"Auto-sync: {_sync_err}")
         else:
             _activos = None
     except Exception:
@@ -1125,9 +1134,13 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
     df_editor_base = df_filtrado[
         df_filtrado["DNI"].apply(normalizar_dni).isin(_activos)
     ].copy() if _activos is not None else df_filtrado[df_filtrado.apply(fila_editable_hoy, axis=1)].copy()
+
+    # Contador: editables (activos) vs total filtrado
+    total_filtrado = len(df_filtrado)
+    total_editables = len(df_editor_base)
     total_filtrado = len(df_editor_base)
 
-    st.caption(f"Registros editables hoy: **{total_filtrado}** | Registros en espejo mensual: **{len(df_filtrado)}**")
+    st.caption(f"Registros editables (activos): **{total_editables}** | Total filtrados: **{total_filtrado}** | Espejo mensual: **{len(df_filtrado)}**")
 
     if df_editor_base.empty:
         st.warning("⚠️ No hay personal vigente para marcar asistencia el día de hoy con los filtros seleccionados.")
