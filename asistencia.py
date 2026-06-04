@@ -1088,7 +1088,7 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
             # Auto-sync liviano: agregar filas faltantes SIN leer toda la base
             _dnis_asist = set(df_total["DNI"].apply(normalizar_dni).tolist())
             _faltantes = _activos - _dnis_asist
-            if _faltantes and not st.session_state.get("_sync_auto"):
+            if _faltantes:
                 try:
                     _dc_dedup = _dc.drop_duplicates("DNI")
                     _nuevas = []
@@ -1114,11 +1114,9 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                         hoja_asistencia.append_rows(_nuevas, value_input_option="USER_ENTERED")
                         _leer_asistencia_cached.clear()
                         st.session_state.pop(KEY_LOADED, None)
-                    st.session_state["_sync_auto"] = True
-                    if _nuevas:
                         st.rerun()
                 except Exception:
-                    st.session_state["_sync_auto"] = True
+                    pass
         else:
             _activos = None
     except Exception:
