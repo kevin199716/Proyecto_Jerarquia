@@ -1244,17 +1244,35 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                             _leer_asistencia_cached.clear()
                             st.session_state.pop(KEY_LOADED, None)
 
-                        # Si hay A-BM nuevos → abrir popup para documento
+                        # Si hay A-BM nuevos → guardar marcas + popup por cada uno
                         if _abm_nuevos:
-                            _primero = _abm_nuevos[0]
-                            _row_abm = _primero[1]
-                            _dni_abm = normalizar_dni(str(_row_abm.get("DNI", "")))
-                            _nom_abm = limpiar_texto(str(_row_abm.get("NOMBRE", "")))
-                            _raz_abm = limpiar_texto(str(_row_abm.get("RAZON SOCIAL", "")))
-                            _rs_abm = int(float(str(_row_abm.get("ROW_SHEET", 0) or 0)))
-                            _clave_abm = f"{_dni_abm}_{_per_bm}_{_dia_bm}"
-                            dialogo_sustento_bm(_clave_abm, _dni_abm, _nom_abm, _raz_abm, _rs_abm, col_dia=_col_bm)
-                            st.stop()
+                            # Primero guardar las marcas A-BM en la hoja
+                            _hdrs_bm = st.session_state.get(KEY_HEADERS, COLUMNAS_ASISTENCIA)
+                            from gspread.cell import Cell as _CellBM
+                            _cw_bm = []
+                            for _i, _row, _nuevo in _abm_nuevos:
+                                _rs = int(float(str(_row.get("ROW_SHEET", 0) or 0)))
+                                if _rs and _col_bm in _hdrs_bm:
+                                    _cw_bm.append(_CellBM(_rs, _hdrs_bm.index(_col_bm) + 1, _nuevo))
+                            if _cw_bm:
+                                hoja_asistencia.update_cells(_cw_bm, value_input_option="USER_ENTERED")
+
+                            # Popup para el primer A-BM sin sustento pendiente
+                            _pend = st.session_state.get(KEY_SUSTENTOS_PENDIENTES, {})
+                            for _ix, (_i, _row_abm, _nv) in enumerate(_abm_nuevos):
+                                _dni_abm = normalizar_dni(str(_row_abm.get("DNI", "")))
+                                _clave_abm = f"{_dni_abm}_{_per_bm}_{_dia_bm}_{_ix}"
+                                if _clave_abm not in _pend:
+                                    _nom_abm = limpiar_texto(str(_row_abm.get("NOMBRE", "")))
+                                    _raz_abm = limpiar_texto(str(_row_abm.get("RAZON SOCIAL", "")))
+                                    _rs_abm = int(float(str(_row_abm.get("ROW_SHEET", 0) or 0)))
+                                    dialogo_sustento_bm(_clave_abm, _dni_abm, _nom_abm, _raz_abm, _rs_abm, col_dia=_col_bm)
+                                    st.stop()
+                            # Si todos tienen sustento, limpiar cache y confirmar
+                            _leer_asistencia_cached.clear()
+                            st.session_state.pop(KEY_LOADED, None)
+                            st.session_state["asis_guardado_msg"] = f"✅ {len(_abm_nuevos)} marcas A-BM guardadas"
+                            st.rerun()
 
                         if _cambios_normales and not _abm_nuevos:
                             st.session_state["asis_guardado_msg"] = f"✅ {len(_cambios_normales)} cambios de presencialidad guardados correctamente"
