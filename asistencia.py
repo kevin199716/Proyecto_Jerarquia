@@ -1093,44 +1093,16 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
             _faltantes = _activos - _dnis_asist
             if _faltantes:
                 try:
-                    _dc_dedup = _dc.drop_duplicates("DNI")
+                    _dc_dedup = _dc[_dc["ESTADO"].str.upper().str.strip() == "ACTIVO"].drop_duplicates("DNI")
                     _nuevas = []
-                    _periodo_act = periodo_actual()
-                    _mes_act = str(hoy_actual().month)
                     _hdrs_real = st.session_state.get(KEY_HEADERS, COLUMNAS_ASISTENCIA)
                     for _dnif in list(_faltantes)[:50]:
                         _matches = _dc_dedup[_dc_dedup["DNI"] == _dnif]
                         if _matches.empty:
                             continue
-                        _fila_colab = _matches.iloc[0]
-                        def _sg(row, *keys):
-                            for k in keys:
-                                v = str(row.get(k, "")).strip()
-                                if v and v.lower() not in ("nan", "none", ""):
-                                    return v
-                            # Buscar case-insensitive como fallback
-                            for k in keys:
-                                for col in row.index:
-                                    if k.upper().replace(" ","") in str(col).upper().replace(" ",""):
-                                        v = str(row[col]).strip()
-                                        if v and v.lower() not in ("nan", "none", ""):
-                                            return v
-                            return ""
-                        _mapa = {
-                            "RAZON SOCIAL": _sg(_fila_colab, "RAZON SOCIAL"),
-                            "DNI": str(_dnif),
-                            "NOMBRE": _sg(_fila_colab, "NOMBRES", "NOMBRE"),
-                            "SUPERVISOR": _sg(_fila_colab, "SUPERVISOR A CARGO", "SUPERVISOR"),
-                            "COORDINADOR": _sg(_fila_colab, "COORDINADOR", "COORDINADOR A CARGO"),
-                            "DEPARTAMENTO": _sg(_fila_colab, "DEPARTAMENTO"),
-                            "PROVINCIA": _sg(_fila_colab, "PROVINCIA"),
-                            "ESTADO": "ACTIVO",
-                            "FECHA_ALTA": _sg(_fila_colab, "FECHA DE CREACION USUARIO", "FECHA_ALTA"),
-                            "FECHA_CESE": "",
-                            "MES": _mes_act,
-                            "PERIODO": _periodo_act,
-                        }
-                        _row = [str(_mapa.get(h, "")) for h in _hdrs_real]
+                        # Usar construir_payload_base (misma función que sincronizar_mes)
+                        _payload = construir_payload_base(_matches.iloc[0])
+                        _row = [str(_payload.get(h, "")) for h in _hdrs_real]
                         _nuevas.append(_row)
                     if _nuevas:
                         hoja_asistencia.append_rows(_nuevas, value_input_option="USER_ENTERED")
