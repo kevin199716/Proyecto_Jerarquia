@@ -1085,16 +1085,37 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
         if not _dc.empty and "DNI" in _dc.columns and "ESTADO" in _dc.columns:
             _dc["DNI"] = _dc["DNI"].apply(normalizar_dni)
             _activos = set(_dc[_dc["ESTADO"].str.upper().str.strip() == "ACTIVO"]["DNI"].tolist())
-            # Auto-sync: si hay activos sin fila en asistencia → crearlas sin botón
+            # Auto-sync liviano: agregar filas faltantes SIN leer toda la base
             _dnis_asist = set(df_total["DNI"].apply(normalizar_dni).tolist())
             _faltantes = _activos - _dnis_asist
             if _faltantes and not st.session_state.get("_sync_auto"):
                 try:
-                    sincronizar_mes(hoja_asistencia, hoja_colaboradores)
-                    _leer_asistencia_cached.clear()
-                    st.session_state.pop(KEY_LOADED, None)
+                    _nuevas = []
+                    _periodo_act = periodo_actual()
+                    _mes_act = str(hoy_peru_fecha().month)
+                    for _dnif in list(_faltantes)[:50]:  # máximo 50 a la vez
+                        _fila_colab = _dc[_dc["DNI"] == _dnif].iloc[0] if _dnif in _dc["DNI"].values else None
+                        if _fila_colab is not None:
+                            _row_nueva = {col: "" for col in COLUMNAS_ASISTENCIA}
+                            _row_nueva["RAZON SOCIAL"] = str(_fila_colab.get("RAZON SOCIAL", ""))
+                            _row_nueva["DNI"] = _dnif
+                            _row_nueva["NOMBRE"] = str(_fila_colab.get("NOMBRES", "")) or str(_fila_colab.get("NOMBRE", ""))
+                            _row_nueva["SUPERVISOR"] = str(_fila_colab.get("SUPERVISOR A CARGO", ""))
+                            _row_nueva["COORDINADOR"] = str(_fila_colab.get("COORDINADOR A CARGO", ""))
+                            _row_nueva["DEPARTAMENTO"] = str(_fila_colab.get("DEPARTAMENTO", ""))
+                            _row_nueva["PROVINCIA"] = str(_fila_colab.get("PROVINCIA", ""))
+                            _row_nueva["ESTADO"] = "ACTIVO"
+                            _row_nueva["FECHA_ALTA"] = str(_fila_colab.get("FECHA DE CREACION USUARIO", ""))
+                            _row_nueva["MES"] = _mes_act
+                            _row_nueva["PERIODO"] = _periodo_act
+                            _nuevas.append(list(_row_nueva.values()))
+                    if _nuevas:
+                        hoja_asistencia.append_rows(_nuevas, value_input_option="USER_ENTERED")
+                        _leer_asistencia_cached.clear()
+                        st.session_state.pop(KEY_LOADED, None)
                     st.session_state["_sync_auto"] = True
-                    st.rerun()
+                    if _nuevas:
+                        st.rerun()
                 except Exception:
                     st.session_state["_sync_auto"] = True
         else:
