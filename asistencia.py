@@ -1114,12 +1114,8 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                 column_config=_cfg_bm, num_rows="fixed",
                 key=f"editor_bm_{_per_bm}_{_dia_bm}",
             )
-            if not _es_hoy:
-                _arch_bm = st.file_uploader("📎 Documento médico sustento A-BM", type=["pdf","png","jpg","jpeg"], key=f"arch_bm_{_per_bm}_{_dia_bm}")
-            else:
-                _arch_bm = None
             _guardar_bm = st.button(
-                "💾 Guardar Presencialidad" if _es_hoy else "💾 Guardar A-BM + Sustento",
+                "💾 Guardar Presencialidad",
                 key=f"btn_gbm_{_per_bm}_{_dia_bm}",
                 use_container_width=True
             )
@@ -1135,41 +1131,38 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                             _nuevo = str(_row[_col_bm]).strip()
                             if _nuevo and _nuevo != _orig:
                                 _cambios.append((_i, _row, _nuevo))
-                        _url_doc = None
-                        if _arch_bm:
-                            _tz2 = pytz.timezone("America/Lima")
-                            _st3 = datetime.now(_tz2).strftime("%Y%m%d_%H%M%S")
-                            _ext3 = extension_archivo(_arch_bm.name, _arch_bm.type)
-                            _url_doc = subir_archivo_drive(f"bm_{_per_bm}_d{_dia_bm}_{_st3}.{_ext3}", _arch_bm.read(), _arch_bm.type)
-                        if _cambios or _url_doc:
+
+                        # Detectar A-BM nuevos → abrir popup para documento
+                        _abm_nuevos = [c for c in _cambios if "A-BM" in c[2]]
+                        if _abm_nuevos:
+                            _primero = _abm_nuevos[0]
+                            _row_abm = _primero[1]
+                            _dni_abm = normalizar_dni(str(_row_abm.get("DNI", "")))
+                            _nom_abm = limpiar_texto(str(_row_abm.get("NOMBRE", "")))
+                            _raz_abm = limpiar_texto(str(_row_abm.get("RAZON SOCIAL", "")))
+                            _rs_abm = int(float(str(_row_abm.get("ROW_SHEET", 0) or 0)))
+                            _clave_abm = f"{_dni_abm}_{_per_bm}_{_dia_bm}"
+                            dialogo_sustento_bm(_clave_abm, _dni_abm, _nom_abm, _raz_abm, _rs_abm)
+                        
+                        if _cambios:
                             _hdrs = st.session_state.get(KEY_HEADERS, COLUMNAS_ASISTENCIA)
                             from gspread.cell import Cell as _Cell
                             _cw = []
-                            _hs2 = obtener_o_crear_worksheet("maestra_vendedores","Sustentos_Bajas",COLUMNAS_SUSTENTOS_BM)
                             for _i, _row, _nuevo in _cambios:
-                                _rs = int(float(str(_row.get("ROW_SHEET",0) or 0)))
+                                _rs = int(float(str(_row.get("ROW_SHEET", 0) or 0)))
                                 if _rs and _col_bm in _hdrs:
-                                    _cw.append(_Cell(_rs, _hdrs.index(_col_bm)+1, _nuevo))
-                                if _url_doc:
-                                    _tz3 = pytz.timezone("America/Lima")
-                                    _hs2.append_row([_per_bm, f"{_per_bm}-{str(_dia_bm).zfill(2)}",
-                                        normalizar_dni(str(_row.get("DNI",""))),
-                                        limpiar_texto(str(_row.get("NOMBRE",""))),
-                                        limpiar_texto(str(_row.get("RAZON SOCIAL",""))),
-                                        "A-BM", _url_doc,
-                                        datetime.now(_tz3).strftime("%Y-%m-%d %H:%M:%S"),
-                                        st.session_state.get("usuario","")
-                                    ], value_input_option="USER_ENTERED")
+                                    _cw.append(_Cell(_rs, _hdrs.index(_col_bm) + 1, _nuevo))
                             if _cw:
                                 hoja_asistencia.update_cells(_cw, value_input_option="USER_ENTERED")
                             _leer_asistencia_cached.clear()
                             st.session_state.pop(KEY_LOADED, None)
-                            st.success(f"✅ {len(_cambios)} cambios guardados" + (f" | [Ver documento]({_url_doc})" if _url_doc else ""))
+                            st.success(f"✅ {len(_cambios)} cambios guardados")
                             st.rerun()
                         else:
-                            st.info("Sin cambios ni documento.")
+                            st.info("Sin cambios.")
                     except Exception as _e:
-                        st.error(f"❌ Error: {_e}")
+                        if "dialog" not in str(type(_e).__name__).lower():
+                            st.error(f"❌ Error: {_e}")
         st.divider()
         # ======= FIN SLICERS BM =======
 
