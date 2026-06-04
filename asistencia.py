@@ -1082,7 +1082,14 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
             _dia_bm = st.selectbox("📆 Día", list(range(1, 32)), key="bm_retro_dia")
 
         _col_bm = f"DIA_{_dia_bm}"
-        _es_hoy = (_per_bm == str(periodo_actual())) and (_col_bm == col_hoy)
+        _hoy_num = dia_actual()
+        _per_actual = str(periodo_actual()).strip()
+        _es_hoy = (_per_bm.strip() == _per_actual) and (int(_dia_bm) == _hoy_num)
+        _es_futuro = (_per_bm.strip() == _per_actual) and (int(_dia_bm) > _hoy_num)
+
+        if _es_futuro:
+            st.warning(f"⚠️ DÍA {_dia_bm} es futuro. No se puede editar.")
+
         _df_sel = df_historico[df_historico["PERIODO"].astype(str).eq(_per_bm)].copy()
         if filtro_razon and filtro_razon != op_razon[0] and "RAZON SOCIAL" in _df_sel.columns:
             _df_sel = _df_sel[_df_sel["RAZON SOCIAL"].astype(str).str.strip().eq(filtro_razon)]
@@ -1091,6 +1098,8 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
 
         if _df_sel.empty:
             st.info(f"Sin registros en {_per_bm}")
+        elif _es_futuro:
+            pass  # No mostrar editor para días futuros
         else:
             columnas_bm_ed = COLUMNAS_FIJAS_EDITOR + [_col_bm, "ROW_SHEET"]
             _df_bm_b = _df_sel.copy()
