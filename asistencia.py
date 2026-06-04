@@ -1074,6 +1074,7 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
         st.divider()
         st.markdown("<span class=\'wow-section-title\'>📋 Cargar Sustento A-BM (cualquier fecha)</span>", unsafe_allow_html=True)
         st.caption("Selecciona período y día. Muestra la asistencia de ese día. Solo puedes marcar **A-BM** + adjuntar documento.")
+        st.info("**Motivos:** A = Asistió · A-BM = No Asistió por Baja Médica · A-VAC = No Asistió por Vacaciones · NA-SA = No Asistió (Sin aviso) · NA-CA = No Asistió (Con aviso)")
         _col_p, _col_d = st.columns(2)
         with _col_p:
             _periodos = sorted([str(p) for p in df_historico["PERIODO"].unique() if str(p).strip()], reverse=True)
@@ -1115,7 +1116,16 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                 "ROW_SHEET": st.column_config.TextColumn("FILA", width="small", disabled=True),
                 _col_bm: st.column_config.SelectboxColumn(_label_col, options=_opciones_col, width="small"),
             }
-            st.caption(f"**{len(_df_bm_ed)} registros** | {_per_bm} / DÍA {_dia_bm} {'— Todas las marcas disponibles (es HOY)' if _es_hoy else '— Solo A-BM editable'}")
+            st.caption(f"**{len(_df_bm_ed)} registros** | {_per_bm} / DÍA {_dia_bm} {'— Todas las marcas (es HOY)' if _es_hoy else '— Solo A-BM editable'}")
+
+            # Paginación para no freezear
+            _MAX_BM = 100
+            if len(_df_bm_ed) > _MAX_BM:
+                _npag = -(-len(_df_bm_ed) // _MAX_BM)
+                _pag_bm = st.selectbox(f"Página ({_MAX_BM} de {len(_df_bm_ed)})", range(1, _npag+1), key=f"pag_bm_{_per_bm}_{_dia_bm}")
+                _ini = (_pag_bm - 1) * _MAX_BM
+                _df_bm_ed = _df_bm_ed.iloc[_ini:_ini+_MAX_BM].copy()
+
             _editado_bm = st.data_editor(
                 _df_bm_ed, use_container_width=True,
                 height=min(380, 50 + len(_df_bm_ed) * 35),
@@ -1141,8 +1151,24 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                             if _nuevo and _nuevo != _orig:
                                 _cambios.append((_i, _row, _nuevo))
 
-                        # Detectar A-BM nuevos → abrir popup para documento
+                        # Guardar cambios normales primero
+                        _cambios_normales = [c for c in _cambios if "A-BM" not in c[2]]
                         _abm_nuevos = [c for c in _cambios if "A-BM" in c[2]]
+
+                        if _cambios_normales:
+                            _hdrs = st.session_state.get(KEY_HEADERS, COLUMNAS_ASISTENCIA)
+                            from gspread.cell import Cell as _Cell
+                            _cw = []
+                            for _i, _row, _nuevo in _cambios_normales:
+                                _rs = int(float(str(_row.get("ROW_SHEET", 0) or 0)))
+                                if _rs and _col_bm in _hdrs:
+                                    _cw.append(_Cell(_rs, _hdrs.index(_col_bm) + 1, _nuevo))
+                            if _cw:
+                                hoja_asistencia.update_cells(_cw, value_input_option="USER_ENTERED")
+                            _leer_asistencia_cached.clear()
+                            st.session_state.pop(KEY_LOADED, None)
+
+                        # Si hay A-BM nuevos → abrir popup para documento
                         if _abm_nuevos:
                             _primero = _abm_nuevos[0]
                             _row_abm = _primero[1]
@@ -1152,22 +1178,12 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                             _rs_abm = int(float(str(_row_abm.get("ROW_SHEET", 0) or 0)))
                             _clave_abm = f"{_dni_abm}_{_per_bm}_{_dia_bm}"
                             dialogo_sustento_bm(_clave_abm, _dni_abm, _nom_abm, _raz_abm, _rs_abm)
-                        
-                        if _cambios:
-                            _hdrs = st.session_state.get(KEY_HEADERS, COLUMNAS_ASISTENCIA)
-                            from gspread.cell import Cell as _Cell
-                            _cw = []
-                            for _i, _row, _nuevo in _cambios:
-                                _rs = int(float(str(_row.get("ROW_SHEET", 0) or 0)))
-                                if _rs and _col_bm in _hdrs:
-                                    _cw.append(_Cell(_rs, _hdrs.index(_col_bm) + 1, _nuevo))
-                            if _cw:
-                                hoja_asistencia.update_cells(_cw, value_input_option="USER_ENTERED")
-                            _leer_asistencia_cached.clear()
-                            st.session_state.pop(KEY_LOADED, None)
-                            st.success(f"✅ {len(_cambios)} cambios guardados")
+                            st.stop()
+
+                        if _cambios_normales and not _abm_nuevos:
+                            st.success(f"✅ {len(_cambios_normales)} cambios guardados")
                             st.rerun()
-                        else:
+                        elif not _cambios:
                             st.info("Sin cambios.")
                     except Exception as _e:
                         if "dialog" not in str(type(_e).__name__).lower():
