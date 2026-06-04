@@ -1039,6 +1039,18 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
         if not _dc.empty and "DNI" in _dc.columns and "ESTADO" in _dc.columns:
             _dc["DNI"] = _dc["DNI"].apply(normalizar_dni)
             _activos = set(_dc[_dc["ESTADO"].str.upper().str.strip() == "ACTIVO"]["DNI"].tolist())
+            # Auto-sync: si hay activos sin fila en asistencia → crearlas sin botón
+            _dnis_asist = set(df_total["DNI"].apply(normalizar_dni).tolist())
+            _faltantes = _activos - _dnis_asist
+            if _faltantes and not st.session_state.get("_sync_auto"):
+                try:
+                    sincronizar_mes(hoja_asistencia, hoja_colaboradores)
+                    _leer_asistencia_cached.clear()
+                    st.session_state.pop(KEY_LOADED, None)
+                    st.session_state["_sync_auto"] = True
+                    st.rerun()
+                except Exception:
+                    st.session_state["_sync_auto"] = True
         else:
             _activos = None
     except Exception:
@@ -1110,13 +1122,13 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
             _df_bm_ed = _df_bm_b[columnas_bm_ed].fillna("").astype(str).replace({"nan":"","None":""})
             _df_bm_ed[_col_bm] = _df_bm_ed[_col_bm].apply(limpiar_marca)
             _opciones_col = MARCAS_PRESENCIALIDAD if _es_hoy else ["", "A-BM"]
-            _label_col = f"{_col_bm} {'← HOY (todas las marcas)' if _es_hoy else '← Solo A-BM permitido'}"
+            _label_col = f"{_col_bm}{' ← HOY' if _es_hoy else ' (solo A-BM)'}"
             _disabled_bm = [c for c in _df_bm_ed.columns if c != _col_bm]
             _cfg_bm = {
                 "ROW_SHEET": st.column_config.TextColumn("FILA", width="small", disabled=True),
                 _col_bm: st.column_config.SelectboxColumn(_label_col, options=_opciones_col, width="small"),
             }
-            st.caption(f"**{len(_df_bm_ed)} registros** | {_per_bm} / DÍA {_dia_bm} {'— Todas las marcas (es HOY)' if _es_hoy else '— Solo A-BM editable'}")
+            st.caption(f"**{len(_df_bm_ed)} registros** | {_per_bm} / DÍA {_dia_bm}{' ← HOY (todas las marcas)' if _es_hoy else ' (solo A-BM retroactivo)'}")
 
             # Paginación para no freezear
             _MAX_BM = 100

@@ -389,6 +389,7 @@ def dar_de_baja(df, hoja, razon_usuario=None):
                 # Forzar re-sync de ESTADO en próxima visita a Presencialidad
                 import streamlit as _st
                 _st.session_state.pop("asis_estado_sync", None)
+                _st.session_state.pop("_sync_auto", None)
                 _st.session_state.pop("asis_loaded", None)
             except Exception:
                 pass

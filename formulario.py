@@ -412,6 +412,15 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
 
     if msg_ok_pendiente:
         st.success(msg_ok_pendiente if isinstance(msg_ok_pendiente, str) else "✅ Alta registrada correctamente")
+        # Limpiar cachés para que aparezca en Presencialidad inmediatamente
+        try:
+            from asistencia import _leer_asistencia_cached, sincronizar_mes
+            _leer_asistencia_cached.clear()
+            import streamlit as _st2
+            _st2.session_state.pop("asis_loaded", None)
+            _st2.session_state.pop("_sync_auto", None)
+        except Exception:
+            pass
 
     if msg_warning_pendiente:
         st.warning(msg_warning_pendiente)
@@ -609,6 +618,15 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
     # Mensaje también cerca del botón porque el navegador suele quedarse abajo luego del guardado.
     if msg_ok_pendiente:
         st.success(msg_ok_pendiente if isinstance(msg_ok_pendiente, str) else "✅ Alta registrada correctamente")
+        # Limpiar cachés para que aparezca en Presencialidad inmediatamente
+        try:
+            from asistencia import _leer_asistencia_cached, sincronizar_mes
+            _leer_asistencia_cached.clear()
+            import streamlit as _st2
+            _st2.session_state.pop("asis_loaded", None)
+            _st2.session_state.pop("_sync_auto", None)
+        except Exception:
+            pass
         st.session_state.pop("mensaje_ok", None)
     if msg_warning_pendiente:
         st.warning(msg_warning_pendiente)
