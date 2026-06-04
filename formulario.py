@@ -720,10 +720,10 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
                     estado_pres = registrar_alta_en_asistencia(hoja_asistencia, campos)
                     st.session_state["mensaje_ok"] = f"✅ Alta registrada correctamente. {estado_pres}"
                 except Exception as e_sync:
-                    st.session_state["mensaje_ok"] = "✅ Alta registrada correctamente. Para verlo en Presencialidad Dealer, presiona Sincronizar mes."
+                    st.session_state["mensaje_ok"] = "✅ Alta registrada correctamente. Aparecerá en Presencialidad automáticamente."
                     st.session_state["mensaje_sync_warning"] = f"⚠️ No se pudo actualizar presencialidad en automático: {e_sync}"
             else:
-                st.session_state["mensaje_ok"] = "✅ Alta registrada correctamente. Para verlo en Presencialidad Dealer, presiona Sincronizar mes."
+                st.session_state["mensaje_ok"] = "✅ Alta registrada correctamente. Aparecerá en Presencialidad automáticamente."
 
             # Fuerza que el próximo render use llaves nuevas y todos los campos queden en blanco.
             st.session_state["alta_form_version"] = int(st.session_state.get("alta_form_version", 0)) + 1

@@ -276,7 +276,14 @@ def dar_de_baja(df, hoja, razon_usuario=None):
         st.error("❌ La base no tiene columna DNI.")
         return
 
-    dni = st.text_input("DNI", key="dni_baja").strip()
+    with st.form("form_buscar_baja"):
+        dni_input = st.text_input("DNI", key="dni_baja_input").strip()
+        buscar_baja = st.form_submit_button("🔍 Buscar para dar de baja", use_container_width=True)
+
+    if buscar_baja and dni_input:
+        st.session_state["dni_baja_confirmado"] = dni_input
+
+    dni = st.session_state.get("dni_baja_confirmado", "")
     if not dni:
         return
 

@@ -744,7 +744,7 @@ def extension_archivo(nombre: str, mime_type: str) -> str:
 
 
 @st.dialog("📋 Sustento obligatorio para A-BM")
-def dialogo_sustento_bm(clave, dni, nombre, razon_social, row_sheet):
+def dialogo_sustento_bm(clave, dni, nombre, razon_social, row_sheet, col_dia=None):
     st.write(f"Colaborador: **{nombre}**")
     st.write(f"DNI: **{dni}** · Fila: **{row_sheet}**")
     st.warning("Para registrar **A-BM (No Asistió por Baja Médica)** debes adjuntar PDF o imagen. El registro se guardará como una fila histórica nueva en Sustentos_Bajas.")
@@ -776,6 +776,7 @@ def dialogo_sustento_bm(clave, dni, nombre, razon_social, row_sheet):
             "contenido_bytes": archivo.read(),
             "periodo": periodo_actual(),
             "fecha_asistencia": str(hoy_actual()),
+            "col_dia": col_dia or f"DIA_{dia_actual()}",
         }
         st.session_state[KEY_SUSTENTOS_PENDIENTES] = pendientes
         st.success("✅ Sustento validado. Ahora presiona Guardar Presencialidad para registrar la marca y el histórico.")
@@ -1032,6 +1033,51 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
         return
 
     # Editor solo para personas vigentes hoy.
+    # Auto-save: si hay sustentos pendientes del popup, guardarlos inmediatamente
+    _pendientes = st.session_state.get(KEY_SUSTENTOS_PENDIENTES, {})
+    if _pendientes:
+        try:
+            hoja_sus = obtener_o_crear_worksheet("maestra_vendedores", "Sustentos_Bajas", COLUMNAS_SUSTENTOS_BM)
+            tz_lima = pytz.timezone("America/Lima")
+            usuario = st.session_state.get("usuario", "")
+            _guardados = 0
+            for clave, datos in list(_pendientes.items()):
+                _dnip = normalizar_dni(datos.get("dni", ""))
+                _extp = extension_archivo(datos.get("nombre_archivo", ""), datos.get("mime_type", ""))
+                _stampp = datetime.now(tz_lima).strftime("%Y%m%d_%H%M%S")
+                _nombre_p = f"sustento_bm_{_dnip}_{datos.get('fecha_asistencia')}_{_stampp}.{_extp}"
+                _linkp = subir_archivo_drive(_nombre_p, datos.get("contenido_bytes", b""), datos.get("mime_type", "application/octet-stream"))
+                hoja_sus.append_row([
+                    datos.get("periodo", periodo_actual()),
+                    datos.get("fecha_asistencia", str(hoy_actual())),
+                    _dnip,
+                    datos.get("nombre", ""),
+                    datos.get("razon_social", ""),
+                    "A-BM (No Asistió por Baja Médica)",
+                    _linkp,
+                    datetime.now(tz_lima).strftime("%Y-%m-%d %H:%M:%S"),
+                    usuario,
+                ], value_input_option="USER_ENTERED")
+                # Guardar marca A-BM en la hoja de asistencia
+                _rsp = int(datos.get("row_sheet", 0))
+                if _rsp:
+                    _col_dia = datos.get("col_dia", col_hoy)
+                    _hdrs_p = st.session_state.get(KEY_HEADERS, COLUMNAS_ASISTENCIA)
+                    if _col_dia in _hdrs_p:
+                        from gspread.cell import Cell as _CellP
+                        hoja_asistencia.update_cells(
+                            [_CellP(_rsp, _hdrs_p.index(_col_dia) + 1, "A-BM")],
+                            value_input_option="USER_ENTERED"
+                        )
+                _guardados += 1
+            st.session_state[KEY_SUSTENTOS_PENDIENTES] = {}
+            _leer_asistencia_cached.clear()
+            st.session_state.pop(KEY_LOADED, None)
+            st.success(f"✅ {_guardados} sustento(s) A-BM guardados en Drive + Sustentos_Bajas")
+            st.rerun()
+        except Exception as e:
+            st.error(f"❌ Error al guardar sustentos: {e}")
+
     # FUENTE DE VERDAD: colaboradores define quién es ACTIVO, no asistencia.
     # Leer colaboradores (cacheado) y filtrar solo los DNI activos hoy.
     try:
@@ -1189,7 +1235,7 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                             _raz_abm = limpiar_texto(str(_row_abm.get("RAZON SOCIAL", "")))
                             _rs_abm = int(float(str(_row_abm.get("ROW_SHEET", 0) or 0)))
                             _clave_abm = f"{_dni_abm}_{_per_bm}_{_dia_bm}"
-                            dialogo_sustento_bm(_clave_abm, _dni_abm, _nom_abm, _raz_abm, _rs_abm)
+                            dialogo_sustento_bm(_clave_abm, _dni_abm, _nom_abm, _raz_abm, _rs_abm, col_dia=_col_bm)
                             st.stop()
 
                         if _cambios_normales and not _abm_nuevos:
