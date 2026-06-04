@@ -1108,6 +1108,13 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                                 v = str(row.get(k, "")).strip()
                                 if v and v.lower() not in ("nan", "none", ""):
                                     return v
+                            # Buscar case-insensitive como fallback
+                            for k in keys:
+                                for col in row.index:
+                                    if k.upper().replace(" ","") in str(col).upper().replace(" ",""):
+                                        v = str(row[col]).strip()
+                                        if v and v.lower() not in ("nan", "none", ""):
+                                            return v
                             return ""
                         _mapa = {
                             "RAZON SOCIAL": _sg(_fila_colab, "RAZON SOCIAL"),
@@ -1278,7 +1285,7 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                             st.stop()
 
                         if _cambios_normales and not _abm_nuevos:
-                            st.success(f"✅ {len(_cambios_normales)} cambios guardados")
+                            st.session_state["asis_guardado_msg"] = f"✅ {len(_cambios_normales)} cambios de presencialidad guardados correctamente"
                             st.rerun()
                         elif not _cambios:
                             st.info("Sin cambios.")
