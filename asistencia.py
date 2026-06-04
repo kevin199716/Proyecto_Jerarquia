@@ -1087,7 +1087,7 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
         _dc = leer_colaboradores_drive(hoja_colaboradores)
         if not _dc.empty and "DNI" in _dc.columns and "ESTADO" in _dc.columns:
             _dc["DNI"] = _dc["DNI"].apply(normalizar_dni)
-            _activos = set(_dc.drop_duplicates("DNI")[_dc.drop_duplicates("DNI")["ESTADO"].str.upper().str.strip() == "ACTIVO"]["DNI"].tolist())
+            _activos = set(_dc[_dc["ESTADO"].str.upper().str.strip() == "ACTIVO"].drop_duplicates("DNI")["DNI"].tolist())
             # Auto-sync liviano: agregar filas faltantes SIN leer toda la base
             _dnis_asist = set(df_total["DNI"].apply(normalizar_dni).tolist())
             _faltantes = _activos - _dnis_asist
