@@ -1096,7 +1096,7 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                     _dc_dedup = _dc.drop_duplicates("DNI")
                     _nuevas = []
                     _periodo_act = periodo_actual()
-                    _mes_act = str(hoy_peru_fecha().month)
+                    _mes_act = str(hoy_actual().month)
                     _hdrs_real = st.session_state.get(KEY_HEADERS, COLUMNAS_ASISTENCIA)
                     for _dnif in list(_faltantes)[:50]:
                         _matches = _dc_dedup[_dc_dedup["DNI"] == _dnif]
