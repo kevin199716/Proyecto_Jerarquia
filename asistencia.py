@@ -1103,16 +1103,22 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                         if _matches.empty:
                             continue
                         _fila_colab = _matches.iloc[0]
+                        def _sg(row, *keys):
+                            for k in keys:
+                                v = str(row.get(k, "")).strip()
+                                if v and v.lower() not in ("nan", "none", ""):
+                                    return v
+                            return ""
                         _mapa = {
-                            "RAZON SOCIAL": str(_fila_colab.get("RAZON SOCIAL", "")),
+                            "RAZON SOCIAL": _sg(_fila_colab, "RAZON SOCIAL"),
                             "DNI": str(_dnif),
-                            "NOMBRE": str(_fila_colab.get("NOMBRES", "") or _fila_colab.get("NOMBRE", "")),
-                            "SUPERVISOR": str(_fila_colab.get("SUPERVISOR A CARGO", "")),
-                            "COORDINADOR": str(_fila_colab.get("COORDINADOR A CARGO", "")),
-                            "DEPARTAMENTO": str(_fila_colab.get("DEPARTAMENTO", "")),
-                            "PROVINCIA": str(_fila_colab.get("PROVINCIA", "")),
+                            "NOMBRE": _sg(_fila_colab, "NOMBRES", "NOMBRE"),
+                            "SUPERVISOR": _sg(_fila_colab, "SUPERVISOR A CARGO", "SUPERVISOR"),
+                            "COORDINADOR": _sg(_fila_colab, "COORDINADOR", "COORDINADOR A CARGO"),
+                            "DEPARTAMENTO": _sg(_fila_colab, "DEPARTAMENTO"),
+                            "PROVINCIA": _sg(_fila_colab, "PROVINCIA"),
                             "ESTADO": "ACTIVO",
-                            "FECHA_ALTA": str(_fila_colab.get("FECHA DE CREACION USUARIO", "")),
+                            "FECHA_ALTA": _sg(_fila_colab, "FECHA DE CREACION USUARIO", "FECHA_ALTA"),
                             "FECHA_CESE": "",
                             "MES": _mes_act,
                             "PERIODO": _periodo_act,
