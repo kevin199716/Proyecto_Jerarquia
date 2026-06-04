@@ -245,7 +245,7 @@ def mostrar_tabla(hoja, razon_usuario=None):
         df_pag = df_vista
 
     with st.expander("📋 Ver matriz de jerarquía", expanded=abierto):
-        st.dataframe(df_pag, use_container_width=True, height=480, column_config=cols_texto)
+        st.dataframe(df_pag.fillna("").astype(str), use_container_width=True, height=480, column_config=cols_texto)
         import io as _io
         _buf = _io.StringIO()
         df_vista.to_csv(_buf, index=False, encoding="utf-8-sig")

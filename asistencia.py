@@ -1183,8 +1183,8 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
             st.warning(f"⚠️ DÍA {_dia_bm} es futuro. No se puede editar.")
 
         _df_sel = df_historico[df_historico["PERIODO"].astype(str).eq(_per_bm)].copy()
-        if filtro_razon and filtro_razon != op_razon[0] and "RAZON SOCIAL" in _df_sel.columns:
-            _df_sel = _df_sel[_df_sel["RAZON SOCIAL"].astype(str).str.strip().eq(filtro_razon)]
+        # Aplicar TODOS los filtros del slicer superior
+        _df_sel = filtrar_df(_df_sel, filtro_razon, filtro_supervisor, filtro_coord, filtro_dep, filtro_prov, filtro_estado)
         if not _df_sel.empty and _col_bm not in _df_sel.columns:
             _df_sel[_col_bm] = ""
 
