@@ -62,7 +62,7 @@ KEY_HEADERS = "asis_headers_cache"
 KEY_LOADED = "asis_loaded"
 KEY_LOAD_TS = "asis_load_timestamp"
 
-CACHE_TTL = 600
+CACHE_TTL = 120
 # Mantener la vista amplia original. Solo pagina si realmente supera este límite.
 MAX_FILAS_EDITOR = 300
 
@@ -316,7 +316,7 @@ def leer_asistencia_drive(hoja_asistencia) -> tuple[pd.DataFrame, list[str]]:
     return df, headers
 
 
-@st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(ttl=30, show_spinner=False)
 def leer_colaboradores_drive(_hoja_colaboradores) -> pd.DataFrame:
     try:
         valores = _hoja_colaboradores.get_all_values()

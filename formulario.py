@@ -414,11 +414,17 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
         st.success(msg_ok_pendiente if isinstance(msg_ok_pendiente, str) else "✅ Alta registrada correctamente")
         # Limpiar cachés para que aparezca en Presencialidad inmediatamente
         try:
-            from asistencia import _leer_asistencia_cached, sincronizar_mes
+            from asistencia import _leer_asistencia_cached, leer_colaboradores_drive
             _leer_asistencia_cached.clear()
+            leer_colaboradores_drive.clear()
+            try:
+                from registro_mod import _leer_matriz_cached
+                _leer_matriz_cached.clear()
+            except Exception:
+                pass
             import streamlit as _st2
-            _st2.session_state.pop("asis_loaded", None)
-            _st2.session_state.pop("_sync_auto", None)
+            for _k in ["asis_loaded", "_sync_auto", "asis_estado_sync"]:
+                _st2.session_state.pop(_k, None)
         except Exception:
             pass
 
@@ -620,11 +626,17 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
         st.success(msg_ok_pendiente if isinstance(msg_ok_pendiente, str) else "✅ Alta registrada correctamente")
         # Limpiar cachés para que aparezca en Presencialidad inmediatamente
         try:
-            from asistencia import _leer_asistencia_cached, sincronizar_mes
+            from asistencia import _leer_asistencia_cached, leer_colaboradores_drive
             _leer_asistencia_cached.clear()
+            leer_colaboradores_drive.clear()
+            try:
+                from registro_mod import _leer_matriz_cached
+                _leer_matriz_cached.clear()
+            except Exception:
+                pass
             import streamlit as _st2
-            _st2.session_state.pop("asis_loaded", None)
-            _st2.session_state.pop("_sync_auto", None)
+            for _k in ["asis_loaded", "_sync_auto", "asis_estado_sync"]:
+                _st2.session_state.pop(_k, None)
         except Exception:
             pass
         st.session_state.pop("mensaje_ok", None)

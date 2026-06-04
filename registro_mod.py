@@ -138,7 +138,7 @@ def _headers_unicos(headers):
     return salida
 
 
-@st.cache_data(ttl=180, show_spinner=False)
+@st.cache_data(ttl=60, show_spinner=False)
 def _leer_matriz_cached(_hoja):
     """Lee la hoja con get_all_values (liviano) y devuelve un DataFrame YA limpio
     y con DNI/celulares como texto. Se hace UNA sola vez y se comparte entre
