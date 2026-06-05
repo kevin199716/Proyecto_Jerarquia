@@ -613,10 +613,22 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             dni_supervisor = buscar_dni_por_nombre(df_ubi, "SUPERVISOR A CARGO FINAL", "DNI SUPERVISOR", supervisor)
             st.text_input("DNI SUPERVISOR", value=dni_supervisor, disabled=True, key=k("dni_supervisor"))
     else:
-        # Para VENTAS DIRECTAS se oculta completamente la jerarquía D2D indirecta.
-        # El supervisor válido es el de Datos adicionales Ventas Directas.
+        # Para VENTAS DIRECTAS: mostrar DEPARTAMENTO y PROVINCIA (son obligatorios)
+        # pero ocultar jerarquía D2D indirecta (coordinador).
         supervisor = supervisor_directo
         dni_supervisor = ""
+        st.divider()
+        st.markdown("**Ubicación**")
+        col_u1d, col_u2d = st.columns(2)
+        with col_u1d:
+            departamento = st.selectbox("DEPARTAMENTO", [""] + departamentos, key=k("departamento_directo"))
+            provincias = []
+            if departamento and "DEPARTAMENTO" in df_ubi.columns and "PROVINCIA" in df_ubi.columns:
+                df_dep = df_ubi[serie_columna(df_ubi, "DEPARTAMENTO").eq(str(departamento).strip())]
+                provincias = lista_limpia(df_dep, "PROVINCIA")
+            provincia = st.selectbox("PROVINCIA", [""] + provincias, key=k("provincia_directo"))
+        with col_u2d:
+            st.text_input("SUPERVISOR", value=supervisor_directo, disabled=True, key=k("sup_directo_display"))
 
     st.markdown("")
     submit = st.button("Guardar Alta", key=k("btn_guardar_alta"))
