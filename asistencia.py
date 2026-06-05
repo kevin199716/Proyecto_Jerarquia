@@ -950,10 +950,24 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
             "Los días anteriores y futuros quedan bloqueados."
         )
 
-    # En VPS: forzar lectura fresca de asistencia cada vez que se entra al módulo.
-    # Esto garantiza que Altas/Bajas se reflejen de inmediato.
-    _leer_asistencia_cached.clear()
-    cargar_cache_desde_drive(hoja_asistencia, forzar=True)
+    # En VPS: forzar lectura fresca de asistencia al entrar al módulo para que
+    # Altas/Bajas se reflejen de inmediato. PERO si estamos a mitad de un flujo
+    # de carga de varios A-BM (cola pendiente), NO se vuelve a descargar toda la
+    # hoja en cada paso: eso era lo que hacía lentísimo cargar varias BM seguidas.
+    _en_flujo_bm = bool(st.session_state.get("_cola_abm")) or bool(
+        st.session_state.get(KEY_SUSTENTOS_PENDIENTES)
+    )
+    if not _en_flujo_bm:
+        _leer_asistencia_cached.clear()
+        cargar_cache_desde_drive(hoja_asistencia, forzar=True)
+        # Limpiar también el caché de colaboradores para que un Alta recién hecha
+        # aparezca al toque como "activo" en Presencialidad (antes esperaba 30s).
+        try:
+            leer_colaboradores_drive.clear()
+        except Exception:
+            pass
+    else:
+        cargar_cache_desde_drive(hoja_asistencia, forzar=False)
 
     df_total = st.session_state[KEY_DF_TOTAL].copy()
     df_original = df_total
@@ -1090,7 +1104,10 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
             st.session_state[KEY_SUSTENTOS_PENDIENTES] = {}
             _leer_asistencia_cached.clear()
             st.session_state.pop(KEY_LOADED, None)
-            st.session_state["asis_guardado_msg"] = f"✅ {_guardados} sustento(s) A-BM guardados en Drive + Sustentos_Bajas"
+            st.session_state["asis_guardado_msg"] = (
+                f"✅ Se registraron {_guardados} A-BM con su sustento "
+                f"(marca guardada + documento subido a Drive + fila en Sustentos_Bajas)."
+            )
             st.rerun()
         except Exception as e:
             st.error(f"❌ Error al guardar sustentos: {e}")
@@ -1134,12 +1151,15 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
         df_filtrado["DNI"].apply(normalizar_dni).isin(_activos)
     ].copy() if _activos is not None else df_filtrado[df_filtrado.apply(fila_editable_hoy, axis=1)].copy()
 
-    # Contador: editables (activos) vs total filtrado
-    total_filtrado = len(df_filtrado)
+    # Contador: editables (activos hoy) vs total filtrado vs espejo del mes
     total_editables = len(df_editor_base)
-    total_filtrado = len(df_editor_base)
+    total_filtrado = len(df_filtrado)
 
-    st.caption(f"Registros editables (activos): **{total_editables}** | Total filtrados: **{total_filtrado}** | Espejo mensual: **{len(df_filtrado)}**")
+    st.caption(
+        f"Registros editables (activos hoy): **{total_editables}** | "
+        f"Total filtrados: **{total_filtrado}** | "
+        f"Espejo mensual: **{len(df_filtrado)}**"
+    )
 
     if df_editor_base.empty:
         st.warning("⚠️ No hay personal vigente para marcar asistencia el día de hoy con los filtros seleccionados.")

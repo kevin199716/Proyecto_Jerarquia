@@ -461,6 +461,23 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
     supervisores = lista_limpia(df_ubi, "SUPERVISOR A CARGO FINAL")
     coordinadores = lista_limpia(df_ubi, "COORDINADOR FINAL")
 
+    # Aviso controlado: si alguna lista de jerarquía viene vacía, el desplegable
+    # mostrará "No results". Avisamos cuál columna de 'ubicaciones' está vacía o
+    # mal nombrada para que no parezca un bug del formulario.
+    _faltan_ref = [
+        nombre for nombre, lst in [
+            ("DEPARTAMENTO", departamentos),
+            ("SUPERVISOR A CARGO FINAL", supervisores),
+            ("COORDINADOR FINAL", coordinadores),
+        ] if not lst
+    ]
+    if _faltan_ref:
+        st.warning(
+            "⚠️ Estas columnas de la hoja **ubicaciones** vienen vacías o con otro "
+            f"nombre, por eso su desplegable saldrá como 'No results': {', '.join(_faltan_ref)}. "
+            "Revisa que existan y tengan datos en la hoja de referencia."
+        )
+
     # Listas adicionales para canal VENTAS DIRECTAS (mismo worksheet ubicaciones).
     # Si la columna no existe, queda lista vacía y se muestra alerta controlada.
     supervisores_directo = lista_limpia(df_ubi, "SUPERVISOR")
