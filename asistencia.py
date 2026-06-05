@@ -159,19 +159,19 @@ def parse_fecha(valor):
 
 
 def periodo_actual() -> str:
-    return datetime.now().strftime("%Y-%m")
+    return datetime.now(pytz.timezone("America/Lima")).strftime("%Y-%m")
 
 
 def mes_actual() -> str:
-    return str(datetime.now().month)
+    return str(datetime.now(pytz.timezone("America/Lima")).month)
 
 
 def hoy_actual() -> date:
-    return datetime.now().date()
+    return datetime.now(pytz.timezone("America/Lima")).date()
 
 
 def dia_actual() -> int:
-    return datetime.now().day
+    return datetime.now(pytz.timezone("America/Lima")).day
 
 
 def dias_del_mes_actual() -> list[int]:
@@ -1156,7 +1156,8 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
             _periodos = sorted([str(p) for p in df_historico["PERIODO"].unique() if str(p).strip()], reverse=True)
             _per_bm = st.selectbox("📅 Período", _periodos, key="bm_retro_periodo")
         with _col_d:
-            _dia_bm = st.selectbox("📆 Día", list(range(1, 32)), key="bm_retro_dia")
+            _dia_default = min(dia_actual() - 1, 30)  # índice 0-based, default = hoy
+            _dia_bm = st.selectbox("📆 Día", list(range(1, 32)), index=_dia_default, key="bm_retro_dia")
 
         _col_bm = f"DIA_{_dia_bm}"
         _hoy_num = dia_actual()
