@@ -230,6 +230,10 @@ def mostrar_tabla(hoja, razon_usuario=None):
         if "DNI" in str(c).upper() or "CELULAR" in str(c).upper() or str(c).upper().startswith("ID")
     }
 
+    abierto = bool(buscar) or any(
+        v != "TODOS" for v in [filtro_estado, filtro_razon, filtro_canal, filtro_region, filtro_dep, filtro_prov]
+    )
+
     # Paginación: máximo 300 filas por vista para no freezear el navegador
     MAX_VISTA = 300
     if total > MAX_VISTA:
@@ -240,20 +244,8 @@ def mostrar_tabla(hoja, razon_usuario=None):
     else:
         df_pag = df_vista
 
-    # IMPORTANTE (fix React #185 = "Maximum update depth exceeded"):
-    # NO usar un expander que se abre/cierra solo (expanded=variable) junto con
-    # st.dataframe + use_container_width + height fijo. Esa combinación hace que la
-    # grilla mida el contenedor MIENTRAS se anima al abrirse -> bucle de render.
-    # Solución: que la apertura la controle SIEMPRE el usuario (checkbox estable),
-    # nunca el código de forma automática al filtrar.
-    ver_matriz = st.checkbox("📋 Ver matriz de jerarquía", key="matriz_ver_check")
-    if ver_matriz:
-        # width fijo en lugar de use_container_width evita el ResizeObserver loop.
-        st.dataframe(
-            df_pag.fillna("").astype(str),
-            height=480,
-            column_config=cols_texto,
-        )
+    with st.expander("📋 Ver matriz de jerarquía", expanded=abierto):
+        st.dataframe(df_pag.fillna("").astype(str), use_container_width=True, height=480, column_config=cols_texto)
         import io as _io
         _buf = _io.StringIO()
         df_vista.to_csv(_buf, index=False, encoding="utf-8-sig")
@@ -460,3 +452,33 @@ def editar_registro(df, hoja, hoja_ubi):
     st.success("Registro seleccionado")
     st.caption(f"Fila en Google Sheets: {int(index_global) + 2}")
     st.info("La lógica completa de edición puede mantenerse como la tenías; este bloque solo corrige búsqueda por DNI normalizado.")
+
+# =========================
+# DAR DE BAJA LAZY — no carga matriz hasta buscar DNI
+# =========================
+def dar_de_baja_lazy(hoja, razon_usuario=None):
+    st.markdown("<span class='wow-section-title'>🔻 Dar de baja</span>", unsafe_allow_html=True)
+    st.caption("Busca primero el DNI. La base se carga recién al buscar para no congelar el módulo.")
+
+    with st.form("form_buscar_baja_lazy"):
+        dni_input = st.text_input("DNI", key="dni_baja_lazy_input").strip()
+        buscar = st.form_submit_button("🔍 Buscar DNI", use_container_width=True)
+
+    if buscar:
+        st.session_state["dni_baja_confirmado"] = dni_input
+
+    dni = st.session_state.get("dni_baja_confirmado", "")
+    if not dni:
+        return
+
+    try:
+        df = _leer_matriz_cached(hoja)
+        if df.empty:
+            st.warning("No hay datos en colaboradores.")
+            return
+
+        # Evita que dar_de_baja vuelva a pedir el DNI: se mantiene el valor confirmado
+        # y se muestra el flujo de selección/cese/motivo.
+        dar_de_baja(df, hoja, razon_usuario)
+    except Exception as e:
+        st.error(f"❌ Error cargando registro para baja: {e}")

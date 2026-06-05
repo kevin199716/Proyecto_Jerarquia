@@ -4,7 +4,6 @@ import sys
 import streamlit as st
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-
 if BASE_DIR not in sys.path:
     sys.path.insert(0, BASE_DIR)
 
@@ -40,11 +39,23 @@ st.set_page_config(
 inject_global_theme()
 
 # =========================
-# CACHE SOLO PARA CONEXION
+# CONEXIÓN LAZY A GOOGLE SHEETS
 # =========================
 @st.cache_resource(show_spinner=False)
 def get_worksheet(nombre_hoja, nombre_worksheet):
     return conectar_google_sheets(nombre_hoja, nombre_worksheet)
+
+
+def hoja_colaboradores():
+    return get_worksheet("maestra_vendedores", "colaboradores")
+
+
+def hoja_ubicaciones():
+    return get_worksheet("maestra_vendedores", "ubicaciones")
+
+
+def hoja_asistencia():
+    return get_worksheet("maestra_vendedores", "Asistencia")
 
 # =========================
 # USUARIOS / LOGIN
@@ -67,20 +78,10 @@ razon = st.session_state.get("razon", "")
 usuario = st.session_state.get("usuario", st.session_state.get("username", ""))
 
 # =========================
-# CONEXIONES GOOGLE SHEETS
-# =========================
-hoja_colaboradores = get_worksheet("maestra_vendedores", "colaboradores")
-hoja_ubicaciones = get_worksheet("maestra_vendedores", "ubicaciones")
-hoja_asistencia = get_worksheet("maestra_vendedores", "Asistencia")
-
-# =========================
-# SIDEBAR — usuario + navegación + ayuda
+# SIDEBAR
 # =========================
 render_sidebar_user(usuario=usuario, rol=rol, razon=razon)
 
-# Nombres visibles corregidos:
-# Registro      -> Alta
-# Asistencia    -> Presencialidad Dealer
 if rol == "backoffice":
     opciones_menu = ["Alta", "Bajas", "Presencialidad Dealer"]
 elif rol == "dealer":
@@ -92,41 +93,36 @@ elif rol == "editor":
 else:
     opciones_menu = []
 
-if opciones_menu:
-    pagina = st.sidebar.radio(
-        "Módulo",
-        opciones_menu,
-        label_visibility="collapsed",
-        key=f"nav_{rol}",
-    )
-else:
-    pagina = ""
+pagina = st.sidebar.radio(
+    "Módulo",
+    opciones_menu,
+    label_visibility="collapsed",
+    key=f"nav_{rol}",
+) if opciones_menu else ""
 
-# Cerrar sesión
 st.sidebar.markdown("<div style='height: 14px;'></div>", unsafe_allow_html=True)
 if st.sidebar.button("🚪 Cerrar sesión", key="btn_logout"):
     for k in ["autenticado", "usuario", "rol", "razon", "user", "pass"]:
-        if k in st.session_state:
-            del st.session_state[k]
+        st.session_state.pop(k, None)
     st.rerun()
 
 render_sidebar_help()
-
-# =========================
-# CABECERA PRINCIPAL
-# =========================
 render_app_header(usuario=usuario, rol=rol, razon=razon)
 
 # =====================================================
-# HELPER: matriz de jerarquía
+# HELPER: matriz de jerarquía bajo demanda
 # =====================================================
 def mostrar_matriz_jerarquia(titulo="Estado actual de la jerarquía", icono="📋"):
     st.divider()
     wow_section(titulo, icono)
+    st.caption("La matriz se carga solo cuando la solicitas para no consumir memoria mientras registras asistencia o altas/bajas.")
+    if not st.button("📥 Cargar / recargar matriz", key=f"btn_matriz_{titulo}_{pagina}"):
+        return None
     try:
+        hc = hoja_colaboradores()
         if rol == "editor":
-            return registro.mostrar_tabla(hoja_colaboradores)
-        return registro.mostrar_tabla(hoja_colaboradores, razon)
+            return registro.mostrar_tabla(hc)
+        return registro.mostrar_tabla(hc, razon)
     except Exception as e:
         st.error(f"No se pudo cargar la matriz de jerarquía: {e}")
         return None
@@ -136,17 +132,20 @@ def mostrar_matriz_jerarquia(titulo="Estado actual de la jerarquía", icono="�
 # =====================================================
 if rol == "backoffice":
     if pagina == "Alta":
-        mostrar_formulario(hoja_colaboradores, hoja_ubicaciones)
+        mostrar_formulario(hoja_colaboradores(), hoja_ubicaciones(), hoja_asistencia())
         mostrar_matriz_jerarquia()
 
     elif pagina == "Bajas":
-        df = mostrar_matriz_jerarquia()
-        if df is not None:
-            st.divider()
-            registro.dar_de_baja(df, hoja_colaboradores, razon)
+        if hasattr(registro, "dar_de_baja_lazy"):
+            registro.dar_de_baja_lazy(hoja_colaboradores(), razon)
+        else:
+            df = mostrar_matriz_jerarquia()
+            if df is not None:
+                st.divider()
+                registro.dar_de_baja(df, hoja_colaboradores(), razon)
 
     elif pagina == "Presencialidad Dealer":
-        mostrar_asistencia(hoja_asistencia, hoja_colaboradores)
+        mostrar_asistencia(hoja_asistencia(), hoja_colaboradores())
         mostrar_matriz_jerarquia()
 
 # =====================================================
@@ -156,17 +155,20 @@ elif rol == "dealer":
     wow_section(f"Socio: {razon}", "📌")
 
     if pagina == "Alta":
-        mostrar_formulario(hoja_colaboradores, hoja_ubicaciones)
+        mostrar_formulario(hoja_colaboradores(), hoja_ubicaciones(), hoja_asistencia())
         mostrar_matriz_jerarquia()
 
     elif pagina == "Bajas":
-        df = mostrar_matriz_jerarquia()
-        if df is not None:
-            st.divider()
-            registro.dar_de_baja(df, hoja_colaboradores, razon)
+        if hasattr(registro, "dar_de_baja_lazy"):
+            registro.dar_de_baja_lazy(hoja_colaboradores(), razon)
+        else:
+            df = mostrar_matriz_jerarquia()
+            if df is not None:
+                st.divider()
+                registro.dar_de_baja(df, hoja_colaboradores(), razon)
 
     elif pagina == "Presencialidad Dealer":
-        mostrar_asistencia(hoja_asistencia, hoja_colaboradores, razon=razon)
+        mostrar_asistencia(hoja_asistencia(), hoja_colaboradores(), razon=razon)
         mostrar_matriz_jerarquia()
 
 # =====================================================
@@ -175,8 +177,7 @@ elif rol == "dealer":
 elif rol in ("presencialidad", "presencialidad_dealer"):
     wow_section(f"Presencialidad Dealer: {razon}", "🗓️")
     if pagina == "Presencialidad Dealer":
-        mostrar_asistencia(hoja_asistencia, hoja_colaboradores, razon=razon)
-        # No se muestra Alta/Bajas ni matriz completa fuera del módulo.
+        mostrar_asistencia(hoja_asistencia(), hoja_colaboradores(), razon=razon)
         mostrar_matriz_jerarquia()
 
 # =====================================================
@@ -189,14 +190,11 @@ elif rol == "editor":
         df = mostrar_matriz_jerarquia()
         if df is not None:
             st.divider()
-            registro.editar_registro(df, hoja_colaboradores, hoja_ubicaciones)
+            registro.editar_registro(df, hoja_colaboradores(), hoja_ubicaciones())
 
     elif pagina == "Presencialidad Dealer":
-        mostrar_asistencia(hoja_asistencia, hoja_colaboradores)
+        mostrar_asistencia(hoja_asistencia(), hoja_colaboradores())
         mostrar_matriz_jerarquia()
 
-# =====================================================
-# SIN PERMISOS
-# =====================================================
 else:
     st.warning(f"Sin permisos para el rol: {rol}")
