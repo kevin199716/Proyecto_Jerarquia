@@ -1,5 +1,4 @@
 """
-FIX_PRESENCIALIDAD_ESTABLE_DRIVE_SIN_RERUN_20260605
 asistencia.py — Presencialidad Dealer
 Cambios aplicados:
   1. Módulo visible como Presencialidad Dealer desde app_maestra_vendedores.py.
@@ -65,7 +64,7 @@ KEY_LOAD_TS = "asis_load_timestamp"
 
 CACHE_TTL = 120
 # Mantener la vista amplia original. Solo pagina si realmente supera este límite.
-MAX_FILAS_EDITOR = 120
+MAX_FILAS_EDITOR = 300
 
 MARCAS_PRESENCIALIDAD = ["", "A", "A-BM", "A-VAC", "NA-SA", "NA-CA"]
 LEYENDA_MARCAS = {
@@ -78,7 +77,6 @@ LEYENDA_MARCAS = {
 
 COLUMNAS_SUSTENTOS_BM = [
     "PERIODO",
-    "DIA",
     "FECHA_ASISTENCIA",
     "DNI",
     "NOMBRE",
@@ -190,38 +188,6 @@ def primer_dia_mes_actual() -> date:
 def ultimo_dia_mes_actual() -> date:
     h = hoy_actual()
     return date(h.year, h.month, calendar.monthrange(h.year, h.month)[1])
-
-
-def fecha_desde_periodo_dia(periodo: str, dia: int):
-    try:
-        y, m = [int(x) for x in str(periodo).split("-")[:2]]
-        ultimo = calendar.monthrange(y, m)[1]
-        d = int(dia)
-        if d < 1 or d > ultimo:
-            return None
-        return date(y, m, d)
-    except Exception:
-        return None
-
-
-def fila_vigente_en_fecha(row: pd.Series, fecha_obj: date) -> bool:
-    """Permite editar si el colaborador estuvo vigente en la fecha seleccionada.
-
-    - ACTIVO: desde fecha_alta en adelante.
-    - INACTIVO: desde fecha_alta hasta fecha_cese inclusive.
-    - Si no hay fecha_alta, no bloquea por alta para no romper históricos antiguos.
-    """
-    if fecha_obj is None:
-        return False
-    alta = parse_fecha(row.get("FECHA_ALTA"))
-    cese = parse_fecha(row.get("FECHA_CESE"))
-    estado = limpiar_texto(row.get("ESTADO", "")).upper()
-
-    if alta and fecha_obj < alta:
-        return False
-    if cese:
-        return fecha_obj <= cese
-    return estado == "ACTIVO"
 
 
 def letra_columna(numero: int) -> str:
@@ -808,9 +774,8 @@ def dialogo_sustento_bm(clave, dni, nombre, razon_social, row_sheet, col_dia=Non
             "nombre_archivo": archivo.name,
             "mime_type": archivo.type,
             "contenido_bytes": archivo.read(),
-            "periodo": st.session_state.get("asis_periodo_sustento", periodo_actual()),
-            "dia": st.session_state.get("asis_dia_sustento", str(dia_actual())),
-            "fecha_asistencia": st.session_state.get("asis_fecha_sustento", str(hoy_actual())),
+            "periodo": periodo_actual(),
+            "fecha_asistencia": str(hoy_actual()),
             "col_dia": col_dia or f"DIA_{dia_actual()}",
         }
         st.session_state[KEY_SUSTENTOS_PENDIENTES] = pendientes
@@ -897,7 +862,6 @@ def guardar_sustentos_bm_en_historico(df_editado: pd.DataFrame, col_hoy: str) ->
 
         filas.append([
             datos.get("periodo", periodo_actual()),
-            datos.get("dia", str(datos.get("col_dia", "")).replace("DIA_", "")),
             datos.get("fecha_asistencia", str(hoy_actual())),
             dni,
             datos.get("nombre", ""),
@@ -986,15 +950,16 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
             "Los días anteriores y futuros quedan bloqueados."
         )
 
-    # Carga controlada: NO forzar lectura en cada interacción, porque eso friza Render.
-    # El cache dura poco y se limpia automáticamente cuando Alta/Bajas escriben en Asistencia.
-    cargar_cache_desde_drive(hoja_asistencia, forzar=False)
+    # En VPS: forzar lectura fresca de asistencia cada vez que se entra al módulo.
+    # Esto garantiza que Altas/Bajas se reflejen de inmediato.
+    _leer_asistencia_cached.clear()
+    cargar_cache_desde_drive(hoja_asistencia, forzar=True)
 
     df_total = st.session_state[KEY_DF_TOTAL].copy()
     df_original = df_total
     headers = st.session_state.get(KEY_HEADERS, COLUMNAS_ASISTENCIA)
-    # Historia del periodo cargado. Evita una segunda lectura completa a Drive en cada render.
-    df_historico = df_total.copy()
+    # Historia completa para espejo y BM retroactivo
+    df_historico, _ = _leer_asistencia_cached(hoja_asistencia)
 
     # Colaboradores siempre se lee directo de Drive (sin caché) para reflejar
     # cambios inmediatamente sin cerrar sesión.
@@ -1011,27 +976,8 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
     if razon_usuario and razon_usuario.upper() != "ALL" and "RAZON SOCIAL" in df_mes.columns:
         df_mes = df_mes[df_mes["RAZON SOCIAL"].astype(str).str.strip().str.upper().eq(razon_usuario.upper())].copy()
 
-    # Auto-sync seguro: solo una vez cada 90 segundos por sesión.
-    # Agrega altas nuevas y actualiza bajas sin tocar DIA_1..DIA_31.
-    _last_sync = st.session_state.get("asis_auto_sync_ts", 0)
-    if hoja_colaboradores is not None and (time.time() - _last_sync > 90):
-        try:
-            nuevos_sync, updates_sync = sincronizar_mes(hoja_asistencia, hoja_colaboradores)
-            st.session_state["asis_auto_sync_ts"] = time.time()
-            if nuevos_sync or updates_sync:
-                _leer_asistencia_cached.clear()
-                cargar_cache_desde_drive(hoja_asistencia, forzar=True)
-                df_total = st.session_state[KEY_DF_TOTAL].copy()
-                df_original = df_total
-                headers = st.session_state.get(KEY_HEADERS, COLUMNAS_ASISTENCIA)
-                df_historico = df_total.copy()
-                df_mes = df_total[df_total["PERIODO"].astype(str).eq(periodo)].copy()
-                st.caption(f"✅ Presencialidad actualizada automáticamente: {nuevos_sync} alta(s), {updates_sync} dato(s) base.")
-        except Exception as _sync_e:
-            st.caption(f"⚠️ Autoactualización omitida: {_sync_e}")
-
     if df_mes.empty:
-        st.warning("⚠️ No hay registros del periodo actual. Espera la actualización automática o valida la hoja Asistencia.")
+        st.warning("⚠️ No hay registros del periodo actual. Presiona **Sincronizar mes**.")
         return
 
     # =====================================================
@@ -1044,7 +990,7 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
     op_coordinador = lista_opciones(df_mes, "COORDINADOR")
     op_departamento = lista_opciones(df_mes, "DEPARTAMENTO")
     op_provincia = lista_opciones(df_mes, "PROVINCIA")
-    op_estado = ["TODOS"]
+    op_estado = lista_opciones(df_mes, "ESTADO")
 
     # Botón recargar: fuerza lectura fresca de Drive y sincroniza filas nuevas
     def _valor_guardado(clave, opciones):
@@ -1052,7 +998,7 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
         return valor if valor in opciones else "TODOS"
 
     with st.form("form_filtros_presencialidad"):
-        f1, f2, f3, f4, f5 = st.columns(5)
+        f1, f2, f3, f4, f5, f6 = st.columns(6)
         with f1:
             tmp_razon = st.selectbox("Razón Social", op_razon, index=op_razon.index(_valor_guardado("asis_filtro_razon", op_razon)), key="asis_tmp_razon")
         with f2:
@@ -1063,7 +1009,8 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
             tmp_dep = st.selectbox("Departamento", op_departamento, index=op_departamento.index(_valor_guardado("asis_filtro_dep", op_departamento)), key="asis_tmp_dep")
         with f5:
             tmp_prov = st.selectbox("Provincia", op_provincia, index=op_provincia.index(_valor_guardado("asis_filtro_prov", op_provincia)), key="asis_tmp_prov")
-        tmp_estado = "TODOS"
+        with f6:
+            tmp_estado = st.selectbox("Estado", op_estado, index=op_estado.index(_valor_guardado("asis_filtro_estado", op_estado)), key="asis_tmp_estado")
 
         aplicar_filtros = st.form_submit_button("🔎 Aplicar filtros", use_container_width=True)
 
@@ -1099,9 +1046,6 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
         _sin_sustento = [item for item in _cola_abm if item["clave"] not in _procesados]
         if _sin_sustento:
             _next = _sin_sustento[0]
-            st.session_state["asis_periodo_sustento"] = _next.get("periodo", periodo)
-            st.session_state["asis_dia_sustento"] = str(_next.get("dia", str(hoy_dia)))
-            st.session_state["asis_fecha_sustento"] = str(_next.get("fecha_asistencia", hoy_actual()))
             dialogo_sustento_bm(_next["clave"], _next["dni"], _next["nombre"], _next["razon"], _next["row_sheet"], col_dia=_next.get("col_dia"))
             st.stop()
         else:
@@ -1122,7 +1066,6 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                 _linkp = subir_archivo_drive(_nombre_p, datos.get("contenido_bytes", b""), datos.get("mime_type", "application/octet-stream"))
                 hoja_sus.append_row([
                     datos.get("periodo", periodo_actual()),
-                    datos.get("dia", str(datos.get("col_dia", "")).replace("DIA_", "")),
                     datos.get("fecha_asistencia", str(hoy_actual())),
                     _dnip,
                     datos.get("nombre", ""),
@@ -1187,8 +1130,6 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
     except Exception:
         _activos = None
 
-    # Solo personas vigentes HOY en el bloque operativo.
-    # Para fechas anteriores, el bloque A-BM retroactivo usa fila_vigente_en_fecha más abajo.
     df_editor_base = df_filtrado[
         df_filtrado["DNI"].apply(normalizar_dni).isin(_activos)
     ].copy() if _activos is not None else df_filtrado[df_filtrado.apply(fila_editable_hoy, axis=1)].copy()
@@ -1244,9 +1185,6 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
         _df_sel = df_historico[df_historico["PERIODO"].astype(str).eq(_per_bm)].copy()
         # Aplicar TODOS los filtros del slicer superior
         _df_sel = filtrar_df(_df_sel, filtro_razon, filtro_supervisor, filtro_coord, filtro_dep, filtro_prov, filtro_estado)
-        _fecha_sel = fecha_desde_periodo_dia(_per_bm, int(_dia_bm))
-        if _fecha_sel is not None:
-            _df_sel = _df_sel[_df_sel.apply(lambda r: fila_vigente_en_fecha(r, _fecha_sel), axis=1)].copy()
         if not _df_sel.empty and _col_bm not in _df_sel.columns:
             _df_sel[_col_bm] = ""
 
@@ -1272,25 +1210,25 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
             st.caption(f"**{len(_df_bm_ed)} registros** | {_per_bm} / DÍA {_dia_bm}{' ← HOY (todas las marcas)' if _es_hoy else ' (solo A-BM retroactivo)'}")
 
             # Paginación para no freezear
-            _MAX_BM = 60
+            _MAX_BM = 100
             if len(_df_bm_ed) > _MAX_BM:
                 _npag = -(-len(_df_bm_ed) // _MAX_BM)
                 _pag_bm = st.selectbox(f"Página ({_MAX_BM} de {len(_df_bm_ed)})", range(1, _npag+1), key=f"pag_bm_{_per_bm}_{_dia_bm}")
                 _ini = (_pag_bm - 1) * _MAX_BM
                 _df_bm_ed = _df_bm_ed.iloc[_ini:_ini+_MAX_BM].copy()
 
-            with st.form(f"form_editor_bm_{_per_bm}_{_dia_bm}"):
-                _editado_bm = st.data_editor(
-                    _df_bm_ed, use_container_width=True,
-                    height=min(360, 50 + len(_df_bm_ed) * 32),
-                    hide_index=True, disabled=_disabled_bm,
-                    column_config=_cfg_bm, num_rows="fixed",
-                    key=f"editor_bm_{_per_bm}_{_dia_bm}",
-                )
-                _guardar_bm = st.form_submit_button(
-                    "💾 Guardar Presencialidad",
-                    use_container_width=True
-                )
+            _editado_bm = st.data_editor(
+                _df_bm_ed, use_container_width=True,
+                height=min(380, 50 + len(_df_bm_ed) * 35),
+                hide_index=True, disabled=_disabled_bm,
+                column_config=_cfg_bm, num_rows="fixed",
+                key=f"editor_bm_{_per_bm}_{_dia_bm}",
+            )
+            _guardar_bm = st.button(
+                "💾 Guardar Presencialidad",
+                key=f"btn_gbm_{_per_bm}_{_dia_bm}",
+                use_container_width=True
+            )
 
             if _guardar_bm:
                 with st.spinner("⏳ Guardando..."):
@@ -1344,16 +1282,10 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                                     "razon": limpiar_texto(str(_row_abm.get("RAZON SOCIAL", ""))),
                                     "row_sheet": int(float(str(_row_abm.get("ROW_SHEET", 0) or 0))),
                                     "col_dia": _col_bm,
-                                    "periodo": _per_bm,
-                                    "dia": str(_dia_bm),
-                                    "fecha_asistencia": str(fecha_desde_periodo_dia(_per_bm, int(_dia_bm)) or hoy_actual()),
                                 })
                             st.session_state["_cola_abm"] = _cola
                             # Abrir popup para el primero
                             _first = _cola[0]
-                            st.session_state["asis_periodo_sustento"] = _per_bm
-                            st.session_state["asis_dia_sustento"] = str(_dia_bm)
-                            st.session_state["asis_fecha_sustento"] = str(fecha_desde_periodo_dia(_per_bm, int(_dia_bm)) or hoy_actual())
                             dialogo_sustento_bm(_first["clave"], _first["dni"], _first["nombre"], _first["razon"], _first["row_sheet"], col_dia=_first["col_dia"])
                             st.stop()
 

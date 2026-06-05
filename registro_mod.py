@@ -452,33 +452,3 @@ def editar_registro(df, hoja, hoja_ubi):
     st.success("Registro seleccionado")
     st.caption(f"Fila en Google Sheets: {int(index_global) + 2}")
     st.info("La lógica completa de edición puede mantenerse como la tenías; este bloque solo corrige búsqueda por DNI normalizado.")
-
-# =========================
-# DAR DE BAJA LAZY — no carga matriz hasta buscar DNI
-# =========================
-def dar_de_baja_lazy(hoja, razon_usuario=None):
-    st.markdown("<span class='wow-section-title'>🔻 Dar de baja</span>", unsafe_allow_html=True)
-    st.caption("Busca primero el DNI. La base se carga recién al buscar para no congelar el módulo.")
-
-    with st.form("form_buscar_baja_lazy"):
-        dni_input = st.text_input("DNI", key="dni_baja_lazy_input").strip()
-        buscar = st.form_submit_button("🔍 Buscar DNI", use_container_width=True)
-
-    if buscar:
-        st.session_state["dni_baja_confirmado"] = dni_input
-
-    dni = st.session_state.get("dni_baja_confirmado", "")
-    if not dni:
-        return
-
-    try:
-        df = _leer_matriz_cached(hoja)
-        if df.empty:
-            st.warning("No hay datos en colaboradores.")
-            return
-
-        # Evita que dar_de_baja vuelva a pedir el DNI: se mantiene el valor confirmado
-        # y se muestra el flujo de selección/cese/motivo.
-        dar_de_baja(df, hoja, razon_usuario)
-    except Exception as e:
-        st.error(f"❌ Error cargando registro para baja: {e}")
