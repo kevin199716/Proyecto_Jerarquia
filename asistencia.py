@@ -56,24 +56,6 @@ COLUMNAS_FIJAS_EDITOR = [
     "PERIODO",
 ]
 
-# Columnas base que se re-sincronizan SIEMPRE desde colaboradores para reflejar en
-# línea las bajas (ESTADO/FECHA_CESE), reactivaciones y ediciones manuales hechas
-# directamente en la BD de Drive. Nunca se tocan las columnas DIA_*.
-COLUMNAS_SYNC_BASE = [
-    "RAZON SOCIAL",
-    "SUPERVISOR",
-    "COORDINADOR",
-    "DEPARTAMENTO",
-    "PROVINCIA",
-    "NOMBRE",
-    "ESTADO",
-    "FECHA_ALTA",
-    "FECHA_CESE",
-]
-# Columnas de fecha: se comparan por fecha parseada (no por texto) para evitar
-# bucles de re-escritura si Sheets reformatea la fecha al guardarla.
-COLUMNAS_SYNC_FECHA = {"FECHA_ALTA", "FECHA_CESE"}
-
 KEY_DF_TOTAL = "asis_df_total_cache"
 KEY_DF_ORIGINAL = "asis_df_original_cache"
 KEY_HEADERS = "asis_headers_cache"
@@ -247,25 +229,6 @@ def fila_editable_hoy(row: pd.Series) -> bool:
     if estado != "ACTIVO":
         return False
     if cese and hoy > cese:
-        return False
-    return True
-
-
-def fila_vigente_en_fecha(row: pd.Series, fecha_sel) -> bool:
-    """True si el colaborador estaba vigente en la fecha indicada.
-
-    Vigente = ya había ingresado (FECHA_ALTA <= fecha) y aún no había cesado
-    (sin FECHA_CESE o fecha <= FECHA_CESE). Se usa para OCULTAR del grid de un día
-    a quien todavía no ingresaba o que ya cesó en ese día, de modo que la
-    presencialidad solo se gestione entre el alta y el cese de cada persona.
-    """
-    if fecha_sel is None:
-        return True
-    alta = parse_fecha(row.get("FECHA_ALTA"))
-    cese = parse_fecha(row.get("FECHA_CESE"))
-    if alta and fecha_sel < alta:
-        return False
-    if cese and fecha_sel > cese:
         return False
     return True
 
@@ -511,66 +474,6 @@ def sincronizar_mes(hoja_asistencia, hoja_colaboradores) -> tuple[int, int]:
     return len(nuevas), len(updates)
 
 
-def sincronizar_datos_base(hoja_asistencia, df_periodo: pd.DataFrame, df_colab: pd.DataFrame, headers: list[str]) -> int:
-    """Refleja en la hoja Asistencia (periodo actual) los cambios hechos en
-    colaboradores desde los módulos Alta/Baja y las ediciones manuales de la BD:
-    bajas (ESTADO->INACTIVO + FECHA_CESE), reactivaciones (ESTADO->ACTIVO +
-    FECHA_CESE en blanco) y cambios de supervisor, coordinador, departamento,
-    provincia, razón social o nombre.
-
-    NUNCA toca las columnas DIA_* (asistencia ya marcada). Devuelve cuántas celdas
-    se actualizaron; 0 si ya estaba todo sincronizado.
-    """
-    if df_periodo is None or df_periodo.empty or df_colab is None or df_colab.empty:
-        return 0
-    if "DNI" not in df_colab.columns or "ROW_SHEET" not in df_periodo.columns:
-        return 0
-
-    colab = df_colab.copy()
-    colab["DNI"] = colab["DNI"].apply(normalizar_dni)
-    colab = colab[colab["DNI"].ne("")].drop_duplicates("DNI", keep="last")
-
-    # Llave DNI+FECHA_ALTA: así un reingreso (nueva alta) no pisa la fila histórica
-    # de su estadía anterior, y la baja sí actualiza la fila vigente.
-    payloads = {}
-    for _, fila in colab.iterrows():
-        p = construir_payload_base(fila)
-        payloads[clave_asistencia(p.get("DNI", ""), p.get("FECHA_ALTA", ""))] = p
-
-    mapa_col = {limpiar_texto(c).upper(): idx + 1 for idx, c in enumerate(headers)}
-    updates = []
-    for _, r in df_periodo.iterrows():
-        key = clave_asistencia(r.get("DNI", ""), r.get("FECHA_ALTA", ""))
-        payload = payloads.get(key)
-        if not payload:
-            continue
-        try:
-            row_sheet = int(r.get("ROW_SHEET"))
-        except (TypeError, ValueError):
-            continue
-        for col in COLUMNAS_SYNC_BASE:
-            if col not in mapa_col:
-                continue
-            actual = limpiar_texto(r.get(col, ""))
-            nuevo = limpiar_texto(payload.get(col, ""))
-            if col in COLUMNAS_SYNC_FECHA:
-                if parse_fecha(actual) == parse_fecha(nuevo):
-                    continue
-            elif actual == nuevo:
-                continue
-            updates.append({
-                "range": f"{letra_columna(mapa_col[col])}{row_sheet}",
-                "values": [[nuevo]],
-            })
-
-    if updates:
-        for i in range(0, len(updates), 100):
-            hoja_asistencia.batch_update(updates[i:i + 100], value_input_option="USER_ENTERED")
-            if i + 100 < len(updates):
-                time.sleep(0.10)
-    return len(updates)
-
-
 def registrar_alta_en_asistencia(hoja_asistencia, campos: dict) -> str:
     """
     Agrega o actualiza SOLO el alta recién registrada al periodo actual de Presencialidad.
@@ -637,7 +540,6 @@ def registrar_alta_en_asistencia(hoja_asistencia, campos: dict) -> str:
                 for k in [KEY_DF_TOTAL, KEY_DF_ORIGINAL, KEY_HEADERS, KEY_LOADED, KEY_LOAD_TS]:
                     if k in st.session_state:
                         del st.session_state[k]
-                _invalidar_caches_lectura()
                 return "Presencialidad actualizada; el DNI ya existía con la misma fecha de alta y no se duplicó."
     except Exception:
         pass
@@ -648,7 +550,6 @@ def registrar_alta_en_asistencia(hoja_asistencia, campos: dict) -> str:
     for k in [KEY_DF_TOTAL, KEY_DF_ORIGINAL, KEY_HEADERS, KEY_LOADED, KEY_LOAD_TS]:
         if k in st.session_state:
             del st.session_state[k]
-    _invalidar_caches_lectura()
     return "Presencialidad actualizada con este alta."
 
 
@@ -665,16 +566,6 @@ def _leer_asistencia_cached(_hoja_asistencia):
     """Lee y normaliza la hoja de Asistencia UNA sola vez y la comparte entre
     todas las sesiones (antes cada usuario leía Drive y guardaba 2 copias)."""
     return leer_asistencia_drive(_hoja_asistencia)
-
-
-def _invalidar_caches_lectura() -> None:
-    """Invalida los cachés de lectura de asistencia y colaboradores para que el
-    próximo render de Presencialidad lea datos frescos (tras un alta/baja)."""
-    for _fn in (_leer_asistencia_cached, leer_colaboradores_drive):
-        try:
-            _fn.clear()
-        except Exception:
-            pass
 
 
 def cargar_cache_desde_drive(hoja_asistencia, forzar: bool = False) -> None:
@@ -1030,43 +921,30 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
     hoy_dia = dia_actual()
     col_hoy = f"DIA_{hoy_dia}"
 
-    c1, c2, c3 = st.columns([1.25, 1.15, 5])
+    # Los botones de "Sincronizar mes" y "Recargar Drive" se removieron porque
+    # Presencialidad ya recarga automáticamente cada vez que entras, y los cambios
+    # de Alta/Baja se reflejan al instante. Mantener botones manuales confundía.
+    st.info(
+        f"📅 Periodo: **{periodo}** | Día editable: **{col_hoy}** | "
+        "Se carga automáticamente. Los días anteriores y futuros quedan bloqueados."
+    )
 
-    with c1:
-        if False and st.button("🔄 Sincronizar mes", key="btn_sync_asistencia"):
-            with st.spinner("Sincronizando con colaboradores…"):
-                try:
-                    nuevos, actualizados = sincronizar_mes(hoja_asistencia, hoja_colaboradores)
-                    cargar_cache_desde_drive(hoja_asistencia, forzar=True)
-                    st.success(f"✅ Mes sincronizado. Nuevos: {nuevos} | Datos base actualizados: {actualizados}")
-                except Exception as e:
-                    st.error(f"Error sincronizando: {e}")
-                    return
-
-    with c2:
-        if st.button("♻️ Recargar Drive", key="btn_reload_asistencia", use_container_width=True):
-            st.session_state["asis_force_reload"] = True
-            st.rerun()
-
-    with c3:
-        st.info(
-            f"📅 Periodo: **{periodo}** | Día editable: **{col_hoy}** | "
-            "Los días anteriores y futuros quedan bloqueados."
-        )
-
-    # Carga basada en caché (TTL). ANTES se forzaba una descarga COMPLETA de la hoja
-    # en CADA rerun (al cambiar día, período o filtro), lo que hacía lentísimo el
-    # módulo. Ahora se usa el caché: tanto la sincronización de datos base como los
-    # guardados invalidan el caché cuando hay cambios reales, de modo que altas,
-    # bajas y ediciones manuales se siguen reflejando, pero sin re-descargar todo
-    # en cada interacción. Un refresco manual fuerza la lectura fresca.
-    if st.session_state.pop("asis_force_reload", False):
+    # En VPS: forzar lectura fresca de asistencia al entrar al módulo para que
+    # Altas/Bajas se reflejen de inmediato. PERO si estamos a mitad de un flujo
+    # de carga de varios A-BM (cola pendiente), NO se vuelve a descargar toda la
+    # hoja en cada paso: eso era lo que hacía lentísimo cargar varias BM seguidas.
+    _en_flujo_bm = bool(st.session_state.get("_cola_abm")) or bool(
+        st.session_state.get(KEY_SUSTENTOS_PENDIENTES)
+    )
+    if not _en_flujo_bm:
         _leer_asistencia_cached.clear()
+        cargar_cache_desde_drive(hoja_asistencia, forzar=True)
+        # Limpiar también el caché de colaboradores para que un Alta recién hecha
+        # aparezca al toque como "activo" en Presencialidad (antes esperaba 30s).
         try:
             leer_colaboradores_drive.clear()
         except Exception:
             pass
-        cargar_cache_desde_drive(hoja_asistencia, forzar=True)
     else:
         cargar_cache_desde_drive(hoja_asistencia, forzar=False)
 
@@ -1213,41 +1091,21 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
         except Exception as e:
             st.error(f"❌ Error al guardar sustentos: {e}")
 
-    # FUENTE DE VERDAD: colaboradores define estado, vigencia y datos base.
-    # En cada carga se refleja "en línea" lo gestionado en Alta/Baja y los cambios
-    # manuales de la BD: (1) se sincronizan datos base de filas existentes, (2) se
-    # agregan altas nuevas faltantes. Las bajas y ediciones se ven sin re-sincronizar
-    # a mano. NUNCA se tocan los días ya marcados.
-    _dnis_colab = None  # DNIs que aún EXISTEN en colaboradores (para ocultar borrados)
+    # FUENTE DE VERDAD: colaboradores define quién es ACTIVO, no asistencia.
+    # Leer colaboradores (cacheado) y filtrar solo los DNI activos hoy.
     try:
         _dc = leer_colaboradores_drive(hoja_colaboradores)
         if not _dc.empty and "DNI" in _dc.columns and "ESTADO" in _dc.columns:
             _dc["DNI"] = _dc["DNI"].apply(normalizar_dni)
             _activos = set(_dc[_dc["ESTADO"].str.upper().str.strip() == "ACTIVO"].drop_duplicates("DNI")["DNI"].tolist())
-            # Conjunto de DNIs vigentes en la BD (activos + inactivos). Si un DNI fue
-            # ELIMINADO de colaboradores, no estará aquí y se ocultará de Presencialidad
-            # aunque su fila huérfana siga en la hoja Asistencia.
-            _dnis_colab = {d for d in _dc["DNI"].tolist() if str(d).strip()}
-
-            _hdrs_real = st.session_state.get(KEY_HEADERS, COLUMNAS_ASISTENCIA)
-            _hubo_cambios = False
-
-            # (1) Sincronizar SIEMPRE datos base (bajas, reactivaciones, ediciones manuales).
-            try:
-                _df_periodo = df_total[df_total["PERIODO"].astype(str).eq(periodo)].copy()
-                _n_base = sincronizar_datos_base(hoja_asistencia, _df_periodo, _dc, _hdrs_real)
-                if _n_base:
-                    _hubo_cambios = True
-            except Exception as _base_err:
-                st.warning(f"Sync datos base: {_base_err}")
-
-            # (2) Auto-sync liviano: agregar filas faltantes SIN leer toda la base
+            # Auto-sync liviano: agregar filas faltantes SIN leer toda la base
             _dnis_asist = set(df_total["DNI"].apply(normalizar_dni).tolist())
             _faltantes = _activos - _dnis_asist
             if _faltantes:
                 try:
                     _dc_dedup = _dc[_dc["ESTADO"].str.upper().str.strip() == "ACTIVO"].drop_duplicates("DNI")
                     _nuevas = []
+                    _hdrs_real = st.session_state.get(KEY_HEADERS, COLUMNAS_ASISTENCIA)
                     for _dnif in list(_faltantes)[:50]:
                         _matches = _dc_dedup[_dc_dedup["DNI"] == _dnif]
                         if _matches.empty:
@@ -1258,15 +1116,11 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                         _nuevas.append(_row)
                     if _nuevas:
                         hoja_asistencia.append_rows(_nuevas, value_input_option="USER_ENTERED")
-                        _hubo_cambios = True
+                        _leer_asistencia_cached.clear()
+                        st.session_state.pop(KEY_LOADED, None)
+                        st.rerun()
                 except Exception as _sync_err:
                     st.warning(f"Auto-sync: {_sync_err}")
-
-            # Un único refresco si hubo cualquier cambio en la hoja, para verlo en línea.
-            if _hubo_cambios:
-                _leer_asistencia_cached.clear()
-                st.session_state.pop(KEY_LOADED, None)
-                st.rerun()
         else:
             _activos = None
     except Exception:
@@ -1330,24 +1184,6 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
         _df_sel = df_historico[df_historico["PERIODO"].astype(str).eq(_per_bm)].copy()
         # Aplicar TODOS los filtros del slicer superior
         _df_sel = filtrar_df(_df_sel, filtro_razon, filtro_supervisor, filtro_coord, filtro_dep, filtro_prov, filtro_estado)
-
-        # Ocultar filas huérfanas: DNIs que ya NO existen en la BD de colaboradores
-        # (eliminados manualmente). Su fila puede seguir en la hoja Asistencia pero no
-        # debe mostrarse en Presencialidad.
-        if not _df_sel.empty and _dnis_colab is not None:
-            _df_sel = _df_sel[_df_sel["DNI"].apply(normalizar_dni).isin(_dnis_colab)].copy()
-
-        # Ocultar del grid a quien NO estaba vigente en el día seleccionado:
-        # antes de su FECHA_ALTA o después de su FECHA_CESE. Así la asistencia solo
-        # se gestiona entre el alta y el cese de cada colaborador.
-        try:
-            _y_sel, _m_sel = (int(x) for x in str(_per_bm).split("-")[:2])
-            _fecha_sel = date(_y_sel, _m_sel, int(_dia_bm))
-        except Exception:
-            _fecha_sel = None
-        if not _df_sel.empty and _fecha_sel is not None:
-            _df_sel = _df_sel[_df_sel.apply(lambda r: fila_vigente_en_fecha(r, _fecha_sel), axis=1)].copy()
-
         if not _df_sel.empty and _col_bm not in _df_sel.columns:
             _df_sel[_col_bm] = ""
 
@@ -1469,9 +1305,6 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
     # Espejo mensual completo: muestra todo el mes y mantiene histórico.
     df_total_actual = st.session_state[KEY_DF_TOTAL]
     df_mes_actual = df_total_actual[df_total_actual["PERIODO"].astype(str).eq(periodo)].copy()
-    # Ocultar también aquí las filas huérfanas (DNIs eliminados de colaboradores).
-    if _dnis_colab is not None and not df_mes_actual.empty:
-        df_mes_actual = df_mes_actual[df_mes_actual["DNI"].apply(normalizar_dni).isin(_dnis_colab)].copy()
     df_espejo = filtrar_df(df_mes_actual, filtro_razon, filtro_supervisor, filtro_coord, filtro_dep, filtro_prov, filtro_estado)
 
     ver_espejo = st.checkbox("📊 Ver espejo mensual completo", value=False, key="asis_ver_espejo")
