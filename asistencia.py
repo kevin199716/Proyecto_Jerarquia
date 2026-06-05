@@ -1036,8 +1036,22 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
         return
 
     # Editor solo para personas vigentes hoy.
-    # Auto-save: si hay sustentos pendientes del popup, guardarlos inmediatamente
+    # Auto-save sustentos + cola de A-BM pendientes
     _pendientes = st.session_state.get(KEY_SUSTENTOS_PENDIENTES, {})
+    _cola_abm = st.session_state.get("_cola_abm", [])
+
+    # Si hay cola de A-BM pendientes sin sustento → abrir popup para el siguiente
+    if _cola_abm:
+        _procesados = set(_pendientes.keys())
+        _sin_sustento = [item for item in _cola_abm if item["clave"] not in _procesados]
+        if _sin_sustento:
+            _next = _sin_sustento[0]
+            dialogo_sustento_bm(_next["clave"], _next["dni"], _next["nombre"], _next["razon"], _next["row_sheet"], col_dia=_next.get("col_dia"))
+            st.stop()
+        else:
+            # Todos tienen sustento → guardar todo
+            st.session_state["_cola_abm"] = []
+
     if _pendientes:
         try:
             hoja_sus = obtener_o_crear_worksheet("maestra_vendedores", "Sustentos_Bajas", COLUMNAS_SUSTENTOS_BM)
@@ -1076,7 +1090,7 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
             st.session_state[KEY_SUSTENTOS_PENDIENTES] = {}
             _leer_asistencia_cached.clear()
             st.session_state.pop(KEY_LOADED, None)
-            st.success(f"✅ {_guardados} sustento(s) A-BM guardados en Drive + Sustentos_Bajas")
+            st.session_state["asis_guardado_msg"] = f"✅ {_guardados} sustento(s) A-BM guardados en Drive + Sustentos_Bajas"
             st.rerun()
         except Exception as e:
             st.error(f"❌ Error al guardar sustentos: {e}")
@@ -1247,7 +1261,6 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
 
                         # Si hay A-BM nuevos → guardar marcas + popup por cada uno
                         if _abm_nuevos:
-                            # Primero guardar las marcas A-BM en la hoja
                             _hdrs_bm = st.session_state.get(KEY_HEADERS, COLUMNAS_ASISTENCIA)
                             from gspread.cell import Cell as _CellBM
                             _cw_bm = []
@@ -1258,22 +1271,23 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                             if _cw_bm:
                                 hoja_asistencia.update_cells(_cw_bm, value_input_option="USER_ENTERED")
 
-                            # Popup para el primer A-BM sin sustento pendiente
-                            _pend = st.session_state.get(KEY_SUSTENTOS_PENDIENTES, {})
+                            # Crear cola para pedir documento de CADA A-BM
+                            _cola = []
                             for _ix, (_i, _row_abm, _nv) in enumerate(_abm_nuevos):
                                 _dni_abm = normalizar_dni(str(_row_abm.get("DNI", "")))
-                                _clave_abm = f"{_dni_abm}_{_per_bm}_{_dia_bm}_{_ix}"
-                                if _clave_abm not in _pend:
-                                    _nom_abm = limpiar_texto(str(_row_abm.get("NOMBRE", "")))
-                                    _raz_abm = limpiar_texto(str(_row_abm.get("RAZON SOCIAL", "")))
-                                    _rs_abm = int(float(str(_row_abm.get("ROW_SHEET", 0) or 0)))
-                                    dialogo_sustento_bm(_clave_abm, _dni_abm, _nom_abm, _raz_abm, _rs_abm, col_dia=_col_bm)
-                                    st.stop()
-                            # Si todos tienen sustento, limpiar cache y confirmar
-                            _leer_asistencia_cached.clear()
-                            st.session_state.pop(KEY_LOADED, None)
-                            st.session_state["asis_guardado_msg"] = f"✅ {len(_abm_nuevos)} marcas A-BM guardadas"
-                            st.rerun()
+                                _cola.append({
+                                    "clave": f"{_dni_abm}_{_per_bm}_{_dia_bm}_{_ix}",
+                                    "dni": _dni_abm,
+                                    "nombre": limpiar_texto(str(_row_abm.get("NOMBRE", ""))),
+                                    "razon": limpiar_texto(str(_row_abm.get("RAZON SOCIAL", ""))),
+                                    "row_sheet": int(float(str(_row_abm.get("ROW_SHEET", 0) or 0))),
+                                    "col_dia": _col_bm,
+                                })
+                            st.session_state["_cola_abm"] = _cola
+                            # Abrir popup para el primero
+                            _first = _cola[0]
+                            dialogo_sustento_bm(_first["clave"], _first["dni"], _first["nombre"], _first["razon"], _first["row_sheet"], col_dia=_first["col_dia"])
+                            st.stop()
 
                         if _cambios_normales and not _abm_nuevos:
                             st.session_state["asis_guardado_msg"] = f"✅ {len(_cambios_normales)} cambios de presencialidad guardados correctamente"
