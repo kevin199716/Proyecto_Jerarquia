@@ -755,11 +755,13 @@ def dialogo_sustento_bm(clave, dni, nombre, razon_social, row_sheet, col_dia=Non
         key=f"uploader_bm_{clave}",
     )
 
-    c1, c2 = st.columns(2)
+    c1, c2, c3 = st.columns(3)
     with c1:
         validar = st.button("✅ Validar sustento", use_container_width=True, key=f"btn_val_bm_{clave}")
     with c2:
-        cancelar = st.button("Cancelar", use_container_width=True, key=f"btn_cancel_bm_{clave}")
+        saltar = st.button("⏭️ Saltar (sin sustento)", use_container_width=True, key=f"btn_skip_bm_{clave}")
+    with c3:
+        cancelar = st.button("❌ Cancelar todo", use_container_width=True, key=f"btn_cancel_bm_{clave}")
 
     if validar:
         if archivo is None:
@@ -779,12 +781,22 @@ def dialogo_sustento_bm(clave, dni, nombre, razon_social, row_sheet, col_dia=Non
             "col_dia": col_dia or f"DIA_{dia_actual()}",
         }
         st.session_state[KEY_SUSTENTOS_PENDIENTES] = pendientes
-        st.success("✅ Sustento validado. Ahora presiona Guardar Presencialidad para registrar la marca y el histórico.")
-        time.sleep(0.8)
+        st.success("✅ Sustento validado. Continuando con el siguiente...")
+        st.session_state["_abm_dialog_cerrado"] = True
+        st.rerun()
+
+    if saltar:
+        # Permitir marcar A-BM sin sustento (menos seguro pero da flexibilidad)
+        st.info("⏭️ Se saltó este A-BM. Continuando con el siguiente...")
+        st.session_state["_abm_dialog_cerrado"] = True
         st.rerun()
 
     if cancelar:
-        st.info("No se validó sustento. Cambia la marca o adjunta el archivo antes de guardar.")
+        st.error("❌ Se canceló toda la carga de A-BM.")
+        st.session_state["_cola_abm"] = []
+        st.session_state[KEY_SUSTENTOS_PENDIENTES] = {}
+        st.session_state["_abm_dialog_cerrado"] = True
+        st.rerun()
 
 
 def detectar_abm_sin_sustento(df_editor: pd.DataFrame, df_original: pd.DataFrame, col_hoy: str) -> list[dict]:
@@ -1050,7 +1062,11 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
             st.error("❌ Error: cola de A-BM con más de 100 items. Se limpió la cola. Intenta de nuevo.")
             st.session_state["_cola_abm"] = []
             st.session_state[KEY_SUSTENTOS_PENDIENTES] = {}
+            st.session_state.pop("_abm_dialog_cerrado", None)
             st.rerun()
+        
+        # Limpieza del flag de diálogo cerrado
+        st.session_state.pop("_abm_dialog_cerrado", None)
         
         if _sin_sustento:
             _indice_actual = len(_cola_abm) - len(_sin_sustento)
@@ -1065,8 +1081,9 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                 st.error(f"❌ Error en el diálogo A-BM: {_e_dialog}. Intenta de nuevo o carga manualmente.")
                 st.session_state["_cola_abm"] = []
                 st.session_state[KEY_SUSTENTOS_PENDIENTES] = {}
+                st.session_state.pop("_abm_dialog_cerrado", None)
         else:
-            # Todos tienen sustento → guardar todo
+            # Todos tienen sustento (o fueron saltados) → guardar todo
             st.session_state["_cola_abm"] = []
 
     if _pendientes:
@@ -1223,6 +1240,22 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                     _df_bm_b[_c] = ""
             _df_bm_ed = _df_bm_b[columnas_bm_ed].fillna("").astype(str).replace({"nan":"","None":""})
             _df_bm_ed[_col_bm] = _df_bm_ed[_col_bm].apply(limpiar_marca)
+            
+            # VALIDACIÓN DE FECHAS: solo permitir marcar A-BM entre FECHA_ALTA y FECHA_CESE
+            _fecha_seleccionada = datetime(_per_bm[:4], _per_bm[5:7], _dia_bm).date() if len(_per_bm) >= 7 else hoy_actual()
+            _rows_validos = []
+            for idx, row in _df_bm_ed.iterrows():
+                _fecha_alta = parse_fecha(row.get("FECHA_ALTA", ""))
+                _fecha_cese = parse_fecha(row.get("FECHA_CESE", ""))
+                # Válido si: fecha_seleccionada >= fecha_alta AND fecha_seleccionada <= fecha_cese (o sin cese)
+                _valido = True
+                if _fecha_alta and _fecha_seleccionada < _fecha_alta:
+                    _valido = False
+                if _fecha_cese and _fecha_seleccionada > _fecha_cese:
+                    _valido = False
+                _rows_validos.append(_valido)
+            _df_bm_ed["_permitido_editar"] = _rows_validos
+            
             _opciones_col = MARCAS_PRESENCIALIDAD if _es_hoy else ["", "A-BM"]
             _label_col = f"{_col_bm}{' ← HOY' if _es_hoy else ' (solo A-BM)'}"
             _disabled_bm = [c for c in _df_bm_ed.columns if c != _col_bm]
@@ -1231,6 +1264,14 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                 _col_bm: st.column_config.SelectboxColumn(_label_col, options=_opciones_col, width="small"),
             }
             st.caption(f"**{len(_df_bm_ed)} registros** | {_per_bm} / DÍA {_dia_bm}{' ← HOY (todas las marcas)' if _es_hoy else ' (solo A-BM retroactivo)'}")
+            
+            # Aviso si hay filas fuera del rango de fecha
+            _filas_no_permitidas = sum(1 for v in _rows_validos if not v)
+            if _filas_no_permitidas > 0:
+                st.warning(
+                    f"⚠️ {_filas_no_permitidas} registro(s) están fuera del rango válido "
+                    f"(entre su FECHA_ALTA y FECHA_CESE). No se pueden editar esas filas."
+                )
 
             # Paginación para no freezear
             _MAX_BM = 100
@@ -1239,12 +1280,23 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                 _pag_bm = st.selectbox(f"Página ({_MAX_BM} de {len(_df_bm_ed)})", range(1, _npag+1), key=f"pag_bm_{_per_bm}_{_dia_bm}")
                 _ini = (_pag_bm - 1) * _MAX_BM
                 _df_bm_ed = _df_bm_ed.iloc[_ini:_ini+_MAX_BM].copy()
+                _rows_validos = _rows_validos[_ini:_ini+_MAX_BM]
+
+            # Construir columna de config dinámica: deshabilitar edición si está fuera del rango
+            _cfg_bm_dinamica = {
+                "ROW_SHEET": st.column_config.TextColumn("FILA", width="small", disabled=True),
+            }
+            # El selectbox column se deshabilita por row si no es válido? No, column_config no soporta eso.
+            # Mejor: solo mostrar un aviso y que el usuario evite editar las filas inválidas.
+            # O, filtrar el editor para mostrar solo las válidas.
+            _df_bm_ed_mostrar = _df_bm_ed.drop(columns=["_permitido_editar"])
+            _cfg_bm_dinamica[_col_bm] = st.column_config.SelectboxColumn(_label_col, options=_opciones_col, width="small")
 
             _editado_bm = st.data_editor(
-                _df_bm_ed, use_container_width=True,
-                height=min(380, 50 + len(_df_bm_ed) * 35),
+                _df_bm_ed_mostrar, use_container_width=True,
+                height=min(380, 50 + len(_df_bm_ed_mostrar) * 35),
                 hide_index=True, disabled=_disabled_bm,
-                column_config=_cfg_bm, num_rows="fixed",
+                column_config=_cfg_bm_dinamica, num_rows="fixed",
                 key=f"editor_bm_{_per_bm}_{_dia_bm}",
             )
             _guardar_bm = st.button(
@@ -1257,9 +1309,14 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                 with st.spinner("⏳ Guardando..."):
                     try:
                         _df_res = pd.DataFrame(_editado_bm).fillna("").reset_index(drop=True)
-                        _df_orig = _df_bm_ed.reset_index(drop=True)
+                        # Re-agregar la columna de validación para verificar
+                        _df_res["_permitido_editar"] = _rows_validos if len(_rows_validos) == len(_df_res) else [True] * len(_df_res)
+                        _df_orig = _df_bm_ed.drop(columns=["_permitido_editar"]).reset_index(drop=True)
                         _cambios = []
                         for _i, _row in _df_res.iterrows():
+                            # Validar que no se edite una fila fuera del rango
+                            if not _row.get("_permitido_editar", True):
+                                continue
                             _orig = str(_df_orig.iloc[_i][_col_bm]).strip() if _i < len(_df_orig) else ""
                             _nuevo = str(_row[_col_bm]).strip()
                             if _nuevo and _nuevo != _orig:
