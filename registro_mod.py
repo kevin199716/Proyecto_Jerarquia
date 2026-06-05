@@ -230,10 +230,6 @@ def mostrar_tabla(hoja, razon_usuario=None):
         if "DNI" in str(c).upper() or "CELULAR" in str(c).upper() or str(c).upper().startswith("ID")
     }
 
-    abierto = bool(buscar) or any(
-        v != "TODOS" for v in [filtro_estado, filtro_razon, filtro_canal, filtro_region, filtro_dep, filtro_prov]
-    )
-
     # Paginación: máximo 300 filas por vista para no freezear el navegador
     MAX_VISTA = 300
     if total > MAX_VISTA:
@@ -244,8 +240,20 @@ def mostrar_tabla(hoja, razon_usuario=None):
     else:
         df_pag = df_vista
 
-    with st.expander("📋 Ver matriz de jerarquía", expanded=abierto):
-        st.dataframe(df_pag.fillna("").astype(str), use_container_width=True, height=480, column_config=cols_texto)
+    # IMPORTANTE (fix React #185 = "Maximum update depth exceeded"):
+    # NO usar un expander que se abre/cierra solo (expanded=variable) junto con
+    # st.dataframe + use_container_width + height fijo. Esa combinación hace que la
+    # grilla mida el contenedor MIENTRAS se anima al abrirse -> bucle de render.
+    # Solución: que la apertura la controle SIEMPRE el usuario (checkbox estable),
+    # nunca el código de forma automática al filtrar.
+    ver_matriz = st.checkbox("📋 Ver matriz de jerarquía", key="matriz_ver_check")
+    if ver_matriz:
+        # width fijo en lugar de use_container_width evita el ResizeObserver loop.
+        st.dataframe(
+            df_pag.fillna("").astype(str),
+            height=480,
+            column_config=cols_texto,
+        )
         import io as _io
         _buf = _io.StringIO()
         df_vista.to_csv(_buf, index=False, encoding="utf-8-sig")
