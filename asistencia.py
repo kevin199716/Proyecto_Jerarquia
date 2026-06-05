@@ -928,6 +928,12 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
         f"📅 Periodo: **{periodo}** | Día editable: **{col_hoy}** | "
         "Se carga automáticamente. Los días anteriores y futuros quedan bloqueados."
     )
+    
+    # Nota sobre cambios manuales en Drive
+    st.caption(
+        "💡 Si editaste colaboradores **directamente en Google Drive** (no desde Altas/Bajas), "
+        "presiona **F5** para refrescar y ver los cambios al toque."
+    )
 
     # En VPS: forzar lectura fresca de asistencia al entrar al módulo para que
     # Altas/Bajas se reflejen de inmediato. PERO si estamos a mitad de un flujo
@@ -1034,13 +1040,31 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
     _cola_abm = st.session_state.get("_cola_abm", [])
 
     # Si hay cola de A-BM pendientes sin sustento → abrir popup para el siguiente
+    # CON GUARDIAS para evitar que se cuelgue indefinidamente.
     if _cola_abm:
         _procesados = set(_pendientes.keys())
         _sin_sustento = [item for item in _cola_abm if item["clave"] not in _procesados]
+        
+        # Seguridad: si la cola tiene más de 100 items, algo anormal pasó
+        if len(_cola_abm) > 100:
+            st.error("❌ Error: cola de A-BM con más de 100 items. Se limpió la cola. Intenta de nuevo.")
+            st.session_state["_cola_abm"] = []
+            st.session_state[KEY_SUSTENTOS_PENDIENTES] = {}
+            st.rerun()
+        
         if _sin_sustento:
-            _next = _sin_sustento[0]
-            dialogo_sustento_bm(_next["clave"], _next["dni"], _next["nombre"], _next["razon"], _next["row_sheet"], col_dia=_next.get("col_dia"))
-            st.stop()
+            _indice_actual = len(_cola_abm) - len(_sin_sustento)
+            _total_cola = len(_cola_abm)
+            st.info(f"📋 Cargando sustento A-BM: {_indice_actual + 1} de {_total_cola}")
+            
+            try:
+                _next = _sin_sustento[0]
+                dialogo_sustento_bm(_next["clave"], _next["dni"], _next["nombre"], _next["razon"], _next["row_sheet"], col_dia=_next.get("col_dia"))
+                st.stop()
+            except Exception as _e_dialog:
+                st.error(f"❌ Error en el diálogo A-BM: {_e_dialog}. Intenta de nuevo o carga manualmente.")
+                st.session_state["_cola_abm"] = []
+                st.session_state[KEY_SUSTENTOS_PENDIENTES] = {}
         else:
             # Todos tienen sustento → guardar todo
             st.session_state["_cola_abm"] = []
