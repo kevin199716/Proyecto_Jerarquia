@@ -305,7 +305,7 @@ def clave_asistencia(dni: str, fecha_alta: str) -> str:
 
 def letra_columna(num: int) -> str:
     resultado = ""
-    mientras num > 0:
+    while num > 0:
         num -= 1
         resultado = chr(65 + (num % 26)) + resultado
         num //= 26
