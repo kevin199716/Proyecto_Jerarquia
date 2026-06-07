@@ -47,18 +47,18 @@ def login(usuarios):
     with col_hero:
         _md("""
 <div class="wow-login-hero" style="border-radius:20px; height:100%; min-height:540px;">
-<div class="brand"><img src="https://raw.githubusercontent.com/leocorbur/st_apps/refs/heads/main/images/logo_horizontal_blanco.png" alt="WOW D2D" /></div>
+<div class="brand"><img src="https://raw.githubusercontent.com/leocorbur/st_apps/refs/heads/main/images/logo_horizontal_blanco.png" alt="WAP D2D" /></div>
 <div>
-<div class="wow-login-eyebrow">✦ Portal de Vendedores</div>
+<div class="wow-login-eyebrow">✦ VENTAS DOOR TO DOOR</div>
 <h1>Gestiona tu fuerza de ventas<br/><span class="accent">con claridad</span>.</h1>
-<p>Altas, bajas, asistencia y jerarquía en un solo lugar. Toda la operación de WOW D2D, sincronizada en tiempo real.</p>
+<p>Actualización de jerarquía: altas, bajas, descansos médicos y vacaciones en un solo lugar. Sincronizado en tiempo real.</p>
 <div class="features">
 <div class="feat"><div class="ico">👥</div> Altas y bajas</div>
-<div class="feat"><div class="ico">🗓️</div> Asistencia diaria</div>
-<div class="feat"><div class="ico">📋</div> Jerarquía</div>
+<div class="feat"><div class="ico">🏥</div> Descansos médicos</div>
+<div class="feat"><div class="ico">✈️</div> Vacaciones</div>
 </div>
 </div>
-<div class="footer">© 2026 WOW Perú · v2.4.0</div>
+<div class="footer">© 2026 WAP Perú · v2.5.0</div>
 </div>
 """)
 

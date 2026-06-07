@@ -448,13 +448,10 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
         return
 
     razones = [
-        "MALUTECH S.A.C.",
-        "2CONNECT SERVICES S.A.C.",
         "INTERCONEXION 360 SAC",
-        "NOGALES HIGH SAC",
         "MULTIPLE FORCE SAC",
-        "KONECTA SAC",
-        "WOW TEL",
+        "NOGALES HIGH SAC",
+        "GRUPO CREED SAC",
     ]
 
     departamentos = lista_limpia(df_ubi, "DEPARTAMENTO")
@@ -485,7 +482,7 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
     origenes_ingreso = lista_limpia(df_ubi, "ORIGEN_INGRESO")
     fuentes_ingreso = lista_limpia(df_ubi, "FUENTE_INGRESO")
 
-    st.caption("WOW TEL se gestiona como VENTAS DIRECTAS. Los demás socios se gestionan como VENTAS INDIRECTAS. En indirectas se mantiene la lógica original de cargos Dealer; en directas el cargo va limpio sin Dealer.")
+    st.caption("Todos los socios se gestionan como VENTAS INDIRECTAS. Se mantiene la lógica original de cargos Dealer.")
 
     col_izq, col_der = st.columns(2)
 
@@ -507,21 +504,10 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             razon = razon_usuario
             st.text_input("RAZÓN SOCIAL", value=razon, disabled=True, key=k("razon_dealer"))
 
-        # Regla comercial estable, sin cambiar la lógica inicial:
-        # - WOW TEL siempre viaja como VENTAS DIRECTAS. No debe permitir que el valor anterior
-        #   de sesión deje el SUB CANAL como VENTAS INDIRECTAS/OUTBOUND.
-        # - Los demás socios siguen como VENTAS INDIRECTAS y mantienen SUB CANAL original.
+        # Regla comercial: todos los socios se gestionan como VENTAS INDIRECTAS
         razon_norm = limpiar_texto(razon).upper()
 
-        if razon_norm == "WOW TEL":
-            canal = "VENTAS DIRECTAS"
-            subcanal = "VENTAS DIRECTAS"
-            tipo_gestion = ""
-            # Se muestra fijo para evitar que Streamlit conserve valores anteriores del selectbox.
-            st.text_input("CANAL", value=canal, disabled=True, key=k("canal_wow_fijo"))
-            st.text_input("SUB CANAL", value=subcanal, disabled=True, key=k("subcanal_wow_fijo"))
-
-        elif razon_norm:
+        if razon_norm:
             canal = "VENTAS INDIRECTAS"
             st.text_input("CANAL", value=canal, disabled=True, key=k("canal_indirecto_fijo"))
             subcanal = st.selectbox(
