@@ -49,9 +49,9 @@ def login(usuarios):
 <div class="wow-login-hero" style="border-radius:20px; height:100%; min-height:540px;">
 <div class="brand"><img src="https://raw.githubusercontent.com/leocorbur/st_apps/refs/heads/main/images/logo_horizontal_blanco.png" alt="WAP D2D" /></div>
 <div>
-<div class="wow-login-eyebrow">✦ VENTAS DOOR TO DOOR</div>
+<div class="wow-login-eyebrow">✦ VENTAS D2D</div>
 <h1>Gestiona tu fuerza de ventas<br/><span class="accent">con claridad</span>.</h1>
-<p>Actualización de jerarquía: altas, bajas, descansos médicos y vacaciones en un solo lugar. Sincronizado en tiempo real.</p>
+<p>Jerarquía: Distrito, descansos médicos y vacaciones. Sincronizado en tiempo real.</p>
 <div class="features">
 <div class="feat"><div class="ico">👥</div> Altas y bajas</div>
 <div class="feat"><div class="ico">🏥</div> Descansos médicos</div>
