@@ -1,18 +1,12 @@
 """
-auth.py — v3
-Fix crítico: usar textwrap.dedent() para que st.markdown no interprete el HTML
-indentado como bloque de código.
+auth.py — Autenticación
+v2.5.0 - Sin imagen EMPRESAS
 """
 import json
 import os
 import textwrap
-
 import streamlit as st
 
-
-# =========================
-# CARGAR USUARIOS — BACKEND INTACTO
-# =========================
 def cargar_usuarios():
     try:
         if os.path.exists("/etc/secrets/USUARIOS_CONTRASENAS"):
@@ -22,32 +16,26 @@ def cargar_usuarios():
             with open("usuarios.json", encoding="utf-8") as f:
                 return json.load(f)
         else:
-            st.error("❌ No se encontró el archivo usuarios.json")
+            st.error("❌ No se encontró usuarios.json")
             st.stop()
     except Exception as e:
-        st.error(f"❌ Error leyendo usuarios: {e}")
+        st.error(f"❌ Error: {e}")
         st.stop()
 
-
-# Helper para no repetir textwrap.dedent
 def _md(html: str):
     st.markdown(textwrap.dedent(html), unsafe_allow_html=True)
 
-
-# =========================
-# LOGIN — v3
-# =========================
 def login(usuarios):
     from wow_theme import hide_sidebar_for_login
     hide_sidebar_for_login()
 
     col_hero, col_form = st.columns([1.05, 0.95], gap="medium")
 
-    # ─── HERO (col izquierda) ───────────────────────────────────────────────
+    # HERO (izquierda)
     with col_hero:
         _md("""
 <div class="wow-login-hero" style="border-radius:20px; height:100%; min-height:540px;">
-<div class="brand"><img src="https://raw.githubusercontent.com/leocorbur/st_apps/refs/heads/main/images/logo_horizontal_blanco.png" alt="WAP D2D" /></div>
+<div class="brand" style="font-size:48px; font-weight:800; color:white; letter-spacing:-2px; margin-bottom:24px;">✦ WOW</div>
 <div>
 <div class="wow-login-eyebrow">✦ WOW</div>
 <h1>Gestiona tu fuerza de ventas<br/><span class="accent">con claridad</span>.</h1>
@@ -62,7 +50,7 @@ def login(usuarios):
 </div>
 """)
 
-    # ─── FORM (col derecha) ─────────────────────────────────────────────────
+    # FORM (derecha)
     with col_form:
         _md("""
 <div style="padding:24px 8px 0;">
@@ -96,7 +84,7 @@ def login(usuarios):
             datos_usuario = usuarios.get(usuario)
             if datos_usuario and contraseña == str(datos_usuario.get("password")):
                 if datos_usuario.get("estado") != "activo":
-                    st.error("❌ Usuario inactivo. Contacta a soporte.")
+                    st.error("❌ Usuario inactivo")
                     return
                 st.session_state["autenticado"] = True
                 st.session_state["usuario"] = usuario
@@ -107,15 +95,13 @@ def login(usuarios):
             else:
                 st.error("❌ Usuario o contraseña incorrectos")
 
-        # Caja de soporte
         _md("""
 <div style="margin-top:18px; padding:12px 14px; background:#DFF1F6; border:1px solid #B7E2ED; border-radius:10px; color:#1F6A7E; font-size:12px; line-height:1.5; display:flex; gap:10px; align-items:flex-start;">
 <span style="font-size:14px;">ℹ️</span>
-<div><strong>¿Problemas para ingresar?</strong> Contacta al área de soporte: <strong style="color:#4B0067;">ksa@wowperu.pe</strong></div>
+<div><strong>¿Problemas para ingresar?</strong> Contacta: <strong style="color:#4B0067;">ksa@wowperu.pe</strong></div>
 </div>
 """)
 
-    # Botón primary naranja en main area (override final con !important)
     _md("""
 <style>
 .main button[kind="primary"] {
