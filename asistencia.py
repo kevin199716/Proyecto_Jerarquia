@@ -224,6 +224,12 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, hoja_sustentos=None,
             st.error("❌ Sin datos de colaboradores")
             return
 
+        # FIX: si el usuario tiene razón social asignada (no es backoffice),
+        # solo puede ver y registrar sobre sus propios colaboradores.
+        rol_actual = st.session_state.get("rol", "")
+        if razon and rol_actual != "backoffice" and "RAZON SOCIAL" in df_colab.columns:
+            df_colab = df_colab[df_colab["RAZON SOCIAL"].astype(str).str.strip() == razon.strip()]
+
         st.subheader("1️⃣ Buscar colaborador")
         c1, c2 = st.columns(2)
         with c1:
@@ -359,6 +365,12 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, hoja_sustentos=None,
         if df_h.empty:
             st.info("ℹ️ Sin registros en la hoja Asistencia")
         else:
+            # FIX: si el usuario tiene razón social asignada (no es backoffice),
+            # se filtra automáticamente por su dealer. No puede ver otros socios.
+            rol_actual = st.session_state.get("rol", "")
+            if razon and rol_actual != "backoffice" and "RAZON SOCIAL" in df_h.columns:
+                df_h = df_h[df_h["RAZON SOCIAL"].astype(str).str.strip() == razon.strip()]
+
             cf1, cf2, cf3 = st.columns(3)
             with cf1:
                 meses = ["TODOS"] + sorted(df_h["MES"].dropna().unique().tolist()) if "MES" in df_h.columns else ["TODOS"]
@@ -366,7 +378,12 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, hoja_sustentos=None,
             with cf2:
                 dni_esp = st.text_input("DNI:", key="esp_dni")
             with cf3:
-                razon_esp = st.text_input("Empresa:", key="esp_razon")
+                # Backoffice puede filtrar por cualquier empresa. Dealer ve solo la suya.
+                if rol_actual == "backoffice":
+                    razon_esp = st.text_input("Empresa:", key="esp_razon")
+                else:
+                    st.text_input("Empresa:", value=razon, disabled=True, key="esp_razon")
+                    razon_esp = ""  # Ya filtrado arriba, no aplicar dos veces
 
             df_f = df_h.copy()
             if mes_sel != "TODOS" and "MES" in df_f.columns:
@@ -395,6 +412,12 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, hoja_sustentos=None,
             if df_d.empty:
                 st.info("Sin documentos registrados aún")
             else:
+                # FIX: si el usuario tiene razón social asignada (no es backoffice),
+                # filtra automáticamente sus documentos. No puede ver los de otros socios.
+                rol_actual = st.session_state.get("rol", "")
+                if razon and rol_actual != "backoffice" and "RAZON SOCIAL" in df_d.columns:
+                    df_d = df_d[df_d["RAZON SOCIAL"].astype(str).str.strip() == razon.strip()]
+
                 cf1, cf2, cf3 = st.columns(3)
                 with cf1:
                     dni_d = st.text_input("Buscar por DNI:", key="doc_dni")
