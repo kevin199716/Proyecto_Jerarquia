@@ -563,7 +563,7 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
     origenes_ingreso = lista_limpia(df_ubi, "ORIGEN_INGRESO")
     fuentes_ingreso = lista_limpia(df_ubi, "FUENTE_INGRESO")
 
-    st.caption("Dealers → VENTAS INDIRECTAS | WOW TEL → VENTAS DIRECTAS (ATC/CX/Retail/D2D)")
+    st.caption("Dealers → VENTAS INDIRECTAS | WOW TEL → VENTAS DIRECTAS (D2D / ATC / RETAIL / CEX)")
 
     col_izq, col_der = st.columns(2)
 
@@ -608,21 +608,12 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             # ── WOW TEL → VENTAS DIRECTAS ──────────────────────────────
             canal = st.selectbox(
                 "CANAL",
-                ["", "ATC", "CX", "RETAIL", "DOOR TO DOOR D2D", "OUTBOUND"],
+                ["", "D2D", "ATC", "RETAIL", "CEX"],
                 key=k("canal_wowtel"),
             )
-            opciones_subcanal_wt = {
-                "ATC":              ["ATC", "INBOUND", "OUTBOUND"],
-                "CX":               ["CX", "ATENCIÓN AL CLIENTE"],
-                "RETAIL":           ["RETAIL", "TIENDA"],
-                "DOOR TO DOOR D2D": ["DOOR TO DOOR D2D", "D2D"],
-                "OUTBOUND":         ["OUTBOUND"],
-            }
-            subcanal = st.selectbox(
-                "SUB CANAL",
-                opciones_subcanal_wt.get(canal, [canal]) if canal else [""],
-                key=k("subcanal_wowtel"),
-            )
+            subcanal = "VENTAS DIRECTAS"
+            if canal:
+                st.text_input("SUB CANAL", value=subcanal, disabled=True, key=k("subcanal_wowtel"))
             tipo_gestion = ""
 
         else:
