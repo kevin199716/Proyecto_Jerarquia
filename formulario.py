@@ -126,6 +126,17 @@ def _leer_ubicaciones_cached(_hoja_ubicaciones):
 
     df = pd.DataFrame(filas, columns=headers)
 
+    # Renombrar columnas vacías para evitar conflictos
+    cols_renombradas = []
+    contador_vacias = 0
+    for col in df.columns:
+        if str(col).strip() == "":
+            contador_vacias += 1
+            cols_renombradas.append(f"_COL_VACIA_{contador_vacias}")
+        else:
+            cols_renombradas.append(col)
+    df.columns = cols_renombradas
+
     # En ubicaciones hay dos columnas con el mismo nombre: DNI FINAL.
     # La primera corresponde a supervisor y la segunda a coordinador.
     nuevas_columnas = []
@@ -224,14 +235,20 @@ def lista_limpia(df: pd.DataFrame, columna: str) -> list[str]:
 
 
 def buscar_dni_por_nombre(df: pd.DataFrame, columna_nombre: str, columna_dni: str, nombre: str) -> str:
-    if not nombre or df.empty or columna_nombre not in df.columns or columna_dni not in df.columns:
+    if not nombre or df.empty or columna_nombre not in df.columns:
+        return ""
+    # Buscar la columna DNI con múltiples alternativas por si el sheet tiene otro nombre
+    alternativas_dni = [columna_dni, "DNI FINAL", "DNI", "DNI_SUPERVISOR", "DNI_COORDINADOR"]
+    col_dni_real = next((c for c in alternativas_dni if c in df.columns), None)
+    if not col_dni_real:
         return ""
     serie_nombre = serie_columna(df, columna_nombre)
-    base = df[serie_nombre.eq(str(nombre).strip())]
+    # Comparación insensible a mayúsculas y espacios
+    base = df[serie_nombre.str.upper().str.strip().eq(str(nombre).strip().upper())]
     if base.empty:
         return ""
-    valor = base.iloc[0].get(columna_dni, "")
-    return limpiar_texto(valor).replace(".0", "")
+    valor = base.iloc[0][col_dni_real] if col_dni_real in base.columns else ""
+    return limpiar_texto(str(valor)).replace(".0", "")
 
 
 # =========================
@@ -307,7 +324,70 @@ def validar_dni_unico_historico(df_colab: pd.DataFrame, dni_limpio: str, fecha_a
     return True, ""
 
 
-def validar_formulario(campos: dict, df_colab: pd.DataFrame) -> list[str]:
+def validar_reingreso(df_colab: pd.DataFrame, dni_limpio: str, fecha_alta) -> tuple[bool, str, bool]:
+    """
+    Retorna (ok, mensaje_error, es_reingreso).
+    - ok=False: bloquear el alta
+    - es_reingreso=True: mostrar advertencia de indicadores (no bloquea)
+    """
+    fecha_alta = parse_fecha(fecha_alta)
+    if fecha_alta is None:
+        return False, "❌ La FECHA DE CREACION USUARIO no es válida.", False
+    if df_colab.empty or "DNI" not in df_colab.columns:
+        return True, "", False
+
+    df = df_colab.copy()
+    df["DNI_NORM"] = df["DNI"].apply(normalizar_dni)
+    encontrados = df[df["DNI_NORM"].eq(dni_limpio)].copy()
+
+    if encontrados.empty:
+        return True, "", False  # DNI nuevo, sin histórico
+
+    # Si está ACTIVO → bloquear siempre
+    if "ESTADO" in encontrados.columns:
+        activos = encontrados[encontrados["ESTADO"].astype(str).str.strip().str.upper().eq("ACTIVO")]
+        if not activos.empty:
+            det = activos.iloc[0]
+            razon = limpiar_texto(det.get("RAZON SOCIAL", ""))
+            nombre = " ".join([
+                limpiar_texto(det.get("NOMBRES", det.get("NOMBRE", ""))),
+                limpiar_texto(det.get("APELLIDO PATERNO", "")),
+                limpiar_texto(det.get("APELLIDO MATERNO", "")),
+            ]).strip()
+            return False, (
+                f"❌ DNI {dni_limpio} ya está ACTIVO en la base.\n"
+                f"Empresa: {razon} | Nombre: {nombre}\n"
+                "No se puede registrar nuevamente mientras esté activo."
+            ), False
+
+    # Buscar última fecha de baja/cese
+    columnas_baja = ["FECHA DE CESE", "FECHA CESE", "FECHA_BAJA_REGISTRO", "FECHA BAJA REGISTRO"]
+    fechas_baja = []
+    for _, row in encontrados.iterrows():
+        estado_row = limpiar_texto(row.get("ESTADO", "")).upper()
+        for col in columnas_baja:
+            if col in encontrados.columns:
+                f = parse_fecha(row.get(col))
+                if f:
+                    fechas_baja.append(f)
+        if estado_row == "INACTIVO" and "FECHA MOV" in encontrados.columns:
+            f_mov = parse_fecha(row.get("FECHA MOV"))
+            if f_mov:
+                fechas_baja.append(f_mov)
+
+    if fechas_baja:
+        ultima_baja = max(fechas_baja)
+        # Fecha de alta debe ser MAYOR a fecha de baja
+        if fecha_alta <= ultima_baja:
+            return False, (
+                f"❌ La fecha de alta ({fecha_alta}) debe ser MAYOR "
+                f"a la última fecha de baja/cese del DNI {dni_limpio}: {ultima_baja}.\n"
+                "No puede ser igual ni menor."
+            ), True
+        # Es reingreso válido → advertencia (no bloquea)
+        return True, "", True
+
+    return True, "", False
     errores = []
 
     canal_val = limpiar_texto(campos.get("CANAL", "")).upper()
@@ -602,7 +682,7 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
 
             provincias = []
             if departamento and "DEPARTAMENTO" in df_ubi.columns and "PROVINCIA" in df_ubi.columns:
-                df_dep = df_ubi[serie_columna(df_ubi, "DEPARTAMENTO").eq(str(departamento).strip())]
+                df_dep = df_ubi[serie_columna(df_ubi, "DEPARTAMENTO").str.upper().str.strip().eq(str(departamento).strip().upper())]
                 provincias = lista_limpia(df_dep, "PROVINCIA")
 
             # FIX: si la provincia guardada ya no está en la nueva lista, resetear
@@ -611,7 +691,7 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             provincia = st.selectbox("PROVINCIA", [""] + provincias, key=k("provincia"))
 
             # FIX: si el distrito guardado ya no está en la nueva lista, resetear
-            df_prov = df_ubi[serie_columna(df_ubi, "PROVINCIA").eq(str(provincia).strip())]
+            df_prov = df_ubi[serie_columna(df_ubi, "PROVINCIA").str.upper().str.strip().eq(str(provincia).strip().upper())]
             distritos = lista_limpia(df_prov, "DISTRITO") if provincia else []
             if st.session_state.get(k("distrito"), "") not in [""] + distritos:
                 st.session_state[k("distrito")] = ""
@@ -637,7 +717,7 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             departamento = st.selectbox("DEPARTAMENTO", [""] + departamentos, key=k("departamento_directo"))
             provincias = []
             if departamento and "DEPARTAMENTO" in df_ubi.columns and "PROVINCIA" in df_ubi.columns:
-                df_dep = df_ubi[serie_columna(df_ubi, "DEPARTAMENTO").eq(str(departamento).strip())]
+                df_dep = df_ubi[serie_columna(df_ubi, "DEPARTAMENTO").str.upper().str.strip().eq(str(departamento).strip().upper())]
                 provincias = lista_limpia(df_dep, "PROVINCIA")
             provincia = st.selectbox("PROVINCIA", [""] + provincias, key=k("provincia_directo"))
         with col_u2d:
@@ -687,17 +767,26 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             "REGION": limpiar_texto(region),
             "DEPARTAMENTO": departamento,
             "PROVINCIA": provincia,
-            "DISTRITO": limpiar_texto(distrito),  # 🆕
-            "SUPERVISOR A CARGO": limpiar_texto(supervisor),
-            "SUPERVISOR": limpiar_texto(supervisor),
-            "DNI SUPERVISOR": limpiar_texto(dni_supervisor),
-            "CAPACITADOR": limpiar_texto(capacitador),
-            "ORIGEN_INGRESO": limpiar_texto(origen_ingreso),
-            "ORIGEN INGRESO": limpiar_texto(origen_ingreso),
-            "FUENTE_INGRESO": limpiar_texto(fuente_ingreso),
-            "FUENTE INGRESO": limpiar_texto(fuente_ingreso),
-            "COORDINADOR": limpiar_texto(coordinador),
-            "DNI COORDINADOR": dni_coordinador,
+            "DISTRITO": limpiar_texto(distrito),
+            # ─── SUPERVISOR ────────────────────────────────────────────────
+            # VENTAS INDIRECTAS → usa "SUPERVISOR A CARGO" (jerarquía D2D)
+            # VENTAS DIRECTAS   → usa "SUPERVISOR" (supervisor directo)
+            # Nunca se cruzan entre sí.
+            "SUPERVISOR A CARGO": limpiar_texto(supervisor) if canal == "VENTAS INDIRECTAS" else "",
+            "SUPERVISOR A CARGO FINAL": limpiar_texto(supervisor) if canal == "VENTAS INDIRECTAS" else "",
+            "SUPERVISOR": limpiar_texto(supervisor_directo) if canal == "VENTAS DIRECTAS" else "",
+            "DNI SUPERVISOR": limpiar_texto(dni_supervisor) if canal == "VENTAS INDIRECTAS" else "",
+            # ─── CAPACITADOR / ORIGEN / FUENTE (solo DIRECTAS) ────────────
+            "CAPACITADOR": limpiar_texto(capacitador) if canal == "VENTAS DIRECTAS" else "",
+            "ORIGEN_INGRESO": limpiar_texto(origen_ingreso) if canal == "VENTAS DIRECTAS" else "",
+            "ORIGEN INGRESO": limpiar_texto(origen_ingreso) if canal == "VENTAS DIRECTAS" else "",
+            "FUENTE_INGRESO": limpiar_texto(fuente_ingreso) if canal == "VENTAS DIRECTAS" else "",
+            "FUENTE INGRESO": limpiar_texto(fuente_ingreso) if canal == "VENTAS DIRECTAS" else "",
+            # ─── COORDINADOR (solo INDIRECTAS) ────────────────────────────
+            "COORDINADOR": limpiar_texto(coordinador) if canal == "VENTAS INDIRECTAS" else "",
+            "COORDINADOR FINAL": limpiar_texto(coordinador) if canal == "VENTAS INDIRECTAS" else "",
+            "DNI COORDINADOR": dni_coordinador if canal == "VENTAS INDIRECTAS" else "",
+            # ─── DATOS PERSONALES ─────────────────────────────────────────
             "CARGO (ROL)": cargo,
             "NOMBRES": limpiar_texto(nombres).upper(),
             "APELLIDO PATERNO": limpiar_texto(apellido_p).upper(),
@@ -727,10 +816,31 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
         # Así no se congela el formulario mientras llenas campos.
         df_colab = leer_colaboradores(hoja_colaboradores, forzar=True)
         errores = validar_formulario(campos, df_colab)
+
+        # Validar reingreso (bloqueo + popup advertencia)
+        dni_limpio = normalizar_dni(limpiar_texto(campos.get("DNI", "")))
+        fecha_alta = campos.get("FECHA DE CREACION USUARIO")
+        ok_reingreso, msg_reingreso, es_reingreso = validar_reingreso(df_colab, dni_limpio, fecha_alta)
+
+        if not ok_reingreso:
+            errores.append(msg_reingreso)
+
         if errores:
             for err in errores:
                 st.error(err)
             return
+
+        # Popup de advertencia de reingreso (no bloquea, solo advierte)
+        if es_reingreso and not ok_reingreso is False:
+            st.warning(
+                f"⚠️ **REINGRESO DETECTADO** — DNI: {dni_limpio}\n\n"
+                "**Por favor, revisar urgentemente el resultado de indicadores "
+                "de calidad y productividad en los últimos 6 meses:**\n\n"
+                "• BN2 / BN3 (Buena Nota)\n"
+                "• Productividad venta cero\n"
+                "• Indicadores de actividad y cumplimiento\n\n"
+                "Si los indicadores no califican, rechazar el alta antes de confirmar."
+            )
 
         try:
             columnas_nuevas = [
