@@ -605,11 +605,16 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
                 df_dep = df_ubi[serie_columna(df_ubi, "DEPARTAMENTO").eq(str(departamento).strip())]
                 provincias = lista_limpia(df_dep, "PROVINCIA")
 
+            # FIX: si la provincia guardada ya no está en la nueva lista, resetear
+            if st.session_state.get(k("provincia"), "") not in [""] + provincias:
+                st.session_state[k("provincia")] = ""
             provincia = st.selectbox("PROVINCIA", [""] + provincias, key=k("provincia"))
 
-            # 🆕 DISTRITO
+            # FIX: si el distrito guardado ya no está en la nueva lista, resetear
             df_prov = df_ubi[serie_columna(df_ubi, "PROVINCIA").eq(str(provincia).strip())]
             distritos = lista_limpia(df_prov, "DISTRITO") if provincia else []
+            if st.session_state.get(k("distrito"), "") not in [""] + distritos:
+                st.session_state[k("distrito")] = ""
             distrito = st.selectbox("DISTRITO", [""] + distritos, key=k("distrito"))
 
             coordinador = st.selectbox("COORDINADOR", [""] + coordinadores, key=k("coordinador"))
@@ -743,6 +748,12 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             fila = valor_por_columna(headers, campos)
             hoja_colaboradores.append_row(fila, value_input_option="USER_ENTERED")
             leer_colaboradores(hoja_colaboradores, forzar=True)
+            # Limpiar cache de jerarquía para actualización inmediata
+            try:
+                from registro_mod import _leer_matriz_cached
+                _leer_matriz_cached.clear()
+            except Exception:
+                pass
 
             if hoja_asistencia is not None:
                 try:

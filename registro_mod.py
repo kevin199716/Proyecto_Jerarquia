@@ -138,7 +138,7 @@ def _headers_unicos(headers):
     return salida
 
 
-@st.cache_data(ttl=60, show_spinner=False)
+@st.cache_data(ttl=10, show_spinner=False)
 def _leer_matriz_cached(_hoja):
     """Lee la hoja con get_all_values (liviano) y devuelve un DataFrame YA limpio
     y con DNI/celulares como texto. Se hace UNA sola vez y se comparte entre
@@ -169,6 +169,11 @@ def mostrar_tabla(hoja, razon_usuario=None):
     if rol != "backoffice" and razon_usuario and "RAZON SOCIAL" in df.columns:
         df = df[df["RAZON SOCIAL"].astype(str).str.strip().eq(razon_usuario)]
 
+    col_ref, _ = st.columns([1, 4])
+    with col_ref:
+        if st.button("🔄 Actualizar jerarquía", key="btn_refresh_matriz"):
+            _leer_matriz_cached.clear()
+            st.rerun()
     st.caption("Filtros rápidos sobre la matriz cargada. No vuelve a leer Drive mientras filtras dentro de esta vista.")
     f1, f2, f3, f4 = st.columns([1.3, 1, 1, 1])
     with f1:
