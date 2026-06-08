@@ -528,10 +528,11 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
         return
 
     razones = [
-        "INTERCONEXION 360 SAC",
         "MULTIPLE FORCE SAC",
-        "NOGALES HIGH SAC",
-        "GRUPO CREED SAC",
+        "INTERCONEXION 360 SAC",
+        "NOGALES HIGH S.A.C.",
+        "GRUPO CREED S.A.C.",
+        "WOW TEL",
     ]
 
     departamentos = lista_limpia(df_ubi, "DEPARTAMENTO")
