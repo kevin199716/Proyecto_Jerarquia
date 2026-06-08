@@ -3,7 +3,6 @@ import pandas as pd
 import streamlit as st
 from datetime import datetime, timedelta
 
-@st.cache_data(ttl=60)
 def cargar_colaboradores(hoja_colab):
     try:
         valores = hoja_colab.get_all_values()
