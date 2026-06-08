@@ -1,30 +1,30 @@
 """
-asistencia.py v3.0
-- session_state: no se congela
-- Guarda DM/VAC en hoja Asistencia (días marcados)
-- Sube documentos a catbox.moe
-- Confirmación visual
-- Tab Espejo: historial con filtros
-- Tab Documentos: evidencias subidas
+asistencia.py v4.0
+- Guarda en hoja Asistencia (DIA_1..DIA_31)
+- Guarda documentos en hoja Sustentos_Bajas
+- Tab Espejo: vista de Sustentos_Bajas
+- Tab Documentos: links con metadata completa
+- Sin congelamiento (session_state)
 """
 import pandas as pd
 import streamlit as st
 from datetime import datetime, timedelta
 
-# ─── Helpers ──────────────────────────────────────────────────────────────────
 
 def _cargar_df(hoja):
     try:
         vals = hoja.get_all_values()
         if len(vals) < 2:
             return pd.DataFrame()
-        return pd.DataFrame(vals[1:], columns=vals[0])
+        df = pd.DataFrame(vals[1:], columns=vals[0])
+        df.columns = [c.strip().upper() for c in df.columns]
+        return df
     except Exception as e:
         st.error(f"Error cargando datos: {e}")
         return pd.DataFrame()
 
+
 def _subir_doc(archivo):
-    """Sube archivo a catbox.moe y devuelve URL o mensaje de error."""
     try:
         from sheets import subir_archivo_drive
         url = subir_archivo_drive(
@@ -36,19 +36,17 @@ def _subir_doc(archivo):
     except Exception as e:
         return None, str(e)
 
-# ─── Módulo principal ─────────────────────────────────────────────────────────
 
-def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, razon=None):
+def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, hoja_sustentos=None, registro_mod=None, razon=None):
 
     # Init session_state
-    if "asist_colab" not in st.session_state:
-        st.session_state["asist_colab"] = None
-    if "asist_guardado" not in st.session_state:
-        st.session_state["asist_guardado"] = None
+    for k, v in [("asist_colab", None), ("asist_guardado", None)]:
+        if k not in st.session_state:
+            st.session_state[k] = v
 
     st.write("# Gestión de Descansos Médicos y Vacaciones")
 
-    tab_reg, tab_espejo, tab_docs = st.tabs(["📝 Registrar", "📊 Espejo / Histórico", "📎 Documentos"])
+    tab_reg, tab_espejo, tab_docs = st.tabs(["📝 Registrar", "📊 Espejo", "📎 Documentos"])
 
     # ══════════════════════════════════════════════════════
     # TAB 1 — REGISTRAR
@@ -58,9 +56,6 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
         if df_colab.empty:
             st.error("❌ Sin datos de colaboradores")
             return
-
-        # Normalizar columnas
-        df_colab.columns = [c.strip().upper() for c in df_colab.columns]
 
         st.subheader("1️⃣ Buscar colaborador")
         c1, c2 = st.columns(2)
@@ -78,14 +73,13 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
 
             if res.empty:
                 st.session_state["asist_colab"] = None
-                st.warning("⚠️ No se encontró ningún colaborador")
+                st.warning("⚠️ No encontrado")
             else:
                 st.session_state["asist_colab"] = res.iloc[0].to_dict()
                 visibles = ["DNI", "NOMBRES", "RAZON SOCIAL", "ESTADO"]
                 st.success(f"✅ {len(res)} resultado(s)")
                 st.dataframe(res[[c for c in visibles if c in res.columns]], use_container_width=True, hide_index=True)
 
-        # ── Formulario de registro (persiste con session_state) ──
         colab = st.session_state.get("asist_colab")
         if colab:
             st.divider()
@@ -104,7 +98,6 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                 ["🏥 Descanso Médico (A-BM)", "✈️ Vacaciones (A-VAC)"],
                 key="asist_tipo",
             )
-
             cf1, cf2 = st.columns(2)
             with cf1:
                 f_ini = st.date_input("Fecha inicio:", key="asist_f_ini")
@@ -123,9 +116,13 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                     st.error("❌ La fecha fin no puede ser anterior a la fecha inicio")
                 else:
                     marca = "A-BM" if "Médico" in tipo else "A-VAC"
+                    motivo_texto = "A-BM (No Asistió por Baja Médica)" if marca == "A-BM" else "A-VAC (Vacaciones)"
                     dias = (f_fin - f_ini).days + 1
+                    ahora = datetime.now()
+                    periodo = ahora.strftime("%Y-%m")
+                    usuario_sesion = st.session_state.get("usuario", "admin")
 
-                    # 1. Subir documentos
+                    # 1. Subir documentos y guardar en Sustentos_Bajas
                     urls_docs = []
                     errores_docs = []
                     if docs:
@@ -134,13 +131,30 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                                 url, err = _subir_doc(doc)
                                 if url:
                                     urls_docs.append(url)
+                                    # Guardar en Sustentos_Bajas
+                                    if hoja_sustentos:
+                                        try:
+                                            fila_sust = [
+                                                periodo,
+                                                str(f_ini),
+                                                str(colab.get("DNI", "")),
+                                                str(colab.get("NOMBRES", "")),
+                                                str(colab.get("RAZON SOCIAL", "")),
+                                                motivo_texto,
+                                                url,
+                                                ahora.strftime("%Y-%m-%d %H:%M:%S"),
+                                                usuario_sesion,
+                                            ]
+                                            hoja_sustentos.append_row(fila_sust)
+                                        except Exception as e:
+                                            errores_docs.append(f"Error guardando en Sustentos_Bajas: {e}")
                                 else:
                                     errores_docs.append(f"{doc.name}: {err}")
 
-                    # 2. Guardar en Asistencia
+                    # 2. Guardar en Asistencia (DIA_1..DIA_31)
                     try:
                         with st.spinner("💾 Guardando en Google Sheets..."):
-                            fila = [
+                            fila_asist = [
                                 str(colab.get("RAZON SOCIAL", "")),
                                 str(colab.get("SUPERVISOR A CARGO FINAL", "")),
                                 str(colab.get("COORDINADOR FINAL", "")),
@@ -152,146 +166,187 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                                 str(colab.get("ESTADO", "")),
                                 str(colab.get("FECHA DE CREACION USUARIO", "")),
                                 str(colab.get("FECHA DE CESE", "")),
-                                datetime.now().strftime("%Y-%m"),
-                                datetime.now().strftime("%Y-%m"),
+                                periodo,
+                                periodo,
                             ]
                             fa = f_ini
                             for d in range(1, 32):
                                 if fa <= f_fin:
-                                    fila.append(marca)
+                                    fila_asist.append(marca)
                                     fa += timedelta(days=1)
                                 else:
-                                    fila.append("")
-
-                            hoja_asistencia.append_row(fila)
+                                    fila_asist.append("")
+                            hoja_asistencia.append_row(fila_asist)
 
                         # 3. Confirmación
-                        st.success(f"✅ ¡Registro guardado correctamente!")
+                        st.success("✅ ¡Registro guardado correctamente!")
                         st.info(
-                            f"**Colaborador:** {colab.get('NOMBRES')} ({colab.get('DNI')})\n\n"
-                            f"**Tipo:** {marca}\n\n"
+                            f"**Colaborador:** {colab.get('NOMBRES')} | DNI: {colab.get('DNI')}\n\n"
+                            f"**Razón Social:** {colab.get('RAZON SOCIAL')}\n\n"
+                            f"**Tipo:** {motivo_texto}\n\n"
                             f"**Período:** {f_ini} → {f_fin} ({dias} día{'s' if dias > 1 else ''})\n\n"
                             f"**Documentos subidos:** {len(urls_docs)}"
                         )
 
                         if urls_docs:
-                            st.write("**🔗 Links de documentos:**")
+                            st.write("**🔗 Links de documentos subidos:**")
                             for i, url in enumerate(urls_docs, 1):
-                                st.write(f"  {i}. [{url}]({url})")
+                                st.markdown(f"  {i}. [{url}]({url})")
 
                         if errores_docs:
-                            st.warning("⚠️ Algunos documentos no se pudieron subir:\n" + "\n".join(errores_docs))
+                            st.warning("⚠️ Errores:\n" + "\n".join(errores_docs))
 
-                        # Guardar confirmación y limpiar colaborador
                         st.session_state["asist_guardado"] = {
                             "nombre": colab.get("NOMBRES"),
                             "dni": colab.get("DNI"),
+                            "razon": colab.get("RAZON SOCIAL"),
                             "marca": marca,
+                            "motivo": motivo_texto,
                             "desde": str(f_ini),
                             "hasta": str(f_fin),
                             "dias": dias,
                             "docs": urls_docs,
+                            "fecha_registro": ahora.strftime("%Y-%m-%d %H:%M:%S"),
+                            "usuario": usuario_sesion,
                         }
                         st.session_state["asist_colab"] = None
 
                     except Exception as e:
-                        st.error(f"❌ Error al guardar en Sheets: {str(e)}")
+                        st.error(f"❌ Error al guardar: {str(e)}")
 
-        # Mostrar último guardado confirmado
+        # Banner del último guardado
         guardado = st.session_state.get("asist_guardado")
-        if guardado and not colab:
+        if guardado and not st.session_state.get("asist_colab"):
             st.success(
-                f"✅ Último registro: **{guardado['nombre']}** ({guardado['dni']}) | "
+                f"✅ Último registro: **{guardado['nombre']}** (DNI: {guardado['dni']}) | "
                 f"**{guardado['marca']}** del {guardado['desde']} al {guardado['hasta']} "
-                f"({guardado['dias']} días) | Docs: {len(guardado['docs'])}"
+                f"({guardado['dias']} días) | Docs: {len(guardado['docs'])} | "
+                f"Registrado: {guardado['fecha_registro']}"
             )
 
     # ══════════════════════════════════════════════════════
-    # TAB 2 — ESPEJO / HISTÓRICO
+    # TAB 2 — ESPEJO
     # ══════════════════════════════════════════════════════
     with tab_espejo:
-        st.subheader("📊 Espejo — Registros de Asistencia")
+        st.subheader("📊 Espejo — Sustentos y Registros")
 
-        if st.button("🔄 Actualizar", key="asist_btn_reload"):
-            st.cache_data.clear()
+        if st.button("🔄 Actualizar datos", key="esp_reload"):
+            st.rerun()
 
+        # Mostrar Sustentos_Bajas (con documentos)
+        if hoja_sustentos:
+            df_sust = _cargar_df(hoja_sustentos)
+            if not df_sust.empty:
+                st.write("### Sustentos / Evidencias")
+                cf1, cf2, cf3 = st.columns(3)
+                with cf1:
+                    meses_s = ["TODOS"] + sorted(df_sust.get("PERIODO", pd.Series(dtype=str)).dropna().unique().tolist())
+                    mes_s = st.selectbox("Período:", meses_s, key="esp_mes_s")
+                with cf2:
+                    dni_s = st.text_input("DNI:", key="esp_dni_s")
+                with cf3:
+                    tipo_s = st.selectbox("Tipo:", ["TODOS", "A-BM", "A-VAC"], key="esp_tipo_s")
+
+                df_fs = df_sust.copy()
+                if mes_s != "TODOS" and "PERIODO" in df_fs.columns:
+                    df_fs = df_fs[df_fs["PERIODO"].astype(str) == mes_s]
+                if dni_s.strip() and "DNI" in df_fs.columns:
+                    df_fs = df_fs[df_fs["DNI"].astype(str).str.contains(dni_s.strip(), na=False)]
+                if tipo_s != "TODOS" and "MOTIVO" in df_fs.columns:
+                    df_fs = df_fs[df_fs["MOTIVO"].astype(str).str.contains(tipo_s, na=False)]
+
+                if not df_fs.empty:
+                    cols_vis = ["PERIODO", "FECHA_", "DNI", "NOMBRE", "RAZON SOCIAL", "MOTIVO", "LINK_DOCUMENTO", "FECHA_SUBIDA", "USUARIO_REGISTRO"]
+                    st.dataframe(df_fs[[c for c in cols_vis if c in df_fs.columns]], use_container_width=True, hide_index=True)
+                    st.success(f"✅ {len(df_fs)} registro(s)")
+                else:
+                    st.warning("Sin resultados")
+            else:
+                st.info("Sin sustentos registrados aún")
+
+        # Mostrar Asistencia (días marcados)
+        st.write("### Asistencia — Días registrados")
         df_h = _cargar_df(hoja_asistencia)
-
         if df_h.empty:
-            st.info("ℹ️ Sin registros en la hoja Asistencia aún")
+            st.info("Sin registros en Asistencia")
         else:
-            df_h.columns = [c.strip().upper() for c in df_h.columns]
-
-            # Filtros
-            cf1, cf2, cf3 = st.columns(3)
+            cf1, cf2 = st.columns(2)
             with cf1:
-                meses = ["TODOS"] + sorted(df_h["MES"].dropna().unique().tolist()) if "MES" in df_h.columns else ["TODOS"]
-                mes_sel = st.selectbox("Mes:", meses, key="esp_mes")
+                meses_a = ["TODOS"] + sorted(df_h.get("MES", pd.Series(dtype=str)).dropna().unique().tolist()) if "MES" in df_h.columns else ["TODOS"]
+                mes_a = st.selectbox("Mes:", meses_a, key="esp_mes_a")
             with cf2:
-                dni_esp = st.text_input("DNI:", key="esp_dni")
-            with cf3:
-                tipo_esp = st.selectbox("Tipo:", ["TODOS", "A-BM", "A-VAC"], key="esp_tipo")
+                dni_a = st.text_input("DNI:", key="esp_dni_a")
 
-            df_f = df_h.copy()
-            if mes_sel != "TODOS" and "MES" in df_f.columns:
-                df_f = df_f[df_f["MES"].astype(str) == mes_sel]
-            if dni_esp.strip() and "DNI" in df_f.columns:
-                df_f = df_f[df_f["DNI"].astype(str).str.contains(dni_esp.strip(), na=False)]
+            df_fa = df_h.copy()
+            if mes_a != "TODOS" and "MES" in df_fa.columns:
+                df_fa = df_fa[df_fa["MES"].astype(str) == mes_a]
+            if dni_a.strip() and "DNI" in df_fa.columns:
+                df_fa = df_fa[df_fa["DNI"].astype(str).str.contains(dni_a.strip(), na=False)]
 
-            if not df_f.empty:
-                cols_vis = ["DNI", "NOMBRES", "RAZON SOCIAL", "DEPARTAMENTO", "MES"]
-                st.dataframe(
-                    df_f[[c for c in cols_vis if c in df_f.columns]],
-                    use_container_width=True,
-                    hide_index=True,
-                )
-                st.success(f"✅ Total: {len(df_f)} registro(s)")
+            if not df_fa.empty:
+                cols_vis = ["DNI", "NOMBRES", "RAZON SOCIAL", "MES"]
+                st.dataframe(df_fa[[c for c in cols_vis if c in df_fa.columns]], use_container_width=True, hide_index=True)
 
-                # Detalle por expander
-                st.divider()
-                st.write("**Detalle de registros:**")
-                for _, row in df_f.iterrows():
+                for _, row in df_fa.iterrows():
                     with st.expander(f"📋 {row.get('DNI','—')} · {row.get('NOMBRES','—')} · {row.get('MES','—')}"):
                         d1, d2 = st.columns(2)
                         with d1:
                             st.write(f"**Razón Social:** {row.get('RAZON SOCIAL','—')}")
                             st.write(f"**Supervisor:** {row.get('SUPERVISOR A CARGO FINAL','—')}")
-                            st.write(f"**Departamento:** {row.get('DEPARTAMENTO','—')}")
                         with d2:
                             st.write(f"**Coordinador:** {row.get('COORDINADOR FINAL','—')}")
                             st.write(f"**Estado:** {row.get('ESTADO','—')}")
-                            st.write(f"**Mes:** {row.get('MES','—')}")
-
-                        # Días marcados
-                        dias_marcados = []
-                        for i in range(1, 32):
-                            col_dia = f"DIA_{i}"
-                            val = row.get(col_dia, "")
-                            if val and str(val).strip() not in ("", "0"):
-                                dias_marcados.append(f"Día {i}: {val}")
+                        dias_marcados = [(f"Día {i}", row.get(f"DIA_{i}", "")) for i in range(1, 32) if str(row.get(f"DIA_{i}", "")).strip() not in ("", "0")]
                         if dias_marcados:
-                            st.write("**Días registrados:**")
-                            st.write(" | ".join(dias_marcados))
+                            st.write("**Días marcados:** " + " | ".join([f"{d[0]}: {d[1]}" for d in dias_marcados]))
             else:
-                st.warning("⚠️ Sin resultados para esos filtros")
+                st.warning("Sin resultados")
 
     # ══════════════════════════════════════════════════════
     # TAB 3 — DOCUMENTOS
     # ══════════════════════════════════════════════════════
     with tab_docs:
-        st.subheader("📎 Documentos y Evidencias")
-        st.info(
-            "Los documentos se adjuntan en la pestaña **Registrar** al momento de guardar un descanso. "
-            "Los archivos se suben automáticamente y se genera un link permanente."
-        )
+        st.subheader("📎 Evidencias y Documentos")
 
-        guardado = st.session_state.get("asist_guardado")
-        if guardado and guardado.get("docs"):
-            st.success(f"✅ Documentos del último registro ({guardado['nombre']}):")
-            for i, url in enumerate(guardado["docs"], 1):
-                st.write(f"**Documento {i}:** [{url}]({url})")
+        if hoja_sustentos:
+            df_d = _cargar_df(hoja_sustentos)
+            if df_d.empty:
+                st.info("Sin documentos registrados aún")
+            else:
+                cf1, cf2 = st.columns(2)
+                with cf1:
+                    dni_d = st.text_input("Buscar por DNI:", key="doc_dni")
+                with cf2:
+                    per_d = st.text_input("Buscar por Período (ej: 2026-06):", key="doc_per")
+
+                df_fd = df_d.copy()
+                if dni_d.strip() and "DNI" in df_fd.columns:
+                    df_fd = df_fd[df_fd["DNI"].astype(str).str.contains(dni_d.strip(), na=False)]
+                if per_d.strip() and "PERIODO" in df_fd.columns:
+                    df_fd = df_fd[df_fd["PERIODO"].astype(str).str.contains(per_d.strip(), na=False)]
+
+                if not df_fd.empty:
+                    st.success(f"✅ {len(df_fd)} documento(s) encontrado(s)")
+                    for _, row in df_fd.iterrows():
+                        with st.expander(f"📄 DNI: {row.get('DNI','—')} | {row.get('NOMBRE','—')} | {row.get('PERIODO','—')} | {row.get('FECHA_SUBIDA','—')}"):
+                            d1, d2 = st.columns(2)
+                            with d1:
+                                st.write(f"**DNI:** {row.get('DNI','—')}")
+                                st.write(f"**Nombre:** {row.get('NOMBRE','—')}")
+                                st.write(f"**Razón Social:** {row.get('RAZON SOCIAL','—')}")
+                                st.write(f"**Período:** {row.get('PERIODO','—')}")
+                            with d2:
+                                st.write(f"**Fecha registro:** {row.get('FECHA_','—')}")
+                                st.write(f"**Motivo:** {row.get('MOTIVO','—')}")
+                                st.write(f"**Fecha subida:** {row.get('FECHA_SUBIDA','—')}")
+                                st.write(f"**Usuario:** {row.get('USUARIO_REGISTRO','—')}")
+                            link = row.get("LINK_DOCUMENTO", "")
+                            if link:
+                                st.markdown(f"**🔗 Documento:** [{link}]({link})")
+                else:
+                    st.warning("Sin documentos para esa búsqueda")
         else:
-            st.write("No hay documentos en la sesión actual. Registra un descanso con archivos adjuntos para verlos aquí.")
+            st.warning("Hoja Sustentos_Bajas no conectada")
 
 
 def sincronizar_mes(hoja_asistencia, hoja_colaboradores):
