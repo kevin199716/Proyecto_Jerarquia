@@ -1,10 +1,9 @@
 """
-asistencia.py v4.0
-- Guarda en hoja Asistencia (DIA_1..DIA_31)
-- Guarda documentos en hoja Sustentos_Bajas
-- Tab Espejo: vista de Sustentos_Bajas
-- Tab Documentos: links con metadata completa
+asistencia.py v5.0
+- Espejo: matriz profesional de días DM/VAC por colaborador
+- Documentos: tarjetas profesionales con todos los datos
 - Sin congelamiento (session_state)
+- Guarda en Asistencia (DIA_1..DIA_31) y Sustentos_Bajas
 """
 import pandas as pd
 import streamlit as st
@@ -37,20 +36,148 @@ def _subir_doc(archivo):
         return None, str(e)
 
 
+def _render_matriz_espejo(df_asist):
+    """Renderiza la matriz de días DM/VAC en HTML con colores."""
+    cols_base = ["DNI", "NOMBRES", "RAZON SOCIAL", "MES"]
+    dias_cols = [f"DIA_{i}" for i in range(1, 32)]
+
+    # Filtrar columnas disponibles
+    cols_disp = [c for c in dias_cols if c in df_asist.columns]
+    cols_show = [c for c in cols_base if c in df_asist.columns] + cols_disp
+
+    if not cols_disp:
+        st.warning("No se encontraron columnas DIA_1..DIA_31")
+        return
+
+    df_m = df_asist[cols_show].copy()
+
+    # Construir tabla HTML
+    num_dias = len(cols_disp)
+    headers_base = "".join(f"<th class='col-base'>{c.replace('RAZON SOCIAL','EMPRESA')}</th>" for c in [c for c in cols_base if c in df_asist.columns])
+    headers_dias = "".join(f"<th class='col-dia'>{i}</th>" for i in range(1, num_dias + 1))
+
+    rows_html = ""
+    for _, row in df_m.iterrows():
+        cells_base = "".join(f"<td class='cell-base'>{row.get(c, '')}</td>" for c in [c for c in cols_base if c in df_asist.columns])
+        cells_dias = ""
+        for col in cols_disp:
+            val = str(row.get(col, "")).strip()
+            if val == "A-BM":
+                cells_dias += f"<td class='cell-bm' title='Descanso Médico'>DM</td>"
+            elif val == "A-VAC":
+                cells_dias += f"<td class='cell-vac' title='Vacaciones'>VAC</td>"
+            else:
+                cells_dias += "<td class='cell-empty'></td>"
+        rows_html += f"<tr>{cells_base}{cells_dias}</tr>"
+
+    html = f"""
+<style>
+.matriz-container {{ overflow-x: auto; margin: 12px 0; }}
+.matriz-table {{ border-collapse: collapse; font-size: 11px; font-family: sans-serif; width: 100%; }}
+.matriz-table th {{ background: #4B0067; color: white; padding: 6px 4px; text-align: center; position: sticky; top: 0; white-space: nowrap; }}
+.matriz-table th.col-base {{ background: #3a0052; min-width: 80px; text-align: left; padding-left: 8px; }}
+.matriz-table th.col-dia {{ min-width: 28px; font-size: 10px; }}
+.matriz-table td {{ padding: 4px; text-align: center; border: 1px solid #e0e0e0; white-space: nowrap; }}
+.cell-base {{ text-align: left; padding-left: 8px; background: #fafafa; color: #222; font-size: 11px; }}
+.cell-bm {{ background: #FDECEA; color: #C0392B; font-weight: 700; font-size: 9px; border-radius: 2px; }}
+.cell-vac {{ background: #E8F4FD; color: #1A5276; font-weight: 700; font-size: 9px; border-radius: 2px; }}
+.cell-empty {{ background: white; }}
+.matriz-table tr:hover td {{ background: #f3e5fa !important; }}
+.leyenda {{ display: flex; gap: 16px; margin: 8px 0 16px; font-size: 12px; }}
+.leyenda-item {{ display: flex; align-items: center; gap: 6px; }}
+.leyenda-box {{ width: 16px; height: 16px; border-radius: 3px; }}
+.bm-box {{ background: #FDECEA; border: 1px solid #C0392B; }}
+.vac-box {{ background: #E8F4FD; border: 1px solid #1A5276; }}
+</style>
+<div class='leyenda'>
+  <div class='leyenda-item'><div class='leyenda-box bm-box'></div><span><b>DM</b> = Descanso Médico (A-BM)</span></div>
+  <div class='leyenda-item'><div class='leyenda-box vac-box'></div><span><b>VAC</b> = Vacaciones (A-VAC)</span></div>
+</div>
+<div class='matriz-container'>
+<table class='matriz-table'>
+<thead><tr>{headers_base}{headers_dias}</tr></thead>
+<tbody>{rows_html}</tbody>
+</table>
+</div>
+"""
+    st.markdown(html, unsafe_allow_html=True)
+    st.caption(f"📊 {len(df_m)} colaborador(es) | Días del mes: 1 al {num_dias}")
+
+
+def _render_tarjetas_docs(df_docs):
+    """Renderiza documentos como tarjetas profesionales en HTML."""
+    cards_html = ""
+    for _, row in df_docs.iterrows():
+        link = str(row.get("LINK_DOCUMENTO", "")).strip()
+        ext = link.split(".")[-1].upper() if "." in link else "DOC"
+        motivo = str(row.get("MOTIVO", "—"))
+        tipo_badge = ""
+        if "A-BM" in motivo:
+            tipo_badge = "<span class='badge badge-bm'>🏥 Descanso Médico</span>"
+        elif "A-VAC" in motivo:
+            tipo_badge = "<span class='badge badge-vac'>✈️ Vacaciones</span>"
+        else:
+            tipo_badge = f"<span class='badge badge-other'>{motivo[:20]}</span>"
+
+        btn_link = f"<a href='{link}' target='_blank' class='btn-doc'>🔗 Ver documento ({ext})</a>" if link else "<span class='no-doc'>Sin documento</span>"
+
+        cards_html += f"""
+<div class='doc-card'>
+  <div class='doc-card-header'>
+    <div>
+      <div class='doc-dni'>DNI: {row.get('DNI','—')}</div>
+      <div class='doc-nombre'>{row.get('NOMBRE','—')}</div>
+    </div>
+    {tipo_badge}
+  </div>
+  <div class='doc-card-body'>
+    <div class='doc-meta'><span class='meta-label'>🏢 Empresa</span><span>{row.get('RAZON SOCIAL','—')}</span></div>
+    <div class='doc-meta'><span class='meta-label'>📅 Período</span><span>{row.get('PERIODO','—')}</span></div>
+    <div class='doc-meta'><span class='meta-label'>📆 Fecha registro</span><span>{row.get('FECHA_','—')}</span></div>
+    <div class='doc-meta'><span class='meta-label'>⬆️ Subido</span><span>{row.get('FECHA_SUBIDA','—')}</span></div>
+    <div class='doc-meta'><span class='meta-label'>👤 Usuario</span><span>{row.get('USUARIO_REGISTRO','—')}</span></div>
+  </div>
+  <div class='doc-card-footer'>{btn_link}</div>
+</div>
+"""
+
+    html = f"""
+<style>
+.docs-grid {{ display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 16px; margin: 16px 0; }}
+.doc-card {{ background: white; border: 1px solid #e5e0ea; border-radius: 12px; overflow: hidden; box-shadow: 0 2px 8px rgba(75,0,103,0.08); }}
+.doc-card-header {{ background: linear-gradient(135deg, #4B0067, #3a0052); padding: 14px 16px; display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; }}
+.doc-dni {{ font-size: 11px; color: rgba(255,255,255,0.7); font-weight: 600; letter-spacing: 0.5px; margin-bottom: 2px; }}
+.doc-nombre {{ font-size: 14px; color: white; font-weight: 700; }}
+.badge {{ padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 700; white-space: nowrap; }}
+.badge-bm {{ background: #FDECEA; color: #C0392B; }}
+.badge-vac {{ background: #E8F4FD; color: #1A5276; }}
+.badge-other {{ background: rgba(255,255,255,0.15); color: white; }}
+.doc-card-body {{ padding: 12px 16px; display: flex; flex-direction: column; gap: 6px; }}
+.doc-meta {{ display: flex; gap: 8px; font-size: 12px; color: #444; align-items: center; }}
+.meta-label {{ color: #888; min-width: 110px; font-weight: 600; }}
+.doc-card-footer {{ padding: 10px 16px; border-top: 1px solid #f0eaf5; }}
+.btn-doc {{ display: inline-block; background: #EC6608; color: white; text-decoration: none; padding: 7px 16px; border-radius: 8px; font-size: 12px; font-weight: 700; }}
+.btn-doc:hover {{ background: #D45605; }}
+.no-doc {{ color: #aaa; font-size: 12px; }}
+</style>
+<div class='docs-grid'>{cards_html}</div>
+"""
+    st.markdown(html, unsafe_allow_html=True)
+
+
+# ─── MÓDULO PRINCIPAL ────────────────────────────────────────────────────────
+
 def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, hoja_sustentos=None, registro_mod=None, razon=None):
 
-    # Init session_state
     for k, v in [("asist_colab", None), ("asist_guardado", None)]:
         if k not in st.session_state:
             st.session_state[k] = v
 
     st.write("# Gestión de Descansos Médicos y Vacaciones")
 
-    tab_reg, tab_espejo, tab_docs = st.tabs(["📝 Registrar", "📊 Espejo", "📎 Documentos"])
+    tab_reg, tab_espejo, tab_docs = st.tabs(["📝 Registrar", "📊 Espejo de Asistencia", "📎 Evidencias"])
 
-    # ══════════════════════════════════════════════════════
-    # TAB 1 — REGISTRAR
-    # ══════════════════════════════════════════════════════
+    # ══════════════════════════ TAB REGISTRAR ══════════════════════════
     with tab_reg:
         df_colab = _cargar_df(hoja_colaboradores)
         if df_colab.empty:
@@ -70,7 +197,6 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, hoja_sustentos=None,
                 res = res[res.get("DNI", pd.Series(dtype=str)).astype(str).str.contains(dni_in.strip(), na=False)]
             if nom_in.strip():
                 res = res[res.get("NOMBRES", pd.Series(dtype=str)).astype(str).str.contains(nom_in.strip(), case=False, na=False)]
-
             if res.empty:
                 st.session_state["asist_colab"] = None
                 st.warning("⚠️ No encontrado")
@@ -84,7 +210,6 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, hoja_sustentos=None,
         if colab:
             st.divider()
             st.subheader("2️⃣ Registrar descanso")
-
             ca, cb, cc = st.columns(3)
             with ca:
                 st.text_input("DNI", value=str(colab.get("DNI", "")), disabled=True, key="asist_d_dni")
@@ -93,23 +218,15 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, hoja_sustentos=None,
             with cc:
                 st.text_input("Razón Social", value=str(colab.get("RAZON SOCIAL", "")), disabled=True, key="asist_d_rs")
 
-            tipo = st.radio(
-                "Tipo de ausencia:",
-                ["🏥 Descanso Médico (A-BM)", "✈️ Vacaciones (A-VAC)"],
-                key="asist_tipo",
-            )
+            tipo = st.radio("Tipo:", ["🏥 Descanso Médico (A-BM)", "✈️ Vacaciones (A-VAC)"], key="asist_tipo")
             cf1, cf2 = st.columns(2)
             with cf1:
-                f_ini = st.date_input("Fecha inicio:", key="asist_f_ini")
+                f_ini = st.date_input("Desde:", key="asist_f_ini")
             with cf2:
-                f_fin = st.date_input("Fecha fin:", key="asist_f_fin")
+                f_fin = st.date_input("Hasta:", key="asist_f_fin")
 
             st.subheader("3️⃣ Adjuntar documentos (opcional)")
-            docs = st.file_uploader(
-                "Certificados, autorizaciones, fotos:",
-                accept_multiple_files=True,
-                key="asist_docs",
-            )
+            docs = st.file_uploader("Certificados, autorizaciones, fotos:", accept_multiple_files=True, key="asist_docs")
 
             if st.button("💾 GUARDAR DESCANSO", type="primary", use_container_width=True, key="asist_btn_guardar"):
                 if f_fin < f_ini:
@@ -122,231 +239,137 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, hoja_sustentos=None,
                     periodo = ahora.strftime("%Y-%m")
                     usuario_sesion = st.session_state.get("usuario", "admin")
 
-                    # 1. Subir documentos y guardar en Sustentos_Bajas
-                    urls_docs = []
-                    errores_docs = []
+                    urls_docs, errores_docs = [], []
                     if docs:
                         with st.spinner("📤 Subiendo documentos..."):
                             for doc in docs:
                                 url, err = _subir_doc(doc)
                                 if url:
                                     urls_docs.append(url)
-                                    # Guardar en Sustentos_Bajas
                                     if hoja_sustentos:
                                         try:
-                                            fila_sust = [
-                                                periodo,
-                                                str(f_ini),
-                                                str(colab.get("DNI", "")),
-                                                str(colab.get("NOMBRES", "")),
-                                                str(colab.get("RAZON SOCIAL", "")),
-                                                motivo_texto,
-                                                url,
-                                                ahora.strftime("%Y-%m-%d %H:%M:%S"),
-                                                usuario_sesion,
-                                            ]
-                                            hoja_sustentos.append_row(fila_sust)
+                                            hoja_sustentos.append_row([
+                                                periodo, str(f_ini),
+                                                str(colab.get("DNI", "")), str(colab.get("NOMBRES", "")),
+                                                str(colab.get("RAZON SOCIAL", "")), motivo_texto,
+                                                url, ahora.strftime("%Y-%m-%d %H:%M:%S"), usuario_sesion,
+                                            ])
                                         except Exception as e:
-                                            errores_docs.append(f"Error guardando en Sustentos_Bajas: {e}")
+                                            errores_docs.append(f"Error Sustentos_Bajas: {e}")
                                 else:
                                     errores_docs.append(f"{doc.name}: {err}")
 
-                    # 2. Guardar en Asistencia (DIA_1..DIA_31)
                     try:
-                        with st.spinner("💾 Guardando en Google Sheets..."):
-                            fila_asist = [
-                                str(colab.get("RAZON SOCIAL", "")),
-                                str(colab.get("SUPERVISOR A CARGO FINAL", "")),
-                                str(colab.get("COORDINADOR FINAL", "")),
-                                str(colab.get("DEPARTAMENTO", "")),
-                                str(colab.get("PROVINCIA", "")),
-                                str(colab.get("DISTRITO", "")),
-                                str(colab.get("DNI", "")),
-                                str(colab.get("NOMBRES", "")),
-                                str(colab.get("ESTADO", "")),
-                                str(colab.get("FECHA DE CREACION USUARIO", "")),
-                                str(colab.get("FECHA DE CESE", "")),
-                                periodo,
-                                periodo,
+                        with st.spinner("💾 Guardando en Asistencia..."):
+                            fila = [
+                                str(colab.get("RAZON SOCIAL", "")), str(colab.get("SUPERVISOR A CARGO FINAL", "")),
+                                str(colab.get("COORDINADOR FINAL", "")), str(colab.get("DEPARTAMENTO", "")),
+                                str(colab.get("PROVINCIA", "")), str(colab.get("DISTRITO", "")),
+                                str(colab.get("DNI", "")), str(colab.get("NOMBRES", "")),
+                                str(colab.get("ESTADO", "")), str(colab.get("FECHA DE CREACION USUARIO", "")),
+                                str(colab.get("FECHA DE CESE", "")), periodo, periodo,
                             ]
                             fa = f_ini
                             for d in range(1, 32):
-                                if fa <= f_fin:
-                                    fila_asist.append(marca)
-                                    fa += timedelta(days=1)
-                                else:
-                                    fila_asist.append("")
-                            hoja_asistencia.append_row(fila_asist)
+                                fila.append(marca if fa <= f_fin else "")
+                                fa += timedelta(days=1)
+                            hoja_asistencia.append_row(fila)
 
-                        # 3. Confirmación
                         st.success("✅ ¡Registro guardado correctamente!")
                         st.info(
-                            f"**Colaborador:** {colab.get('NOMBRES')} | DNI: {colab.get('DNI')}\n\n"
-                            f"**Razón Social:** {colab.get('RAZON SOCIAL')}\n\n"
-                            f"**Tipo:** {motivo_texto}\n\n"
-                            f"**Período:** {f_ini} → {f_fin} ({dias} día{'s' if dias > 1 else ''})\n\n"
-                            f"**Documentos subidos:** {len(urls_docs)}"
+                            f"**{colab.get('NOMBRES')}** (DNI: {colab.get('DNI')}) — "
+                            f"**{motivo_texto}** | {f_ini} → {f_fin} ({dias} días) | "
+                            f"Docs: {len(urls_docs)} | Registrado: {ahora.strftime('%Y-%m-%d %H:%M')}"
                         )
-
                         if urls_docs:
-                            st.write("**🔗 Links de documentos subidos:**")
-                            for i, url in enumerate(urls_docs, 1):
-                                st.markdown(f"  {i}. [{url}]({url})")
-
+                            st.write("**🔗 Documentos subidos:**")
+                            for i, u in enumerate(urls_docs, 1):
+                                st.markdown(f"{i}. [{u}]({u})")
                         if errores_docs:
-                            st.warning("⚠️ Errores:\n" + "\n".join(errores_docs))
+                            st.warning("⚠️ " + " | ".join(errores_docs))
 
                         st.session_state["asist_guardado"] = {
-                            "nombre": colab.get("NOMBRES"),
-                            "dni": colab.get("DNI"),
-                            "razon": colab.get("RAZON SOCIAL"),
-                            "marca": marca,
-                            "motivo": motivo_texto,
-                            "desde": str(f_ini),
-                            "hasta": str(f_fin),
-                            "dias": dias,
-                            "docs": urls_docs,
-                            "fecha_registro": ahora.strftime("%Y-%m-%d %H:%M:%S"),
-                            "usuario": usuario_sesion,
+                            "nombre": colab.get("NOMBRES"), "dni": colab.get("DNI"),
+                            "marca": marca, "desde": str(f_ini), "hasta": str(f_fin),
+                            "dias": dias, "docs": urls_docs, "ts": ahora.strftime("%Y-%m-%d %H:%M"),
                         }
                         st.session_state["asist_colab"] = None
-
                     except Exception as e:
                         st.error(f"❌ Error al guardar: {str(e)}")
 
-        # Banner del último guardado
-        guardado = st.session_state.get("asist_guardado")
-        if guardado and not st.session_state.get("asist_colab"):
-            st.success(
-                f"✅ Último registro: **{guardado['nombre']}** (DNI: {guardado['dni']}) | "
-                f"**{guardado['marca']}** del {guardado['desde']} al {guardado['hasta']} "
-                f"({guardado['dias']} días) | Docs: {len(guardado['docs'])} | "
-                f"Registrado: {guardado['fecha_registro']}"
-            )
+        g = st.session_state.get("asist_guardado")
+        if g and not st.session_state.get("asist_colab"):
+            st.success(f"✅ Último: **{g['nombre']}** (DNI: {g['dni']}) | {g['marca']} | {g['desde']} → {g['hasta']} ({g['dias']} días) | {g['ts']}")
 
-    # ══════════════════════════════════════════════════════
-    # TAB 2 — ESPEJO
-    # ══════════════════════════════════════════════════════
+    # ══════════════════════════ TAB ESPEJO ══════════════════════════
     with tab_espejo:
-        st.subheader("📊 Espejo — Sustentos y Registros")
+        st.subheader("📊 Espejo de Asistencia — Matriz de días")
+        st.caption("Vista completa de días marcados por colaborador. 🔴 DM = Descanso Médico | 🔵 VAC = Vacaciones")
 
-        if st.button("🔄 Actualizar datos", key="esp_reload"):
-            st.rerun()
-
-        # Mostrar Sustentos_Bajas (con documentos)
-        if hoja_sustentos:
-            df_sust = _cargar_df(hoja_sustentos)
-            if not df_sust.empty:
-                st.write("### Sustentos / Evidencias")
-                cf1, cf2, cf3 = st.columns(3)
-                with cf1:
-                    meses_s = ["TODOS"] + sorted(df_sust.get("PERIODO", pd.Series(dtype=str)).dropna().unique().tolist())
-                    mes_s = st.selectbox("Período:", meses_s, key="esp_mes_s")
-                with cf2:
-                    dni_s = st.text_input("DNI:", key="esp_dni_s")
-                with cf3:
-                    tipo_s = st.selectbox("Tipo:", ["TODOS", "A-BM", "A-VAC"], key="esp_tipo_s")
-
-                df_fs = df_sust.copy()
-                if mes_s != "TODOS" and "PERIODO" in df_fs.columns:
-                    df_fs = df_fs[df_fs["PERIODO"].astype(str) == mes_s]
-                if dni_s.strip() and "DNI" in df_fs.columns:
-                    df_fs = df_fs[df_fs["DNI"].astype(str).str.contains(dni_s.strip(), na=False)]
-                if tipo_s != "TODOS" and "MOTIVO" in df_fs.columns:
-                    df_fs = df_fs[df_fs["MOTIVO"].astype(str).str.contains(tipo_s, na=False)]
-
-                if not df_fs.empty:
-                    cols_vis = ["PERIODO", "FECHA_", "DNI", "NOMBRE", "RAZON SOCIAL", "MOTIVO", "LINK_DOCUMENTO", "FECHA_SUBIDA", "USUARIO_REGISTRO"]
-                    st.dataframe(df_fs[[c for c in cols_vis if c in df_fs.columns]], use_container_width=True, hide_index=True)
-                    st.success(f"✅ {len(df_fs)} registro(s)")
-                else:
-                    st.warning("Sin resultados")
-            else:
-                st.info("Sin sustentos registrados aún")
-
-        # Mostrar Asistencia (días marcados)
-        st.write("### Asistencia — Días registrados")
         df_h = _cargar_df(hoja_asistencia)
         if df_h.empty:
-            st.info("Sin registros en Asistencia")
+            st.info("ℹ️ Sin registros en la hoja Asistencia")
         else:
-            cf1, cf2 = st.columns(2)
+            cf1, cf2, cf3 = st.columns(3)
             with cf1:
-                meses_a = ["TODOS"] + sorted(df_h.get("MES", pd.Series(dtype=str)).dropna().unique().tolist()) if "MES" in df_h.columns else ["TODOS"]
-                mes_a = st.selectbox("Mes:", meses_a, key="esp_mes_a")
+                meses = ["TODOS"] + sorted(df_h["MES"].dropna().unique().tolist()) if "MES" in df_h.columns else ["TODOS"]
+                mes_sel = st.selectbox("Mes:", meses, key="esp_mes")
             with cf2:
-                dni_a = st.text_input("DNI:", key="esp_dni_a")
+                dni_esp = st.text_input("DNI:", key="esp_dni")
+            with cf3:
+                razon_esp = st.text_input("Empresa:", key="esp_razon")
 
-            df_fa = df_h.copy()
-            if mes_a != "TODOS" and "MES" in df_fa.columns:
-                df_fa = df_fa[df_fa["MES"].astype(str) == mes_a]
-            if dni_a.strip() and "DNI" in df_fa.columns:
-                df_fa = df_fa[df_fa["DNI"].astype(str).str.contains(dni_a.strip(), na=False)]
+            df_f = df_h.copy()
+            if mes_sel != "TODOS" and "MES" in df_f.columns:
+                df_f = df_f[df_f["MES"].astype(str) == mes_sel]
+            if dni_esp.strip() and "DNI" in df_f.columns:
+                df_f = df_f[df_f["DNI"].astype(str).str.contains(dni_esp.strip(), na=False)]
+            if razon_esp.strip() and "RAZON SOCIAL" in df_f.columns:
+                df_f = df_f[df_f["RAZON SOCIAL"].astype(str).str.contains(razon_esp.strip(), case=False, na=False)]
 
-            if not df_fa.empty:
-                cols_vis = ["DNI", "NOMBRES", "RAZON SOCIAL", "MES"]
-                st.dataframe(df_fa[[c for c in cols_vis if c in df_fa.columns]], use_container_width=True, hide_index=True)
-
-                for _, row in df_fa.iterrows():
-                    with st.expander(f"📋 {row.get('DNI','—')} · {row.get('NOMBRES','—')} · {row.get('MES','—')}"):
-                        d1, d2 = st.columns(2)
-                        with d1:
-                            st.write(f"**Razón Social:** {row.get('RAZON SOCIAL','—')}")
-                            st.write(f"**Supervisor:** {row.get('SUPERVISOR A CARGO FINAL','—')}")
-                        with d2:
-                            st.write(f"**Coordinador:** {row.get('COORDINADOR FINAL','—')}")
-                            st.write(f"**Estado:** {row.get('ESTADO','—')}")
-                        dias_marcados = [(f"Día {i}", row.get(f"DIA_{i}", "")) for i in range(1, 32) if str(row.get(f"DIA_{i}", "")).strip() not in ("", "0")]
-                        if dias_marcados:
-                            st.write("**Días marcados:** " + " | ".join([f"{d[0]}: {d[1]}" for d in dias_marcados]))
-            else:
+            if df_f.empty:
                 st.warning("Sin resultados")
+            else:
+                _render_matriz_espejo(df_f)
 
-    # ══════════════════════════════════════════════════════
-    # TAB 3 — DOCUMENTOS
-    # ══════════════════════════════════════════════════════
+        if st.button("🔄 Actualizar", key="esp_reload"):
+            st.rerun()
+
+    # ══════════════════════════ TAB DOCUMENTOS ══════════════════════════
     with tab_docs:
         st.subheader("📎 Evidencias y Documentos")
 
-        if hoja_sustentos:
+        if not hoja_sustentos:
+            st.warning("Hoja Sustentos_Bajas no conectada")
+        else:
             df_d = _cargar_df(hoja_sustentos)
             if df_d.empty:
                 st.info("Sin documentos registrados aún")
             else:
-                cf1, cf2 = st.columns(2)
+                cf1, cf2, cf3 = st.columns(3)
                 with cf1:
                     dni_d = st.text_input("Buscar por DNI:", key="doc_dni")
                 with cf2:
-                    per_d = st.text_input("Buscar por Período (ej: 2026-06):", key="doc_per")
+                    per_d = st.text_input("Período (ej: 2026-06):", key="doc_per")
+                with cf3:
+                    tipo_d = st.selectbox("Tipo:", ["TODOS", "A-BM", "A-VAC"], key="doc_tipo")
 
                 df_fd = df_d.copy()
                 if dni_d.strip() and "DNI" in df_fd.columns:
                     df_fd = df_fd[df_fd["DNI"].astype(str).str.contains(dni_d.strip(), na=False)]
                 if per_d.strip() and "PERIODO" in df_fd.columns:
                     df_fd = df_fd[df_fd["PERIODO"].astype(str).str.contains(per_d.strip(), na=False)]
+                if tipo_d != "TODOS" and "MOTIVO" in df_fd.columns:
+                    df_fd = df_fd[df_fd["MOTIVO"].astype(str).str.contains(tipo_d, na=False)]
 
-                if not df_fd.empty:
-                    st.success(f"✅ {len(df_fd)} documento(s) encontrado(s)")
-                    for _, row in df_fd.iterrows():
-                        with st.expander(f"📄 DNI: {row.get('DNI','—')} | {row.get('NOMBRE','—')} | {row.get('PERIODO','—')} | {row.get('FECHA_SUBIDA','—')}"):
-                            d1, d2 = st.columns(2)
-                            with d1:
-                                st.write(f"**DNI:** {row.get('DNI','—')}")
-                                st.write(f"**Nombre:** {row.get('NOMBRE','—')}")
-                                st.write(f"**Razón Social:** {row.get('RAZON SOCIAL','—')}")
-                                st.write(f"**Período:** {row.get('PERIODO','—')}")
-                            with d2:
-                                st.write(f"**Fecha registro:** {row.get('FECHA_','—')}")
-                                st.write(f"**Motivo:** {row.get('MOTIVO','—')}")
-                                st.write(f"**Fecha subida:** {row.get('FECHA_SUBIDA','—')}")
-                                st.write(f"**Usuario:** {row.get('USUARIO_REGISTRO','—')}")
-                            link = row.get("LINK_DOCUMENTO", "")
-                            if link:
-                                st.markdown(f"**🔗 Documento:** [{link}]({link})")
+                if df_fd.empty:
+                    st.warning("Sin resultados")
                 else:
-                    st.warning("Sin documentos para esa búsqueda")
-        else:
-            st.warning("Hoja Sustentos_Bajas no conectada")
+                    st.success(f"✅ {len(df_fd)} documento(s) encontrado(s)")
+                    _render_tarjetas_docs(df_fd)
+
+        if st.button("🔄 Actualizar", key="doc_reload"):
+            st.rerun()
 
 
 def sincronizar_mes(hoja_asistencia, hoja_colaboradores):
