@@ -452,29 +452,17 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
         "Permite registrar descansos futuros (ej: licencia maternidad)."
     )
 
-    # Cargar caché fresco
-    _leer_asistencia_cached.clear()
-    cargar_cache_desde_drive(hoja_asistencia, forzar=True)
+    # 🔴 CAMBIO CRÍTICO: Leer DIRECTAMENTE de colaboradores
     try:
         leer_colaboradores_drive.clear()
-    except Exception:
+    except:
         pass
-
-    df_total = st.session_state[KEY_DF_TOTAL].copy()
-    headers = st.session_state.get(KEY_HEADERS, COLUMNAS_ASISTENCIA)
-
-    for col in COLUMNAS_ASISTENCIA:
-        if col not in df_total.columns:
-            df_total[col] = ""
-
-    df_mes = df_total[df_total["PERIODO"].astype(str).eq(periodo)].copy()
-
-    razon_usuario = limpiar_texto(razon if razon is not None else st.session_state.get("razon", ""))
-    if razon_usuario and razon_usuario.upper() != "ALL" and "RAZON SOCIAL" in df_mes.columns:
-        df_mes = df_mes[df_mes["RAZON SOCIAL"].astype(str).str.strip().str.upper().eq(razon_usuario.upper())].copy()
-
+    
+    df_mes = leer_colaboradores_drive(hoja_colaboradores)
+    df_mes = normalizar_columnas(df_mes)
+    
     if df_mes.empty:
-        st.warning("⚠️ No hay registros del periodo actual.")
+        st.warning("⚠️ No hay registros en colaboradores.")
         return
 
     # =====================================================
@@ -562,8 +550,8 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, registro_mod=None, r
                 
                 es_valido, msg_error = validar_rango_disponible(
                     promo_sel.get("ESTADO", ""),
-                    promo_sel.get("FECHA_ALTA", ""),
-                    promo_sel.get("FECHA_CESE", ""),
+                    promo_sel.get("FECHA DE CREACION USUARIO", ""),
+                    promo_sel.get("FECHA DE CESE", ""),
                     str(fecha_desde),
                     str(fecha_hasta)
                 )
