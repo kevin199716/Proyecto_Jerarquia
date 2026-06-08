@@ -1,0 +1,126 @@
+════════════════════════════════════════════════════════════════════════
+                    PROYECTO OPTIMIZADO - LISTO PARA GITHUB
+════════════════════════════════════════════════════════════════════════
+
+✅ ARCHIVOS INCLUIDOS (10 archivos finales):
+
+1. app_maestra_vendedores.py   ← MAIN (OPTIMIZADO)
+2. asistencia.py               ← PRESENCIALIDAD (COMPLETO - 3 TABS)
+3. auth.py                     ← AUTENTICACIÓN
+4. formulario.py               ← MÓDULO ALTA
+5. registro_mod.py             ← MÓDULO BAJAS/EDICIÓN
+6. sheets.py                   ← CONEXIÓN GOOGLE SHEETS
+7. ui_inicio.py                ← INTERFAZ BIENVENIDA
+8. wow_theme.py                ← TEMA VISUAL
+9. usuarios.json               ← USUARIOS/ROLES
+10. requirements.txt            ← DEPENDENCIAS
+
+ARCHIVOS EXTRA:
+- .gitignore                   ← Ignorar archivos sensibles
+- README.md                    ← Documentación completa
+
+════════════════════════════════════════════════════════════════════════
+                              CAMBIOS REALIZADOS
+════════════════════════════════════════════════════════════════════════
+
+✅ LIMPIEZA:
+   - Eliminados: db.py, utils.py, validaciones.py, llenar_asistencia.py
+   - Eliminadas versiones antiguas de asistencia.py
+   - Eliminados archivos de ejemplo
+
+✅ OPTIMIZACIÓN:
+   - app_maestra_vendedores.py simplificado y comentado
+   - asistencia.py completo con 3 TABS (Registrar, Histórico, Documentos)
+   - Código consolidado y sin duplicados
+
+✅ FUNCIONALIDADES (3 MÓDULOS):
+   1. ALTA - Registro de vendedores
+   2. BAJAS - Baja de vendedores
+   3. PRESENCIALIDAD DEALER - Gestión de descansos (Médicos + Vacaciones)
+
+════════════════════════════════════════════════════════════════════════
+                           PRÓXIMOS PASOS
+════════════════════════════════════════════════════════════════════════
+
+OPCIÓN A: SUBIR A GITHUB DESDE TU MÁQUINA
+
+  1. Descargar todos los archivos de aquí
+  
+  2. En tu máquina:
+     cd tu_carpeta_proyecto
+     
+  3. Reemplazar archivos con los nuevos:
+     - Copiar app_maestra_vendedores.py
+     - Copiar asistencia.py
+     - Copiar auth.py
+     - Copiar formulario.py
+     - Copiar registro_mod.py
+     - Copiar sheets.py
+     - Copiar ui_inicio.py
+     - Copiar wow_theme.py
+     - Copiar usuarios.json
+     - Copiar requirements.txt
+     - Copiar .gitignore
+     - Copiar README.md
+     
+  4. En PowerShell:
+     git add .
+     git commit -m "OPTIMIZACIÓN FINAL: Limpieza, asistencia completa, 3 módulos funcionales"
+     git push origin main
+     
+  5. En VPS:
+     cd /opt/Proyecto_Jerarquia
+     git pull origin main
+     systemctl restart proyecto_jerarquia
+     
+  6. Probar:
+     http://2.25.171.171:8501
+
+════════════════════════════════════════════════════════════════════════
+                         ESTRUCTURA FINAL
+════════════════════════════════════════════════════════════════════════
+
+MÓDULO ALTA:
+   - mostrar_formulario() en formulario.py
+   - Agrega vendedores a la hoja "colaboradores"
+   - Incluye DISTRITO, SUPERVISOR, COORDINADOR
+
+MÓDULO BAJAS:
+   - dar_de_baja() en registro_mod.py
+   - Marca vendedores como "INACTIVO"
+   - Solicita motivo
+
+MÓDULO PRESENCIALIDAD DEALER:
+   - mostrar_asistencia() en asistencia.py
+   - TAB 1: Registrar descansos (Médicos + Vacaciones)
+   - TAB 2: Histórico con filtros
+   - TAB 3: Documentos (info)
+
+════════════════════════════════════════════════════════════════════════
+                          IMPORTANTE
+════════════════════════════════════════════════════════════════════════
+
+⚠️ CREDENCIALES:
+   - credenciales.json NO se incluye (sensible)
+   - Debe estar en /opt/Proyecto_Jerarquia/ en el VPS
+   - .gitignore previene subirlo accidentalmente
+
+⚠️ USUARIOS:
+   - usuarios.json si está (modificar con tus usuarios)
+   - Roles: backoffice, dealer, presencialidad, editor
+
+⚠️ LOGO:
+   - Ahora dice solo "WOW" (sin EMPRESAS)
+   - Cambio en auth.py línea 52
+
+════════════════════════════════════════════════════════════════════════
+                     ¿PREGUNTAS?
+════════════════════════════════════════════════════════════════════════
+
+Si algo no funciona:
+1. Verificar que credenciales.json esté en /opt/Proyecto_Jerarquia/
+2. Verificar usuarios.json tenga estructura correcta
+3. Ver logs: journalctl -u proyecto_jerarquia -f
+4. Reintentar: systemctl restart proyecto_jerarquia
+
+════════════════════════════════════════════════════════════════════════

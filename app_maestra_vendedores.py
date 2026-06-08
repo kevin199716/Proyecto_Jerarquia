@@ -1,0 +1,163 @@
+"""
+WAP VENTAS DOOR TO DOOR - Portal de Gestión de Vendedores
+v2.5.0 - Aplicación principal
+"""
+import os
+import sys
+import streamlit as st
+
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+if BASE_DIR not in sys.path:
+    sys.path.insert(0, BASE_DIR)
+
+# Imports
+import registro_mod as registro
+from auth import cargar_usuarios, login
+from ui_inicio import mostrar_bienvenida
+from sheets import conectar_google_sheets
+from formulario import mostrar_formulario
+from asistencia import mostrar_asistencia
+from wow_theme import (
+    inject_global_theme,
+    render_app_header,
+    render_sidebar_user,
+    render_sidebar_help,
+    wow_section,
+)
+
+# CONFIG STREAMLIT
+st.set_page_config(
+    page_title="WOW",
+    page_icon="🟣",
+    layout="wide",
+    initial_sidebar_state="expanded",
+)
+
+inject_global_theme()
+
+# CACHE PARA CONEXIONES
+@st.cache_resource(show_spinner=False)
+def get_worksheet(nombre_hoja, nombre_worksheet):
+    return conectar_google_sheets(nombre_hoja, nombre_worksheet)
+
+# LOGIN
+USUARIOS = cargar_usuarios()
+if "autenticado" not in st.session_state:
+    st.session_state["autenticado"] = False
+
+if not st.session_state["autenticado"]:
+    mostrar_bienvenida()
+    login(USUARIOS)
+    st.stop()
+
+# VARIABLES SESSION
+rol = st.session_state.get("rol", "")
+razon = st.session_state.get("razon", "")
+usuario = st.session_state.get("usuario", st.session_state.get("username", ""))
+
+# CONEXIONES GOOGLE SHEETS
+hoja_colaboradores = get_worksheet("maestra_vendedores", "colaboradores")
+hoja_ubicaciones = get_worksheet("maestra_vendedores", "ubicaciones")
+hoja_asistencia = get_worksheet("maestra_vendedores", "Asistencia")
+
+# SIDEBAR
+render_sidebar_user(usuario=usuario, rol=rol, razon=razon)
+
+# MENU DINÁMICO POR ROL
+if rol == "backoffice":
+    opciones_menu = ["Alta", "Bajas", "Presencialidad Dealer"]
+elif rol == "dealer":
+    opciones_menu = ["Alta", "Bajas", "Presencialidad Dealer"]
+elif rol in ("presencialidad", "presencialidad_dealer"):
+    opciones_menu = ["Presencialidad Dealer"]
+elif rol == "editor":
+    opciones_menu = ["Edición", "Presencialidad Dealer"]
+else:
+    opciones_menu = []
+
+if opciones_menu:
+    pagina = st.sidebar.radio(
+        "Módulo",
+        opciones_menu,
+        label_visibility="collapsed",
+        key=f"nav_{rol}",
+    )
+else:
+    pagina = ""
+
+# CERRAR SESIÓN
+st.sidebar.markdown("<div style='height: 14px;'></div>", unsafe_allow_html=True)
+if st.sidebar.button("🚪 Cerrar sesión", key="btn_logout"):
+    for k in ["autenticado", "usuario", "rol", "razon", "user", "pass"]:
+        if k in st.session_state:
+            del st.session_state[k]
+    st.rerun()
+
+render_sidebar_help()
+
+# CABECERA
+render_app_header(usuario=usuario, rol=rol, razon=razon)
+
+# MATRIZ JERARQUÍA
+def mostrar_matriz_jerarquia(titulo="Estado actual de la jerarquía", icono="📋"):
+    st.divider()
+    wow_section(titulo, icono)
+    try:
+        if rol == "editor":
+            return registro.mostrar_tabla(hoja_colaboradores)
+        return registro.mostrar_tabla(hoja_colaboradores, razon)
+    except Exception as e:
+        st.error(f"No se pudo cargar la matriz: {e}")
+        return None
+
+# BACKOFFICE
+if rol == "backoffice":
+    if pagina == "Alta":
+        mostrar_formulario(hoja_colaboradores, hoja_ubicaciones)
+        mostrar_matriz_jerarquia()
+    elif pagina == "Bajas":
+        df = mostrar_matriz_jerarquia()
+        if df is not None:
+            st.divider()
+            registro.dar_de_baja(df, hoja_colaboradores, razon)
+    elif pagina == "Presencialidad Dealer":
+        mostrar_asistencia(hoja_asistencia, hoja_colaboradores)
+        mostrar_matriz_jerarquia()
+
+# DEALER
+elif rol == "dealer":
+    wow_section(f"Socio: {razon}", "📌")
+    if pagina == "Alta":
+        mostrar_formulario(hoja_colaboradores, hoja_ubicaciones)
+        mostrar_matriz_jerarquia()
+    elif pagina == "Bajas":
+        df = mostrar_matriz_jerarquia()
+        if df is not None:
+            st.divider()
+            registro.dar_de_baja(df, hoja_colaboradores, razon)
+    elif pagina == "Presencialidad Dealer":
+        mostrar_asistencia(hoja_asistencia, hoja_colaboradores, razon=razon)
+        mostrar_matriz_jerarquia()
+
+# PRESENCIALIDAD ONLY
+elif rol in ("presencialidad", "presencialidad_dealer"):
+    wow_section(f"Presencialidad Dealer: {razon}", "🗓️")
+    if pagina == "Presencialidad Dealer":
+        mostrar_asistencia(hoja_asistencia, hoja_colaboradores, razon=razon)
+        mostrar_matriz_jerarquia()
+
+# EDITOR
+elif rol == "editor":
+    wow_section("Modo edición", "✏️")
+    if pagina == "Edición":
+        df = mostrar_matriz_jerarquia()
+        if df is not None:
+            st.divider()
+            registro.editar_registro(df, hoja_colaboradores, hoja_ubicaciones)
+    elif pagina == "Presencialidad Dealer":
+        mostrar_asistencia(hoja_asistencia, hoja_colaboradores)
+        mostrar_matriz_jerarquia()
+
+# SIN PERMISOS
+else:
+    st.warning(f"Sin permisos para el rol: {rol}")
