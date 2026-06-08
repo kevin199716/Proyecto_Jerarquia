@@ -607,6 +607,11 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
 
             provincia = st.selectbox("PROVINCIA", [""] + provincias, key=k("provincia"))
 
+            # 🆕 DISTRITO
+            df_prov = df_ubi[serie_columna(df_ubi, "PROVINCIA").eq(str(provincia).strip())]
+            distritos = lista_limpia(df_prov, "DISTRITO") if provincia else []
+            distrito = st.selectbox("DISTRITO", [""] + distritos, key=k("distrito"))
+
             coordinador = st.selectbox("COORDINADOR", [""] + coordinadores, key=k("coordinador"))
             dni_coordinador = buscar_dni_por_nombre(df_ubi, "COORDINADOR FINAL", "DNI COORDINADOR", coordinador)
             st.text_input("DNI COORDINADOR", value=dni_coordinador, disabled=True, key=k("dni_coordinador"))
@@ -677,6 +682,7 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             "REGION": limpiar_texto(region),
             "DEPARTAMENTO": departamento,
             "PROVINCIA": provincia,
+            "DISTRITO": limpiar_texto(distrito),  # 🆕
             "SUPERVISOR A CARGO": limpiar_texto(supervisor),
             "SUPERVISOR": limpiar_texto(supervisor),
             "DNI SUPERVISOR": limpiar_texto(dni_supervisor),
