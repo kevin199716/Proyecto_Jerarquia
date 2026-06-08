@@ -563,7 +563,7 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
     origenes_ingreso = lista_limpia(df_ubi, "ORIGEN_INGRESO")
     fuentes_ingreso = lista_limpia(df_ubi, "FUENTE_INGRESO")
 
-    st.caption("Todos los socios se gestionan como VENTAS INDIRECTAS. Se mantiene la lógica original de cargos Dealer.")
+    st.caption("Dealers → VENTAS INDIRECTAS | WOW TEL → VENTAS DIRECTAS (ATC/CX/Retail/D2D)")
 
     col_izq, col_der = st.columns(2)
 
@@ -585,10 +585,15 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             razon = razon_usuario
             st.text_input("RAZÓN SOCIAL", value=razon, disabled=True, key=k("razon_dealer"))
 
-        # Regla comercial: todos los socios se gestionan como VENTAS INDIRECTAS
+        # Regla comercial:
+        # - Dealers (MULTIPLE FORCE, INTERCONEXION, NOGALES, GRUPO CREED) → VENTAS INDIRECTAS
+        # - WOW TEL → VENTAS DIRECTAS con sus propios canales
         razon_norm = limpiar_texto(razon).upper()
+        ES_WOW_TEL = razon_norm == "WOW TEL"
+        ES_DEALER  = razon_norm and not ES_WOW_TEL
 
-        if razon_norm:
+        if ES_DEALER:
+            # ── DEALERS INDIRECTOS ──────────────────────────────────────
             canal = "VENTAS INDIRECTAS"
             st.text_input("CANAL", value=canal, disabled=True, key=k("canal_indirecto_fijo"))
             subcanal = st.selectbox(
@@ -599,7 +604,29 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             )
             tipo_gestion = "CAMPO"
 
+        elif ES_WOW_TEL:
+            # ── WOW TEL → VENTAS DIRECTAS ──────────────────────────────
+            canal = st.selectbox(
+                "CANAL",
+                ["", "ATC", "CX", "RETAIL", "DOOR TO DOOR D2D", "OUTBOUND"],
+                key=k("canal_wowtel"),
+            )
+            opciones_subcanal_wt = {
+                "ATC":              ["ATC", "INBOUND", "OUTBOUND"],
+                "CX":               ["CX", "ATENCIÓN AL CLIENTE"],
+                "RETAIL":           ["RETAIL", "TIENDA"],
+                "DOOR TO DOOR D2D": ["DOOR TO DOOR D2D", "D2D"],
+                "OUTBOUND":         ["OUTBOUND"],
+            }
+            subcanal = st.selectbox(
+                "SUB CANAL",
+                opciones_subcanal_wt.get(canal, [canal]) if canal else [""],
+                key=k("subcanal_wowtel"),
+            )
+            tipo_gestion = ""
+
         else:
+            # ── BACKOFFICE SIN RAZÓN SELECCIONADA ──────────────────────
             canal = st.selectbox("CANAL", ["VENTAS INDIRECTAS", "VENTAS DIRECTAS"], key=k("canal"))
             if canal == "VENTAS DIRECTAS":
                 subcanal = "VENTAS DIRECTAS"
@@ -614,21 +641,12 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
                 )
                 tipo_gestion = "CAMPO"
 
-        # TIPO_GESTION no se muestra en pantalla.
-        # Regla: VENTAS INDIRECTAS viaja como CAMPO; VENTAS DIRECTAS viaja vacío.
+        # ── REGIÓN ──────────────────────────────────────────────────────
         region = st.selectbox("REGIÓN", ["", "CENTRAL", "NORORIENTE", "SUR"], key=k("region"))
-        # CARGO (ROL) depende del canal:
-        # - VENTAS INDIRECTAS conserva la lógica original con "- Dealer".
-        # - VENTAS DIRECTAS usa el rol limpio, sin "- Dealer".
-        if canal == "VENTAS DIRECTAS":
-            opciones_cargo = [
-                "",
-                "Agente BO D2D",
-                "Promotor D2D",
-                "Supervisor D2D",
-                "Coordinador D2D",
-            ]
-        else:
+
+        # ── CARGO (ROL) ─────────────────────────────────────────────────
+        # Dealers → con sufijo "- Dealer" | WOW TEL y Directas → sin sufijo
+        if canal == "VENTAS INDIRECTAS":
             opciones_cargo = [
                 "",
                 "Agente BO D2D - Dealer",
@@ -636,12 +654,16 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
                 "Supervisor D2D - Dealer",
                 "Coordinador D2D - Dealer",
             ]
+        else:
+            opciones_cargo = [
+                "",
+                "Agente BO D2D",
+                "Promotor D2D",
+                "Supervisor D2D",
+                "Coordinador D2D",
+            ]
 
-        cargo = st.selectbox(
-            "CARGO (ROL)",
-            opciones_cargo,
-            key=k("cargo"),
-        )
+        cargo = st.selectbox("CARGO (ROL)", opciones_cargo, key=k("cargo"))
         tipo_contrato = st.selectbox("TIPO DE CONTRATO", ["PLANILLA", "MEDIA PLANILLA"], key=k("tipo_contrato"))
         hoy_alta = datetime.now(zona_peru).date()
         fecha_creacion = st.date_input(
@@ -654,16 +676,18 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
         )
         contrato_firmado = st.selectbox("CONTRATO FIRMADO", ["SI"], index=0, key=k("contrato_firmado"))
 
+        # ── DATOS ADICIONALES (solo DIRECTAS / WOW TEL) ─────────────────
         supervisor_directo = ""
-        capacitador = ""
-        origen_ingreso = ""
-        fuente_ingreso = ""
-        if canal == "VENTAS DIRECTAS":
-            st.markdown("**Datos adicionales Ventas Directas**")
-            supervisor_directo = st.selectbox("SUPERVISOR", [""] + supervisores_directo, key=k("supervisor_directo"))
-            capacitador = st.selectbox("CAPACITADOR", [""] + capacitadores, key=k("capacitador"))
-            origen_ingreso = st.selectbox("ORIGEN INGRESO", [""] + origenes_ingreso, key=k("origen_ingreso"))
-            fuente_ingreso = st.selectbox("FUENTE INGRESO", [""] + fuentes_ingreso, key=k("fuente_ingreso"))
+        capacitador        = ""
+        origen_ingreso     = ""
+        fuente_ingreso     = ""
+
+        if canal != "VENTAS INDIRECTAS" and canal:
+            st.markdown("**Datos adicionales**")
+            supervisor_directo = st.selectbox("SUPERVISOR",       [""] + supervisores_directo, key=k("supervisor_directo"))
+            capacitador        = st.selectbox("CAPACITADOR",      [""] + capacitadores,        key=k("capacitador"))
+            origen_ingreso     = st.selectbox("ORIGEN INGRESO",   [""] + origenes_ingreso,     key=k("origen_ingreso"))
+            fuente_ingreso     = st.selectbox("FUENTE INGRESO",   [""] + fuentes_ingreso,      key=k("fuente_ingreso"))
 
     # =====================================================
     # UBICACIÓN / JERARQUÍA
@@ -674,6 +698,7 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
     dni_coordinador = ""
 
     if canal == "VENTAS INDIRECTAS":
+        # ── DEALERS: jerarquía completa ────────────────────────────────
         st.divider()
         st.markdown("**Ubicación y jerarquía**")
         col_u1, col_u2 = st.columns(2)
@@ -686,12 +711,10 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
                 df_dep = df_ubi[serie_columna(df_ubi, "DEPARTAMENTO").str.upper().str.strip().eq(str(departamento).strip().upper())]
                 provincias = lista_limpia(df_dep, "PROVINCIA")
 
-            # FIX: si la provincia guardada ya no está en la nueva lista, resetear
             if st.session_state.get(k("provincia"), "") not in [""] + provincias:
                 st.session_state[k("provincia")] = ""
             provincia = st.selectbox("PROVINCIA", [""] + provincias, key=k("provincia"))
 
-            # FIX: si el distrito guardado ya no está en la nueva lista, resetear
             df_prov = df_ubi[serie_columna(df_ubi, "PROVINCIA").str.upper().str.strip().eq(str(provincia).strip().upper())]
             distritos = lista_limpia(df_prov, "DISTRITO") if provincia else []
             if st.session_state.get(k("distrito"), "") not in [""] + distritos:
@@ -706,11 +729,15 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             supervisor = st.selectbox("SUPERVISOR A CARGO", [""] + supervisores, key=k("supervisor"))
             dni_supervisor = buscar_dni_por_nombre(df_ubi, "SUPERVISOR A CARGO FINAL", "DNI SUPERVISOR", supervisor)
             st.text_input("DNI SUPERVISOR", value=dni_supervisor, disabled=True, key=k("dni_supervisor"))
+
     else:
-        # Para VENTAS DIRECTAS: mostrar DEPARTAMENTO y PROVINCIA (son obligatorios)
-        # pero ocultar jerarquía D2D indirecta (coordinador).
-        supervisor = supervisor_directo
+        # ── WOW TEL / VENTAS DIRECTAS: solo ubicación ──────────────────
+        supervisor     = supervisor_directo
         dni_supervisor = ""
+        coordinador    = ""
+        dni_coordinador = ""
+        distrito       = ""
+
         st.divider()
         st.markdown("**Ubicación**")
         col_u1d, col_u2d = st.columns(2)
@@ -720,6 +747,8 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             if departamento and "DEPARTAMENTO" in df_ubi.columns and "PROVINCIA" in df_ubi.columns:
                 df_dep = df_ubi[serie_columna(df_ubi, "DEPARTAMENTO").str.upper().str.strip().eq(str(departamento).strip().upper())]
                 provincias = lista_limpia(df_dep, "PROVINCIA")
+            if st.session_state.get(k("provincia_directo"), "") not in [""] + provincias:
+                st.session_state[k("provincia_directo")] = ""
             provincia = st.selectbox("PROVINCIA", [""] + provincias, key=k("provincia_directo"))
         with col_u2d:
             st.text_input("SUPERVISOR", value=supervisor_directo, disabled=True, key=k("sup_directo_display"))
@@ -756,9 +785,9 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
         correo_limpio = limpiar_texto(correo).lower()
         marca_alta = ahora_peru_fecha_hora()
 
+        es_indirecto = canal == "VENTAS INDIRECTAS"
+
         campos = {
-            # En ALTA no se marca FECHA MOV.
-            # FECHA MOV se actualiza únicamente en BAJAS.
             "FECHA MOV": "",
             "RAZON SOCIAL": razon,
             "CANAL": limpiar_texto(canal),
@@ -770,24 +799,23 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             "PROVINCIA": provincia,
             "DISTRITO": limpiar_texto(distrito),
             # ─── SUPERVISOR ────────────────────────────────────────────────
-            # VENTAS INDIRECTAS → usa "SUPERVISOR A CARGO" (jerarquía D2D)
-            # VENTAS DIRECTAS   → usa "SUPERVISOR" (supervisor directo)
-            # Nunca se cruzan entre sí.
-            "SUPERVISOR A CARGO": limpiar_texto(supervisor) if canal == "VENTAS INDIRECTAS" else "",
-            "SUPERVISOR A CARGO FINAL": limpiar_texto(supervisor) if canal == "VENTAS INDIRECTAS" else "",
-            "SUPERVISOR": limpiar_texto(supervisor_directo) if canal == "VENTAS DIRECTAS" else "",
-            "DNI SUPERVISOR": limpiar_texto(dni_supervisor) if canal == "VENTAS INDIRECTAS" else "",
-            # ─── CAPACITADOR / ORIGEN / FUENTE (solo DIRECTAS) ────────────
-            "CAPACITADOR": limpiar_texto(capacitador) if canal == "VENTAS DIRECTAS" else "",
-            "ORIGEN_INGRESO": limpiar_texto(origen_ingreso) if canal == "VENTAS DIRECTAS" else "",
-            "ORIGEN INGRESO": limpiar_texto(origen_ingreso) if canal == "VENTAS DIRECTAS" else "",
-            "FUENTE_INGRESO": limpiar_texto(fuente_ingreso) if canal == "VENTAS DIRECTAS" else "",
-            "FUENTE INGRESO": limpiar_texto(fuente_ingreso) if canal == "VENTAS DIRECTAS" else "",
-            # ─── COORDINADOR (solo INDIRECTAS) ────────────────────────────
-            "COORDINADOR": limpiar_texto(coordinador) if canal == "VENTAS INDIRECTAS" else "",
-            "COORDINADOR FINAL": limpiar_texto(coordinador) if canal == "VENTAS INDIRECTAS" else "",
-            "DNI COORDINADOR": dni_coordinador if canal == "VENTAS INDIRECTAS" else "",
-            # ─── DATOS PERSONALES ─────────────────────────────────────────
+            # INDIRECTAS (Dealers) → SUPERVISOR A CARGO / SUPERVISOR A CARGO FINAL
+            # DIRECTAS y WOW TEL   → SUPERVISOR
+            "SUPERVISOR A CARGO":       limpiar_texto(supervisor)        if es_indirecto else "",
+            "SUPERVISOR A CARGO FINAL": limpiar_texto(supervisor)        if es_indirecto else "",
+            "SUPERVISOR":               limpiar_texto(supervisor_directo) if not es_indirecto else "",
+            "DNI SUPERVISOR":           limpiar_texto(dni_supervisor)     if es_indirecto else "",
+            # ─── CAPACITADOR / ORIGEN / FUENTE (solo DIRECTAS / WOW TEL) ──
+            "CAPACITADOR":     limpiar_texto(capacitador)     if not es_indirecto else "",
+            "ORIGEN_INGRESO":  limpiar_texto(origen_ingreso)  if not es_indirecto else "",
+            "ORIGEN INGRESO":  limpiar_texto(origen_ingreso)  if not es_indirecto else "",
+            "FUENTE_INGRESO":  limpiar_texto(fuente_ingreso)  if not es_indirecto else "",
+            "FUENTE INGRESO":  limpiar_texto(fuente_ingreso)  if not es_indirecto else "",
+            # ─── COORDINADOR (solo INDIRECTAS/Dealers) ─────────────────────
+            "COORDINADOR":        limpiar_texto(coordinador)    if es_indirecto else "",
+            "COORDINADOR FINAL":  limpiar_texto(coordinador)    if es_indirecto else "",
+            "DNI COORDINADOR":    dni_coordinador               if es_indirecto else "",
+            # ─── DATOS PERSONALES ───────────────────────────────────────────
             "CARGO (ROL)": cargo,
             "NOMBRES": limpiar_texto(nombres).upper(),
             "APELLIDO PATERNO": limpiar_texto(apellido_p).upper(),
