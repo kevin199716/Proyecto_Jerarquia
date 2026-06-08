@@ -359,7 +359,7 @@ hr { border-color: var(--ink-100) !important; margin: 1.5rem 0 !important; }
     border-bottom: 1px solid rgba(255,255,255,0.1);
     margin-bottom: 16px;
 }
-.wow-sidebar-brand-pl img { max-width: 100%; height: 28px; object-fit: contain; }
+.wow-sidebar-brand-pl span { font-size:24px; font-weight:800; color:white; }
 .wow-user-card {
     display: flex; align-items: center; gap: 11px;
     padding: 12px;
@@ -463,7 +463,7 @@ def render_sidebar_user(usuario: str, rol: str, razon: str):
     razon_short = (razon.split()[0] if razon else "—")
     st.sidebar.markdown(textwrap.dedent(f"""
 <div class="wow-sidebar-brand-pl">
-<img src="https://raw.githubusercontent.com/leocorbur/st_apps/refs/heads/main/images/logo_horizontal_blanco.png" alt="WOW D2D" />
+<span style="font-size:24px;font-weight:800;color:white;letter-spacing:-1px;">✦ WOW</span>
 </div>
 <div class="wow-user-card">
 <div class="wow-user-avatar">{inicial}</div>
