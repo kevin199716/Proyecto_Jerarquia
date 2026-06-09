@@ -286,93 +286,148 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, hoja_sustentos=None,
                 if f_fin < f_ini:
                     st.error("❌ La fecha fin no puede ser anterior a la fecha inicio")
                 else:
-                    # Validar fechas duplicadas
-                    conflictos = _validar_fechas_duplicadas(hoja_asistencia, colab.get("DNI"), f_ini, f_fin)
-                    if conflictos:
+                    # Validar fecha límite según ESTADO y FECHA_CESE del colaborador.
+                    # - Si INACTIVO con FECHA_CESE: el límite es FECHA_CESE.
+                    # - En cualquier otro caso (incluido ACTIVO sin cese): el límite es HOY.
+                    estado_colab = str(colab.get("ESTADO", "")).strip().upper()
+                    fecha_cese_str = str(colab.get("FECHA DE CESE", "")).strip()
+                    hoy = datetime.now().date()
+                    fecha_limite = hoy
+                    motivo_limite = "hoy"
+                    if estado_colab == "INACTIVO" and fecha_cese_str:
+                        try:
+                            # Probar varios formatos comunes
+                            for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%Y/%m/%d", "%d-%m-%Y"):
+                                try:
+                                    fecha_limite = datetime.strptime(fecha_cese_str, fmt).date()
+                                    motivo_limite = f"FECHA_CESE ({fecha_cese_str})"
+                                    break
+                                except ValueError:
+                                    continue
+                        except Exception:
+                            pass
+
+                    if f_fin > fecha_limite:
                         st.error(
-                            f"❌ **{colab.get('NOMBRES')}** (DNI: {colab.get('DNI')}) ya tiene registros en esas fechas:\n\n" +
-                            "\n".join(f"• {c}" for c in conflictos[:10]) +
-                            "\n\n⛔ No se puede registrar un descanso en días ya ocupados."
+                            f"❌ **{colab.get('NOMBRES')}** (DNI: {colab.get('DNI')}) — "
+                            f"la fecha fin **{f_fin}** supera el límite permitido (**{fecha_limite}**, {motivo_limite}). "
+                            "No se puede registrar más allá de esa fecha."
                         )
                     else:
-                        marca = "A-BM" if "Médico" in tipo else "A-VAC"
-                        motivo_texto = "A-BM (No Asistió por Baja Médica)" if marca == "A-BM" else "A-VAC (Vacaciones)"
-                        dias = (f_fin - f_ini).days + 1
-                        ahora = datetime.now()
-                        periodo = ahora.strftime("%Y-%m")
-                        usuario_sesion = st.session_state.get("usuario", "admin")
-
-                        urls_docs, errores_docs = [], []
-                        if docs:
-                            with st.spinner("📤 Subiendo documentos..."):
-                                for doc in docs:
-                                    url, err = _subir_doc(doc)
-                                    if url:
-                                        urls_docs.append(url)
-                                        if hoja_sustentos:
-                                            try:
-                                                hoja_sustentos.append_row([
-                                                    periodo, str(f_ini),
-                                                    str(colab.get("DNI", "")), str(colab.get("NOMBRES", "")),
-                                                    str(colab.get("RAZON SOCIAL", "")), motivo_texto,
-                                                    url, ahora.strftime("%Y-%m-%d %H:%M:%S"), usuario_sesion,
-                                                ])
-                                            except Exception as e:
-                                                errores_docs.append(f"Error Sustentos_Bajas: {e}")
-                                    else:
-                                        errores_docs.append(f"{doc.name}: {err}")
-
-                        # Si no se adjuntó ningún documento, igual registra el histórico
-                        # en Sustentos_Bajas (con LINK_DOCUMENTO vacío). Esto asegura que
-                        # SIEMPRE quede trazabilidad del descanso/vacación registrado.
-                        if not urls_docs and hoja_sustentos:
-                            try:
-                                hoja_sustentos.append_row([
-                                    periodo, str(f_ini),
-                                    str(colab.get("DNI", "")), str(colab.get("NOMBRES", "")),
-                                    str(colab.get("RAZON SOCIAL", "")), motivo_texto,
-                                    "", ahora.strftime("%Y-%m-%d %H:%M:%S"), usuario_sesion,
-                                ])
-                            except Exception as e:
-                                errores_docs.append(f"Error Sustentos_Bajas: {e}")
-
-                        try:
-                            with st.spinner("💾 Guardando en Asistencia..."):
-                                fila = [
-                                    str(colab.get("RAZON SOCIAL", "")), str(colab.get("SUPERVISOR A CARGO FINAL", "")),
-                                    str(colab.get("COORDINADOR FINAL", "")), str(colab.get("DEPARTAMENTO", "")),
-                                    str(colab.get("PROVINCIA", "")), str(colab.get("DISTRITO", "")),
-                                    str(colab.get("DNI", "")), str(colab.get("NOMBRES", "")),
-                                    str(colab.get("ESTADO", "")), str(colab.get("FECHA DE CREACION USUARIO", "")),
-                                    str(colab.get("FECHA DE CESE", "")), periodo, periodo,
-                                ]
-                                fa = f_ini
-                                for d in range(1, 32):
-                                    fila.append(marca if fa <= f_fin else "")
-                                    fa += timedelta(days=1)
-                                hoja_asistencia.append_row(fila)
-
-                            st.success("✅ ¡Registro guardado correctamente!")
-                            st.info(
-                                f"**{colab.get('NOMBRES')}** (DNI: {colab.get('DNI')}) — "
-                                f"**{motivo_texto}** | {f_ini} → {f_fin} ({dias} días) | "
-                                f"Docs: {len(urls_docs)} | Registrado: {ahora.strftime('%Y-%m-%d %H:%M')}"
+                        # Validar fechas duplicadas
+                        conflictos = _validar_fechas_duplicadas(hoja_asistencia, colab.get("DNI"), f_ini, f_fin)
+                        if conflictos:
+                            st.error(
+                                f"❌ **{colab.get('NOMBRES')}** (DNI: {colab.get('DNI')}) ya tiene registros en esas fechas:\n\n" +
+                                "\n".join(f"• {c}" for c in conflictos[:10]) +
+                                "\n\n⛔ No se puede registrar un descanso en días ya ocupados."
                             )
-                            if urls_docs:
-                                st.write("**🔗 Documentos subidos:**")
-                                for i, u in enumerate(urls_docs, 1):
-                                    st.markdown(f"{i}. [{u}]({u})")
-                            if errores_docs:
-                                st.warning("⚠️ " + " | ".join(errores_docs))
+                        else:
+                            marca = "A-BM" if "Médico" in tipo else "A-VAC"
+                            motivo_texto = "A-BM (No Asistió por Baja Médica)" if marca == "A-BM" else "A-VAC (Vacaciones)"
+                            dias = (f_fin - f_ini).days + 1
+                            ahora = datetime.now()
+                            periodo = ahora.strftime("%Y-%m")
+                            usuario_sesion = st.session_state.get("usuario", "admin")
 
-                            st.session_state["asist_guardado"] = {
-                                "nombre": colab.get("NOMBRES"), "dni": colab.get("DNI"),
-                                "marca": marca, "desde": str(f_ini), "hasta": str(f_fin),
-                                "dias": dias, "docs": urls_docs, "ts": ahora.strftime("%Y-%m-%d %H:%M"),
-                            }
-                            st.session_state["asist_colab"] = None
-                        except Exception as e:
-                            st.error(f"❌ Error al guardar: {str(e)}")
+                            urls_docs, errores_docs = [], []
+                            if docs:
+                                with st.spinner("📤 Subiendo documentos..."):
+                                    for doc in docs:
+                                        url, err = _subir_doc(doc)
+                                        if url:
+                                            urls_docs.append(url)
+                                            if hoja_sustentos:
+                                                try:
+                                                    # ORDEN OFICIAL de Sustentos_Bajas (Evidencias):
+                                                    # A=PERIODO, B=FECHA_INICIO, C=FECHA_FIN, D=DNI,
+                                                    # E=NOMBRE, F=RAZON SOCIAL, G=MOTIVO,
+                                                    # H=LINK_DOCUMENTO, I=FECHA_SUBIDA, J=USUARIO_REGISTRO
+                                                    hoja_sustentos.append_row([
+                                                        periodo,                                          # A
+                                                        str(f_ini),                                       # B = FECHA_INICIO
+                                                        str(f_fin),                                       # C = FECHA_FIN
+                                                        str(colab.get("DNI", "")),                        # D
+                                                        str(colab.get("NOMBRES", "")),                    # E
+                                                        str(colab.get("RAZON SOCIAL", "")),               # F
+                                                        motivo_texto,                                     # G
+                                                        url,                                              # H
+                                                        ahora.strftime("%Y-%m-%d %H:%M:%S"),              # I
+                                                        usuario_sesion,                                   # J
+                                                    ])
+                                                except Exception as e:
+                                                    errores_docs.append(f"Error Sustentos_Bajas: {e}")
+                                        else:
+                                            errores_docs.append(f"{doc.name}: {err}")
+
+                            # Si no se adjuntó ningún documento, igual registra el histórico
+                            # en Sustentos_Bajas (con LINK_DOCUMENTO vacío). Esto asegura que
+                            # SIEMPRE quede trazabilidad del descanso/vacación registrado.
+                            if not urls_docs and hoja_sustentos:
+                                try:
+                                    hoja_sustentos.append_row([
+                                        periodo,                                          # A
+                                        str(f_ini),                                       # B = FECHA_INICIO
+                                        str(f_fin),                                       # C = FECHA_FIN
+                                        str(colab.get("DNI", "")),                        # D
+                                        str(colab.get("NOMBRES", "")),                    # E
+                                        str(colab.get("RAZON SOCIAL", "")),               # F
+                                        motivo_texto,                                     # G
+                                        "",                                               # H (sin link)
+                                        ahora.strftime("%Y-%m-%d %H:%M:%S"),              # I
+                                        usuario_sesion,                                   # J
+                                    ])
+                                except Exception as e:
+                                    errores_docs.append(f"Error Sustentos_Bajas: {e}")
+
+                            try:
+                                with st.spinner("💾 Guardando en Asistencia..."):
+                                    # ORDEN OFICIAL de columnas de la hoja Asistencia:
+                                    # A=RAZON SOCIAL, B=SUPERVISOR, C=COORDINADOR, D=DEPARTAMENTO,
+                                    # E=PROVINCIA, F=DNI, G=NOMBRE, H=ESTADO, I=FECHA_ALTA,
+                                    # J=FECHA_CESE, K=MES, L=PERIODO, M..AQ = DIA_1..DIA_31
+                                    mes_num = str(f_ini.month)
+                                    fila = [
+                                        str(colab.get("RAZON SOCIAL", "")),               # A
+                                        str(colab.get("SUPERVISOR A CARGO FINAL", "")),   # B
+                                        str(colab.get("COORDINADOR FINAL", "")),          # C
+                                        str(colab.get("DEPARTAMENTO", "")),               # D
+                                        str(colab.get("PROVINCIA", "")),                  # E
+                                        str(colab.get("DNI", "")),                        # F
+                                        str(colab.get("NOMBRES", "")),                    # G  (cabecera "NOMBRE")
+                                        str(colab.get("ESTADO", "")),                     # H
+                                        str(colab.get("FECHA DE CREACION USUARIO", "")),  # I  (cabecera "FECHA_ALTA")
+                                        str(colab.get("FECHA DE CESE", "")),              # J  (cabecera "FECHA_CESE")
+                                        mes_num,                                          # K  (cabecera "MES" — solo número 1..12)
+                                        periodo,                                          # L  (cabecera "PERIODO" — YYYY-MM)
+                                    ]
+                                    fa = f_ini
+                                    for d in range(1, 32):
+                                        fila.append(marca if fa <= f_fin else "")
+                                        fa += timedelta(days=1)
+                                    hoja_asistencia.append_row(fila)
+
+                                st.success("✅ ¡Registro guardado correctamente!")
+                                st.info(
+                                    f"**{colab.get('NOMBRES')}** (DNI: {colab.get('DNI')}) — "
+                                    f"**{motivo_texto}** | {f_ini} → {f_fin} ({dias} días) | "
+                                    f"Docs: {len(urls_docs)} | Registrado: {ahora.strftime('%Y-%m-%d %H:%M')}"
+                                )
+                                if urls_docs:
+                                    st.write("**🔗 Documentos subidos:**")
+                                    for i, u in enumerate(urls_docs, 1):
+                                        st.markdown(f"{i}. [{u}]({u})")
+                                if errores_docs:
+                                    st.warning("⚠️ " + " | ".join(errores_docs))
+
+                                st.session_state["asist_guardado"] = {
+                                    "nombre": colab.get("NOMBRES"), "dni": colab.get("DNI"),
+                                    "marca": marca, "desde": str(f_ini), "hasta": str(f_fin),
+                                    "dias": dias, "docs": urls_docs, "ts": ahora.strftime("%Y-%m-%d %H:%M"),
+                                }
+                                st.session_state["asist_colab"] = None
+                            except Exception as e:
+                                st.error(f"❌ Error al guardar: {str(e)}")
 
         g = st.session_state.get("asist_guardado")
         if g and not st.session_state.get("asist_colab"):
