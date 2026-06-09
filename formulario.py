@@ -254,6 +254,42 @@ def buscar_dni_por_nombre(df: pd.DataFrame, columna_nombre: str, columna_dni: st
 # =========================
 # VALIDACIONES DE NEGOCIO
 # =========================
+def validar_formulario(campos: dict, df_colab: pd.DataFrame) -> list[str]:
+    """
+    Valida los campos obligatorios del alta. Retorna lista de mensajes de error
+    (vacía si todo está OK). NO valida reingreso/duplicado: eso lo hace
+    validar_reingreso / validar_dni_unico_historico por separado.
+    """
+    errores: list[str] = []
+
+    def _vacio(clave: str) -> bool:
+        return not str(campos.get(clave, "")).strip()
+
+    # Campos obligatorios para TODO colaborador
+    obligatorios = [
+        ("NOMBRES", "Nombres"),
+        ("APELLIDO PATERNO", "Apellido paterno"),
+        ("APELLIDO MATERNO", "Apellido materno"),
+        ("DNI", "DNI"),
+        ("RAZON SOCIAL", "Razón social"),
+        ("CARGO (ROL)", "Cargo (rol)"),
+        ("DEPARTAMENTO", "Departamento"),
+        ("PROVINCIA", "Provincia"),
+        ("FECHA DE CREACION USUARIO", "Fecha de creación usuario"),
+    ]
+    for clave, etiqueta in obligatorios:
+        if _vacio(clave):
+            errores.append(f"❌ Falta completar: {etiqueta}")
+
+    # Validar formato de DNI (8 dígitos para DNI peruano)
+    dni = str(campos.get("DNI", "")).strip()
+    tipo_doc = str(campos.get("TIPO DE DOC", "")).strip().upper()
+    if dni and tipo_doc == "DNI" and (not dni.isdigit() or len(dni) != 8):
+        errores.append(f"❌ El DNI '{dni}' debe tener exactamente 8 dígitos numéricos.")
+
+    return errores
+
+
 def validar_dni_unico_historico(df_colab: pd.DataFrame, dni_limpio: str, fecha_alta) -> tuple[bool, str]:
     fecha_alta = parse_fecha(fecha_alta)
     if fecha_alta is None:
@@ -727,7 +763,7 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
         dni_supervisor = ""
         coordinador    = ""
         dni_coordinador = ""
-        distrito       = ""
+        distrito       = ""  # se sobreescribe con el selector de abajo
 
         st.divider()
         st.markdown("**Ubicación**")
@@ -741,6 +777,13 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             if st.session_state.get(k("provincia_directo"), "") not in [""] + provincias:
                 st.session_state[k("provincia_directo")] = ""
             provincia = st.selectbox("PROVINCIA", [""] + provincias, key=k("provincia_directo"))
+
+            # DISTRITO también para canal directo (antes faltaba y quedaba vacío).
+            df_prov_d = df_ubi[serie_columna(df_ubi, "PROVINCIA").str.upper().str.strip().eq(str(provincia).strip().upper())]
+            distritos_d = lista_limpia(df_prov_d, "DISTRITO") if provincia else []
+            if st.session_state.get(k("distrito_directo"), "") not in [""] + distritos_d:
+                st.session_state[k("distrito_directo")] = ""
+            distrito = st.selectbox("DISTRITO", [""] + distritos_d, key=k("distrito_directo"))
         with col_u2d:
             st.text_input("SUPERVISOR", value=supervisor_directo, disabled=True, key=k("sup_directo_display"))
 
