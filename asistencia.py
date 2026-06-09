@@ -280,10 +280,12 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, hoja_sustentos=None,
                 f_fin = st.date_input("Hasta:", key="asist_f_fin")
 
             st.subheader("3️⃣ Adjuntar documentos (opcional)")
-            docs = st.file_uploader("Certificados, autorizaciones, fotos:", accept_multiple_files=True, key="asist_docs")
+            docs = st.file_uploader("Certificados, autorizaciones, fotos (OBLIGATORIO):", accept_multiple_files=True, key="asist_docs")
 
             if st.button("💾 GUARDAR DESCANSO", type="primary", use_container_width=True, key="asist_btn_guardar"):
-                if f_fin < f_ini:
+                if not docs:
+                    st.error("❌ Debes adjuntar al menos un documento de sustento. No se puede registrar un descanso médico ni vacaciones sin sustento.")
+                elif f_fin < f_ini:
                     st.error("❌ La fecha fin no puede ser anterior a la fecha inicio")
                 else:
                     # Validar fecha límite según ESTADO y FECHA_CESE del colaborador.
@@ -359,26 +361,6 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, hoja_sustentos=None,
                                                     errores_docs.append(f"Error Sustentos_Bajas: {e}")
                                         else:
                                             errores_docs.append(f"{doc.name}: {err}")
-
-                            # Si no se adjuntó ningún documento, igual registra el histórico
-                            # en Sustentos_Bajas (con LINK_DOCUMENTO vacío). Esto asegura que
-                            # SIEMPRE quede trazabilidad del descanso/vacación registrado.
-                            if not urls_docs and hoja_sustentos:
-                                try:
-                                    hoja_sustentos.append_row([
-                                        periodo,                                          # A
-                                        str(f_ini),                                       # B = FECHA_INICIO
-                                        str(f_fin),                                       # C = FECHA_FIN
-                                        str(colab.get("DNI", "")),                        # D
-                                        str(colab.get("NOMBRES", "")),                    # E
-                                        str(colab.get("RAZON SOCIAL", "")),               # F
-                                        motivo_texto,                                     # G
-                                        "",                                               # H (sin link)
-                                        ahora.strftime("%Y-%m-%d %H:%M:%S"),              # I
-                                        usuario_sesion,                                   # J
-                                    ])
-                                except Exception as e:
-                                    errores_docs.append(f"Error Sustentos_Bajas: {e}")
 
                             try:
                                 with st.spinner("💾 Guardando en Asistencia..."):
