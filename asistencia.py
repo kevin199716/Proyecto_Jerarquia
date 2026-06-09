@@ -288,34 +288,9 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, hoja_sustentos=None,
                 elif f_fin < f_ini:
                     st.error("❌ La fecha fin no puede ser anterior a la fecha inicio")
                 else:
-                    # Validar fecha límite según ESTADO y FECHA_CESE del colaborador.
-                    # - Si INACTIVO con FECHA_CESE: el límite es FECHA_CESE.
-                    # - En cualquier otro caso (incluido ACTIVO sin cese): el límite es HOY.
-                    estado_colab = str(colab.get("ESTADO", "")).strip().upper()
-                    fecha_cese_str = str(colab.get("FECHA DE CESE", "")).strip()
-                    hoy = datetime.now().date()
-                    fecha_limite = hoy
-                    motivo_limite = "hoy"
-                    if estado_colab == "INACTIVO" and fecha_cese_str:
-                        try:
-                            # Probar varios formatos comunes
-                            for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%Y/%m/%d", "%d-%m-%Y"):
-                                try:
-                                    fecha_limite = datetime.strptime(fecha_cese_str, fmt).date()
-                                    motivo_limite = f"FECHA_CESE ({fecha_cese_str})"
-                                    break
-                                except ValueError:
-                                    continue
-                        except Exception:
-                            pass
-
-                    if f_fin > fecha_limite:
-                        st.error(
-                            f"❌ **{colab.get('NOMBRES')}** (DNI: {colab.get('DNI')}) — "
-                            f"la fecha fin **{f_fin}** supera el límite permitido (**{fecha_limite}**, {motivo_limite}). "
-                            "No se puede registrar más allá de esa fecha."
-                        )
-                    else:
+                    # Se permiten fechas pasadas y futuras. La única restricción es el
+                    # solapamiento: un mismo DNI no puede tener dos registros en los mismos días.
+                    if True:
                         # Validar fechas duplicadas
                         conflictos = _validar_fechas_duplicadas(hoja_asistencia, colab.get("DNI"), f_ini, f_fin)
                         if conflictos:
