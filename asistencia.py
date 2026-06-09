@@ -283,13 +283,40 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, hoja_sustentos=None,
             docs = st.file_uploader("Certificados, autorizaciones, fotos (OBLIGATORIO):", accept_multiple_files=True, key="asist_docs")
 
             if st.button("💾 GUARDAR DESCANSO", type="primary", use_container_width=True, key="asist_btn_guardar"):
+                # Parsear FECHA_ALTA y FECHA_CESE del colaborador (varios formatos)
+                def _parse_fecha_col(valor):
+                    s = str(valor).strip()
+                    if not s:
+                        return None
+                    for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%Y/%m/%d", "%d-%m-%Y"):
+                        try:
+                            return datetime.strptime(s, fmt).date()
+                        except ValueError:
+                            continue
+                    return None
+
+                fecha_alta_colab = _parse_fecha_col(colab.get("FECHA DE CREACION USUARIO", ""))
+                fecha_cese_colab = _parse_fecha_col(colab.get("FECHA DE CESE", ""))
+
                 if not docs:
                     st.error("❌ Debes adjuntar al menos un documento de sustento. No se puede registrar un descanso médico ni vacaciones sin sustento.")
                 elif f_fin < f_ini:
                     st.error("❌ La fecha fin no puede ser anterior a la fecha inicio")
+                elif fecha_alta_colab and f_ini < fecha_alta_colab:
+                    st.error(
+                        f"❌ **{colab.get('NOMBRES')}** (DNI: {colab.get('DNI')}) — "
+                        f"la fecha inicio **{f_ini}** es anterior a su fecha de alta (**{fecha_alta_colab}**). "
+                        "No se puede registrar un descanso antes de que el colaborador exista."
+                    )
+                elif fecha_cese_colab and f_fin > fecha_cese_colab:
+                    st.error(
+                        f"❌ **{colab.get('NOMBRES')}** (DNI: {colab.get('DNI')}) — "
+                        f"la fecha fin **{f_fin}** supera su fecha de cese (**{fecha_cese_colab}**). "
+                        "No se puede registrar un descanso después de la baja del colaborador."
+                    )
                 else:
-                    # Se permiten fechas pasadas y futuras. La única restricción es el
-                    # solapamiento: un mismo DNI no puede tener dos registros en los mismos días.
+                    # Validación de rango OK (alta ≤ rango ≤ cese, o sin tope si no hay cese).
+                    # Última restricción: solapamiento con registros existentes.
                     if True:
                         # Validar fechas duplicadas
                         conflictos = _validar_fechas_duplicadas(hoja_asistencia, colab.get("DNI"), f_ini, f_fin)
