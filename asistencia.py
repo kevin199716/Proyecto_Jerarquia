@@ -401,10 +401,15 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, hoja_sustentos=None,
                                         mes_num,                                          # K  (cabecera "MES" — solo número 1..12)
                                         periodo,                                          # L  (cabecera "PERIODO" — YYYY-MM)
                                     ]
+                                    # DIA_1..DIA_31: la marca va EN LA COLUMNA DEL NÚMERO DE DÍA.
+                                    # Si el rango es del 6 al 11, se marca DIA_6..DIA_11 (no DIA_1..DIA_6).
+                                    dias_marcados = set()
                                     fa = f_ini
-                                    for d in range(1, 32):
-                                        fila.append(marca if fa <= f_fin else "")
+                                    while fa <= f_fin:
+                                        dias_marcados.add(fa.day)
                                         fa += timedelta(days=1)
+                                    for dia_num in range(1, 32):
+                                        fila.append(marca if dia_num in dias_marcados else "")
                                     hoja_asistencia.append_row(fila)
 
                                 st.success("✅ ¡Registro guardado correctamente!")
