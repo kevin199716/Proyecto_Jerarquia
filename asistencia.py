@@ -45,14 +45,18 @@ def _validar_fechas_duplicadas(hoja_asistencia, dni, f_ini, f_fin):
             dias_pedidos.add(fa.day)
             fa += timedelta(days=1)
 
-        # Mes del período solicitado
-        mes_pedido = f_ini.strftime("%Y-%m")
+        # Período solicitado (formato YYYY-MM, igual al que escribe la app)
+        periodo_pedido = f_ini.strftime("%Y-%m")
+        # Mes solo numérico (para tolerar filas viejas donde MES="6")
+        mes_num_pedido = str(f_ini.month)
 
         conflictos = []
         for _, row in df_dni.iterrows():
-            # Verificar que sea el mismo mes
-            mes_row = str(row.get("MES", "")).strip()
-            if mes_row != mes_pedido:
+            # Acepta match contra PERIODO (formato 2026-06) o MES (formato "6" o "06")
+            periodo_row = str(row.get("PERIODO", "")).strip()
+            mes_row = str(row.get("MES", "")).strip().lstrip("0")
+            mismo_periodo = (periodo_row == periodo_pedido) or (mes_row == mes_num_pedido)
+            if not mismo_periodo:
                 continue
             # Verificar días ocupados
             for dia in dias_pedidos:
@@ -64,6 +68,10 @@ def _validar_fechas_duplicadas(hoja_asistencia, dni, f_ini, f_fin):
         return conflictos
     except Exception:
         return []  # Si falla la validación, no bloquear el registro
+
+
+def _subir_doc(archivo):
+    """Sube un archivo a Drive y retorna (url, error). Si falla, url=None."""
     try:
         from sheets import subir_archivo_drive
         url = subir_archivo_drive(
@@ -314,6 +322,20 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, hoja_sustentos=None,
                                     else:
                                         errores_docs.append(f"{doc.name}: {err}")
 
+                        # Si no se adjuntó ningún documento, igual registra el histórico
+                        # en Sustentos_Bajas (con LINK_DOCUMENTO vacío). Esto asegura que
+                        # SIEMPRE quede trazabilidad del descanso/vacación registrado.
+                        if not urls_docs and hoja_sustentos:
+                            try:
+                                hoja_sustentos.append_row([
+                                    periodo, str(f_ini),
+                                    str(colab.get("DNI", "")), str(colab.get("NOMBRES", "")),
+                                    str(colab.get("RAZON SOCIAL", "")), motivo_texto,
+                                    "", ahora.strftime("%Y-%m-%d %H:%M:%S"), usuario_sesion,
+                                ])
+                            except Exception as e:
+                                errores_docs.append(f"Error Sustentos_Bajas: {e}")
+
                         try:
                             with st.spinner("💾 Guardando en Asistencia..."):
                                 fila = [
@@ -398,9 +420,6 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, hoja_sustentos=None,
             else:
                 _render_matriz_espejo(df_f)
 
-        if st.button("🔄 Actualizar", key="esp_reload"):
-            st.rerun()
-
     # ══════════════════════════ TAB DOCUMENTOS ══════════════════════════
     with tab_docs:
         st.subheader("📎 Evidencias y Documentos")
@@ -439,9 +458,6 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, hoja_sustentos=None,
                 else:
                     st.success(f"✅ {len(df_fd)} documento(s) encontrado(s)")
                     _render_tarjetas_docs(df_fd)
-
-        if st.button("🔄 Actualizar", key="doc_reload"):
-            st.rerun()
 
 
 def sincronizar_mes(hoja_asistencia, hoja_colaboradores):
