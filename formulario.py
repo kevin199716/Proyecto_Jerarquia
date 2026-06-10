@@ -672,22 +672,26 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
         region = st.selectbox("REGIÓN", ["", "CENTRAL", "NORORIENTE", "SUR"], key=k("region"))
 
         # ── CARGO (ROL) ─────────────────────────────────────────────────
-        # Dealers → con sufijo "- Dealer" | WOW TEL y Directas → sin sufijo
+        # Lista tomada tal cual de la hoja maestra (columna CARGO (ROL)).
+        # Dealers (VENTAS INDIRECTAS) → los que llevan sufijo "- Dealer".
+        # WOW TEL / Directas → el resto.
         if canal == "VENTAS INDIRECTAS":
             opciones_cargo = [
                 "",
-                "Agente BO D2D - Dealer",
                 "Promotor D2D - Dealer",
                 "Supervisor D2D - Dealer",
                 "Coordinador D2D - Dealer",
+                "Agente BO D2D - Dealer",
             ]
         else:
             opciones_cargo = [
                 "",
-                "Agente BO D2D",
+                "Agente CEX",
+                "Promotor - D2D",
+                "Coordinador - D2D",
+                "JEFE CEX",
+                "Supervisor - D2D",
                 "Promotor D2D",
-                "Supervisor D2D",
-                "Coordinador D2D",
             ]
 
         cargo = st.selectbox("CARGO (ROL)", opciones_cargo, key=k("cargo"))
