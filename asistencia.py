@@ -23,6 +23,11 @@ def _cargar_df(hoja):
         return pd.DataFrame()
 
 
+def _normalizar_razon(s: str) -> str:
+    """Normaliza razón social: mayúsculas, quita puntos/guiones/espacios extras."""
+    return str(s).strip().upper().replace(".", "").replace("-", "").replace("  ", " ")
+
+
 def _validar_fechas_duplicadas(hoja_asistencia, dni, f_ini, f_fin):
     """
     Verifica si el DNI ya tiene días A-BM o A-VAC registrados
@@ -236,7 +241,8 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, hoja_sustentos=None,
         # solo puede ver y registrar sobre sus propios colaboradores.
         rol_actual = st.session_state.get("rol", "")
         if razon and rol_actual != "backoffice" and "RAZON SOCIAL" in df_colab.columns:
-            df_colab = df_colab[df_colab["RAZON SOCIAL"].astype(str).str.strip() == razon.strip()]
+            razon_norm = _normalizar_razon(razon)
+            df_colab = df_colab[df_colab["RAZON SOCIAL"].astype(str).apply(_normalizar_razon).eq(razon_norm)]
 
         st.subheader("1️⃣ Buscar colaborador")
         c1, c2 = st.columns(2)
@@ -435,7 +441,8 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, hoja_sustentos=None,
             # se filtra automáticamente por su dealer. No puede ver otros socios.
             rol_actual = st.session_state.get("rol", "")
             if razon and rol_actual != "backoffice" and "RAZON SOCIAL" in df_h.columns:
-                df_h = df_h[df_h["RAZON SOCIAL"].astype(str).str.strip() == razon.strip()]
+                razon_norm = _normalizar_razon(razon)
+                df_h = df_h[df_h["RAZON SOCIAL"].astype(str).apply(_normalizar_razon).eq(razon_norm)]
 
             cf1, cf2, cf3 = st.columns(3)
             with cf1:
@@ -479,7 +486,8 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, hoja_sustentos=None,
                 # filtra automáticamente sus documentos. No puede ver los de otros socios.
                 rol_actual = st.session_state.get("rol", "")
                 if razon and rol_actual != "backoffice" and "RAZON SOCIAL" in df_d.columns:
-                    df_d = df_d[df_d["RAZON SOCIAL"].astype(str).str.strip() == razon.strip()]
+                    razon_norm = _normalizar_razon(razon)
+                    df_d = df_d[df_d["RAZON SOCIAL"].astype(str).apply(_normalizar_razon).eq(razon_norm)]
 
                 cf1, cf2, cf3 = st.columns(3)
                 with cf1:

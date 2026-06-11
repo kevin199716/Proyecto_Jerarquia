@@ -158,6 +158,11 @@ def _leer_matriz_cached(_hoja):
     return forzar_columnas_texto(df)
 
 
+def _normalizar_razon(s: str) -> str:
+    """Normaliza razón social: mayúsculas, quita puntos/guiones/espacios extras."""
+    return str(s).strip().upper().replace(".", "").replace("-", "").replace("  ", " ")
+
+
 def mostrar_tabla(hoja, razon_usuario=None):
     df = _leer_matriz_cached(hoja)
     if df.empty:
@@ -175,7 +180,9 @@ def mostrar_tabla(hoja, razon_usuario=None):
         return None
 
     if rol != "backoffice" and razon_usuario and "RAZON SOCIAL" in df.columns:
-        df = df[df["RAZON SOCIAL"].astype(str).str.strip().eq(razon_usuario)]
+        # Normalizar la comparación: ignorar mayúsculas y caracteres especiales
+        razon_normalizada = _normalizar_razon(razon_usuario)
+        df = df[df["RAZON SOCIAL"].astype(str).apply(_normalizar_razon).eq(razon_normalizada)]
         if df.empty:
             st.error(
                 f"❌ No hay registros para tu razón social '{razon_usuario}' en la maestra. "
