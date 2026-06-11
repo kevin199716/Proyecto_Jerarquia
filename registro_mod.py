@@ -166,22 +166,37 @@ def mostrar_tabla(hoja, razon_usuario=None):
 
     rol = st.session_state.get("rol", "")
 
+    # VALIDACIÓN: si es dealer pero no tiene razon_usuario asignada, error
+    if rol != "backoffice" and not razon_usuario:
+        st.error(
+            "❌ Error: Tu usuario es dealer pero no tiene razón social asignada en el sistema. "
+            "Contacta al administrador para que corrija tus credenciales."
+        )
+        return None
+
     if rol != "backoffice" and razon_usuario and "RAZON SOCIAL" in df.columns:
         df = df[df["RAZON SOCIAL"].astype(str).str.strip().eq(razon_usuario)]
+        if df.empty:
+            st.error(
+                f"❌ No hay registros para tu razón social '{razon_usuario}' en la maestra. "
+                "Puede deberse a que aún no hay colaboradores registrados o hay un error de sincronización. "
+                "Contacta al administrador."
+            )
+            return None
 
-    col_ref, _ = st.columns([1, 4])
-    with col_ref:
-        if st.button("🔄 Actualizar jerarquía", key="btn_refresh_matriz"):
-            _leer_matriz_cached.clear()
-            st.rerun()
-    st.caption("Filtros rápidos sobre la matriz cargada. No vuelve a leer Drive mientras filtras dentro de esta vista.")
+    st.caption("Filtros rápidos sobre la matriz cargada. Se sincroniza automáticamente con Drive (cada 10s, e inmediato tras Alta/Baja).")
     f1, f2, f3, f4 = st.columns([1.3, 1, 1, 1])
     with f1:
         buscar = st.text_input("Buscar DNI / nombre / apellido", key="matriz_buscar_texto").strip()
     with f2:
         filtro_estado = st.selectbox("Estado", _opciones_filtro(df, "ESTADO"), key="matriz_filtro_estado")
     with f3:
-        filtro_razon = st.selectbox("Razón social", _opciones_filtro(df, "RAZON SOCIAL"), key="matriz_filtro_razon")
+        opciones_razon = _opciones_filtro(df, "RAZON SOCIAL")
+        # Si es dealer (no backoffice), pre-seleccionar su razon_usuario
+        indice_razon = 0
+        if rol != "backoffice" and razon_usuario and razon_usuario in opciones_razon:
+            indice_razon = opciones_razon.index(razon_usuario)
+        filtro_razon = st.selectbox("Razón social", opciones_razon, index=indice_razon, key="matriz_filtro_razon")
     with f4:
         filtro_canal = st.selectbox("Canal", _opciones_filtro(df, "CANAL"), key="matriz_filtro_canal")
 
