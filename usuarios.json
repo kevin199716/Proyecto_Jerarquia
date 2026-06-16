@@ -22,5 +22,11 @@
     "rol": "presencialidad",
     "estado": "activo",
     "razon": "NOGALES HIGH SAC"
+  },
+  "konecta_presencialidad": {
+    "password": "Konecta@2026",
+    "rol": "presencialidad",
+    "estado": "activo",
+    "razon": "KONECTA SAC"
   }
 }

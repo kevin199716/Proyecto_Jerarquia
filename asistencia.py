@@ -119,6 +119,8 @@ def _render_matriz_espejo(df_asist):
                 cells_dias += f"<td class='cell-bm' title='Descanso Médico'>DM</td>"
             elif val == "A-VAC":
                 cells_dias += f"<td class='cell-vac' title='Vacaciones'>VAC</td>"
+            elif val == "P-PJ":
+                cells_dias += f"<td class='cell-pj' title='Permiso Justificado'>PJ</td>"
             else:
                 cells_dias += "<td class='cell-empty'></td>"
         rows_html += f"<tr>{cells_base}{cells_dias}</tr>"
@@ -134,6 +136,7 @@ def _render_matriz_espejo(df_asist):
 .cell-base {{ text-align: left; padding-left: 8px; background: #fafafa; color: #222; font-size: 11px; }}
 .cell-bm {{ background: #FDECEA; color: #C0392B; font-weight: 700; font-size: 9px; border-radius: 2px; }}
 .cell-vac {{ background: #E8F4FD; color: #1A5276; font-weight: 700; font-size: 9px; border-radius: 2px; }}
+.cell-pj {{ background: #E9F7EF; color: #1E8449; font-weight: 700; font-size: 9px; border-radius: 2px; }}
 .cell-empty {{ background: white; }}
 .matriz-table tr:hover td {{ background: #f3e5fa !important; }}
 .leyenda {{ display: flex; gap: 16px; margin: 8px 0 16px; font-size: 12px; }}
@@ -141,10 +144,12 @@ def _render_matriz_espejo(df_asist):
 .leyenda-box {{ width: 16px; height: 16px; border-radius: 3px; }}
 .bm-box {{ background: #FDECEA; border: 1px solid #C0392B; }}
 .vac-box {{ background: #E8F4FD; border: 1px solid #1A5276; }}
+.pj-box {{ background: #E9F7EF; border: 1px solid #1E8449; }}
 </style>
 <div class='leyenda'>
   <div class='leyenda-item'><div class='leyenda-box bm-box'></div><span><b>DM</b> = Descanso Médico (A-BM)</span></div>
   <div class='leyenda-item'><div class='leyenda-box vac-box'></div><span><b>VAC</b> = Vacaciones (A-VAC)</span></div>
+  <div class='leyenda-item'><div class='leyenda-box pj-box'></div><span><b>PJ</b> = Permiso Justificado (P-PJ)</span></div>
 </div>
 <div class='matriz-container'>
 <table class='matriz-table'>
@@ -278,14 +283,22 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, hoja_sustentos=None,
             with cc:
                 st.text_input("Razón Social", value=str(colab.get("RAZON SOCIAL", "")), disabled=True, key="asist_d_rs")
 
-            tipo = st.radio("Tipo:", ["🏥 Descanso Médico (A-BM)", "✈️ Vacaciones (A-VAC)"], key="asist_tipo")
+            tipo = st.radio(
+                "Tipo:",
+                [
+                    "🏥 Descanso Médico (A-BM)",
+                    "✈️ Vacaciones (A-VAC)",
+                    "📋 Permiso Justificado (P-PJ)",
+                ],
+                key="asist_tipo"
+            )
             cf1, cf2 = st.columns(2)
             with cf1:
                 f_ini = st.date_input("Desde:", key="asist_f_ini")
             with cf2:
                 f_fin = st.date_input("Hasta:", key="asist_f_fin")
 
-            st.subheader("3️⃣ Adjuntar documentos (opcional)")
+            st.subheader("3️⃣ Adjuntar documentos (OBLIGATORIO)")
             docs = st.file_uploader("Certificados, autorizaciones, fotos (OBLIGATORIO):", accept_multiple_files=True, key="asist_docs")
 
             if st.button("💾 GUARDAR DESCANSO", type="primary", use_container_width=True, key="asist_btn_guardar"):
@@ -333,8 +346,15 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, hoja_sustentos=None,
                                 "\n\n⛔ No se puede registrar un descanso en días ya ocupados."
                             )
                         else:
-                            marca = "A-BM" if "Médico" in tipo else "A-VAC"
-                            motivo_texto = "A-BM (No Asistió por Baja Médica)" if marca == "A-BM" else "A-VAC (Vacaciones)"
+                            if "Médico" in tipo:
+                                marca = "A-BM"
+                                motivo_texto = "A-BM (No Asistió por Baja Médica)"
+                            elif "Vacaciones" in tipo:
+                                marca = "A-VAC"
+                                motivo_texto = "A-VAC (Vacaciones)"
+                            else:
+                                marca = "P-PJ"
+                                motivo_texto = "P-PJ (Permiso Justificado)"
                             dias = (f_fin - f_ini).days + 1
                             ahora = datetime.now()
                             periodo = ahora.strftime("%Y-%m")
@@ -495,7 +515,7 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, hoja_sustentos=None,
                 with cf2:
                     per_d = st.text_input("Período (ej: 2026-06):", key="doc_per")
                 with cf3:
-                    tipo_d = st.selectbox("Tipo:", ["TODOS", "A-BM", "A-VAC"], key="doc_tipo")
+                    tipo_d = st.selectbox("Tipo:", ["TODOS", "A-BM", "A-VAC", "P-PJ"], key="doc_tipo")
 
                 df_fd = df_d.copy()
                 if dni_d.strip() and "DNI" in df_fd.columns:
