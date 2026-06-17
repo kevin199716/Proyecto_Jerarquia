@@ -30,16 +30,24 @@ def _normalizar_razon(s: str) -> str:
 
 def _validar_fechas_duplicadas(hoja_asistencia, dni, f_ini, f_fin):
     """
-    Verifica si el DNI ya tiene días A-BM o A-VAC registrados
+    Verifica si el DNI ya tiene días A-BM, A-VAC o P-PJ registrados
     en el rango de fechas solicitado. Retorna lista de conflictos.
+    LEE DIRECTO DE DRIVE (sin caché) para evitar falsos negativos.
     """
     try:
-        df_h = _cargar_df(hoja_asistencia)
-        if df_h.empty or "DNI" not in df_h.columns:
+        # Leer directo sin caché para siempre tener datos frescos
+        vals = hoja_asistencia.get_all_values()
+        if len(vals) < 2:
+            return []
+        df_h = pd.DataFrame(vals[1:], columns=vals[0])
+        df_h.columns = [c.strip().upper() for c in df_h.columns]
+
+        if "DNI" not in df_h.columns:
             return []
 
-        # Filtrar por DNI
-        df_dni = df_h[df_h["DNI"].astype(str).str.strip() == str(dni).strip()]
+        # Filtrar por DNI (normalizado)
+        dni_str = str(dni).strip().lstrip("0")
+        df_dni = df_h[df_h["DNI"].astype(str).str.strip().str.lstrip("0") == dni_str]
         if df_dni.empty:
             return []
 
@@ -50,29 +58,29 @@ def _validar_fechas_duplicadas(hoja_asistencia, dni, f_ini, f_fin):
             dias_pedidos.add(fa.day)
             fa += timedelta(days=1)
 
-        # Período solicitado (formato YYYY-MM, igual al que escribe la app)
+        # Período solicitado
         periodo_pedido = f_ini.strftime("%Y-%m")
-        # Mes solo numérico (para tolerar filas viejas donde MES="6")
         mes_num_pedido = str(f_ini.month)
+
+        # Marcas que se consideran "ocupadas"
+        MARCAS_OCUPADAS = {"A-BM", "A-VAC", "P-PJ"}
 
         conflictos = []
         for _, row in df_dni.iterrows():
-            # Acepta match contra PERIODO (formato 2026-06) o MES (formato "6" o "06")
             periodo_row = str(row.get("PERIODO", "")).strip()
             mes_row = str(row.get("MES", "")).strip().lstrip("0")
             mismo_periodo = (periodo_row == periodo_pedido) or (mes_row == mes_num_pedido)
             if not mismo_periodo:
                 continue
-            # Verificar días ocupados
             for dia in dias_pedidos:
                 col = f"DIA_{dia}"
-                val = str(row.get(col, "")).strip()
-                if val in ("A-BM", "A-VAC"):
+                val = str(row.get(col, "")).strip().upper()
+                if val in MARCAS_OCUPADAS:
                     conflictos.append(f"Día {dia}: ya tiene {val}")
 
         return conflictos
-    except Exception:
-        return []  # Si falla la validación, no bloquear el registro
+    except Exception as e:
+        return []
 
 
 def _subir_doc(archivo):
