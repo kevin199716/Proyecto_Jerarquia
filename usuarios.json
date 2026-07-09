@@ -11,8 +11,32 @@
     "estado": "activo",
     "razon": "INTERCONEXION 360 SAC"
   },
+  "interconexion_bo1": {
+    "password": "Inter360_BO1@2026",
+    "rol": "presencialidad",
+    "estado": "activo",
+    "razon": "INTERCONEXION 360 SAC"
+  },
+  "interconexion_bo2": {
+    "password": "Inter360_BO2@2026",
+    "rol": "presencialidad",
+    "estado": "activo",
+    "razon": "INTERCONEXION 360 SAC"
+  },
   "multiforce_presencialidad": {
     "password": "MultiForce@123",
+    "rol": "presencialidad",
+    "estado": "activo",
+    "razon": "MULTIPLE FORCE SAC"
+  },
+  "multiforce_bo1": {
+    "password": "MultiForce_BO1@2026",
+    "rol": "presencialidad",
+    "estado": "activo",
+    "razon": "MULTIPLE FORCE SAC"
+  },
+  "multiforce_bo2": {
+    "password": "MultiForce_BO2@2026",
     "rol": "presencialidad",
     "estado": "activo",
     "razon": "MULTIPLE FORCE SAC"
@@ -23,14 +47,50 @@
     "estado": "activo",
     "razon": "NOGALES HIGH SAC"
   },
+  "nogales_bo1": {
+    "password": "Nogales_BO1@2026",
+    "rol": "presencialidad",
+    "estado": "activo",
+    "razon": "NOGALES HIGH SAC"
+  },
+  "nogales_bo2": {
+    "password": "Nogales_BO2@2026",
+    "rol": "presencialidad",
+    "estado": "activo",
+    "razon": "NOGALES HIGH SAC"
+  },
   "konecta_presencialidad": {
     "password": "Konecta@2026",
     "rol": "presencialidad",
     "estado": "activo",
     "razon": "KONECTA SAC"
   },
+  "konecta_bo1": {
+    "password": "Konecta_BO1@2026",
+    "rol": "presencialidad",
+    "estado": "activo",
+    "razon": "KONECTA SAC"
+  },
+  "konecta_bo2": {
+    "password": "Konecta_BO2@2026",
+    "rol": "presencialidad",
+    "estado": "activo",
+    "razon": "KONECTA SAC"
+  },
   "grupocreed_presencialidad": {
     "password": "GrupoCreed@2026",
+    "rol": "presencialidad",
+    "estado": "activo",
+    "razon": "GRUPO CREED SAC"
+  },
+  "grupocreed_bo1": {
+    "password": "GrupoCreed_BO1@2026",
+    "rol": "presencialidad",
+    "estado": "activo",
+    "razon": "GRUPO CREED SAC"
+  },
+  "grupocreed_bo2": {
+    "password": "GrupoCreed_BO2@2026",
     "rol": "presencialidad",
     "estado": "activo",
     "razon": "GRUPO CREED SAC"

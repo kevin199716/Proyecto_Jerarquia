@@ -48,7 +48,7 @@ if rol == "backoffice":
 elif rol == "dealer":
     opciones_menu = ["Alta", "Bajas", "Presencialidad Dealer"]
 elif rol in ("presencialidad", "presencialidad_dealer"):
-    opciones_menu = ["Bajas", "Presencialidad Dealer"]
+    opciones_menu = ["Bajas", "Presencialidad Dealer", "Cobranza_Calidad"]
 elif rol == "editor":
     opciones_menu = ["Edición", "Presencialidad Dealer"]
 else:
@@ -126,6 +126,12 @@ elif rol in ("presencialidad", "presencialidad_dealer"):
     elif pagina == "Presencialidad Dealer":
         mostrar_asistencia(hoja_asistencia, hoja_colaboradores, hoja_sustentos=hoja_sustentos, razon=razon)
         mostrar_matriz_jerarquia()
+    elif pagina == "Cobranza_Calidad":
+        hoja_cobranza, error_conexion = conectar_google_sheets_opcional("Facturas - Calidad", "Consolidado")
+        if error_conexion:
+            st.error(f"❌ {error_conexion}")
+        else:
+            mostrar_cobranza(hoja_cobranza, razon)
 
 # EDITOR
 elif rol == "editor":
