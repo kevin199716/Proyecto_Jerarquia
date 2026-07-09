@@ -65,6 +65,33 @@ def conectar_google_sheets(nombre_hoja: str, nombre_worksheet: str):
         st.stop()
 
 
+def conectar_google_sheets_opcional(nombre_hoja: str, nombre_worksheet: str):
+    """
+    Igual que conectar_google_sheets, pero NUNCA detiene la app (no llama a
+    st.stop()). Para módulos opcionales/nuevos (como Cobranza_Calidad) cuyo
+    Sheet puede no estar compartido todavía: en vez de tumbar toda la sesión,
+    retorna (None, mensaje_de_error) para que el módulo lo maneje con calma.
+    """
+    try:
+        spreadsheet = _get_client().open(nombre_hoja)
+        worksheet = spreadsheet.worksheet(nombre_worksheet)
+        return worksheet, None
+    except gspread.exceptions.SpreadsheetNotFound:
+        return None, (
+            f"No se encontró ningún archivo de Google Sheets llamado exactamente **'{nombre_hoja}'** "
+            "compartido con la cuenta de servicio. Verifica: (1) que el nombre del archivo sea "
+            "idéntico, sin espacios de más; (2) que lo hayas compartido (botón Compartir) con el "
+            "correo de la cuenta de servicio, con rol **Editor**."
+        )
+    except gspread.exceptions.WorksheetNotFound:
+        return None, (
+            f"El archivo **'{nombre_hoja}'** sí se encontró, pero no tiene ninguna pestaña llamada "
+            f"exactamente **'{nombre_worksheet}'**. Revisa el nombre de la pestaña."
+        )
+    except Exception as e:
+        return None, f"Error inesperado al conectar: {e}"
+
+
 def conectar_google_drive():
     """Establece conexión con la API de Google Drive v3 (mantenido por compatibilidad)."""
     try:

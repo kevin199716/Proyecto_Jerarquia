@@ -8,7 +8,7 @@ if BASE_DIR not in sys.path:
 import registro_mod as registro
 from auth import cargar_usuarios, login
 from ui_inicio import mostrar_bienvenida
-from sheets import conectar_google_sheets
+from sheets import conectar_google_sheets, conectar_google_sheets_opcional
 from formulario import mostrar_formulario
 from asistencia import mostrar_asistencia
 from cobranza_calidad import mostrar_cobranza
@@ -94,16 +94,11 @@ if rol == "backoffice":
         mostrar_asistencia(hoja_asistencia, hoja_colaboradores, hoja_sustentos=hoja_sustentos)
         mostrar_matriz_jerarquia()
     elif pagina == "Cobranza_Calidad":
-        try:
-            hoja_cobranza = get_worksheet("Facturas - Calidad", "Consolidado")
-        except Exception as e:
-            hoja_cobranza = None
-            st.error(
-                f"❌ No se pudo conectar con la hoja 'Facturas - Calidad' / 'Consolidado': {e}\n\n"
-                "Verifica que el Sheet esté compartido con la cuenta de servicio (rol Editor) "
-                "y que el nombre del archivo sea exactamente 'Facturas - Calidad'."
-            )
-        mostrar_cobranza(hoja_cobranza, razon)
+        hoja_cobranza, error_conexion = conectar_google_sheets_opcional("Facturas - Calidad", "Consolidado")
+        if error_conexion:
+            st.error(f"❌ No se pudo conectar con el módulo de Cobranza:\n\n{error_conexion}")
+        else:
+            mostrar_cobranza(hoja_cobranza, razon)
 
 # DEALER
 elif rol == "dealer":
