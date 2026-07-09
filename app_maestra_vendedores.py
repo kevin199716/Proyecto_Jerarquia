@@ -94,11 +94,12 @@ if rol == "backoffice":
         mostrar_asistencia(hoja_asistencia, hoja_colaboradores, hoja_sustentos=hoja_sustentos)
         mostrar_matriz_jerarquia()
     elif pagina == "Cobranza_Calidad":
-        hoja_cobranza, error_conexion = conectar_google_sheets_opcional("Facturas - Calidad", "Consolidado")
-        if error_conexion:
-            st.error(f"❌ No se pudo conectar con el módulo de Cobranza:\n\n{error_conexion}")
+        hoja_cobranza, err1 = conectar_google_sheets_opcional("Facturas - Calidad", "Consolidado")
+        hoja_listas, err2 = conectar_google_sheets_opcional("Facturas - Calidad", "Listas")
+        if err1:
+            st.error(f"❌ {err1}")
         else:
-            mostrar_cobranza(hoja_cobranza, razon)
+            mostrar_cobranza(hoja_cobranza, razon, hoja_listas=hoja_listas)
 
 # DEALER
 elif rol == "dealer":
@@ -127,11 +128,12 @@ elif rol in ("presencialidad", "presencialidad_dealer"):
         mostrar_asistencia(hoja_asistencia, hoja_colaboradores, hoja_sustentos=hoja_sustentos, razon=razon)
         mostrar_matriz_jerarquia()
     elif pagina == "Cobranza_Calidad":
-        hoja_cobranza, error_conexion = conectar_google_sheets_opcional("Facturas - Calidad", "Consolidado")
-        if error_conexion:
-            st.error(f"❌ {error_conexion}")
+        hoja_cobranza, err1 = conectar_google_sheets_opcional("Facturas - Calidad", "Consolidado")
+        hoja_listas, err2 = conectar_google_sheets_opcional("Facturas - Calidad", "Listas")
+        if err1:
+            st.error(f"❌ {err1}")
         else:
-            mostrar_cobranza(hoja_cobranza, razon)
+            mostrar_cobranza(hoja_cobranza, razon, hoja_listas=hoja_listas)
 
 # EDITOR
 elif rol == "editor":
