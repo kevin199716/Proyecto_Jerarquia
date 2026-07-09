@@ -367,12 +367,12 @@ def dar_de_baja(df, hoja, razon_usuario=None):
     hoy = hoy_peru_fecha()
 
     fecha = st.date_input(
-        "Fecha de cese",
+        "Fecha de cese (FECHA_CESE)",
         value=hoy,
-        min_value=hoy - timedelta(days=2),
+        min_value=max(hoy - timedelta(days=3), fecha_creacion) if fecha_creacion else hoy - timedelta(days=3),
         max_value=hoy,
         key="fecha_cese_baja",
-        help="Solo permite antier, ayer u hoy."
+        help="Solo permite hasta 72 horas atrás (antier, ayer, hoy). No puede ser anterior a la fecha de alta."
     )
 
     motivo = st.selectbox("Motivo de baja", MOTIVOS, key="motivo_baja")
@@ -383,15 +383,19 @@ def dar_de_baja(df, hoja, razon_usuario=None):
             return
 
         if fecha_creacion and fecha < fecha_creacion:
-            st.error("❌ La fecha de cese no puede ser menor a la fecha de creación/alta.")
+            st.error(
+                f"❌ La fecha de cese ({fecha}) no puede ser anterior a la fecha de alta "
+                f"({fecha_creacion}). El calendario ya debería haber bloqueado esta fecha."
+            )
             return
 
         try:
             from gspread.cell import Cell
 
-            # FECHA MOV: solo fecha de movimiento/cese.
-            fecha_mov = str(fecha)
-            # FECHA_BAJA_REGISTRO: marcaje con fecha y hora.
+            # FECHA_CESE: la fecha seleccionada por el usuario (dentro de 72h)
+            # FECHA MOV: fecha del DÍA en que se registra la baja (siempre HOY)
+            fecha_mov = str(hoy)
+            # FECHA_BAJA_REGISTRO: marcaje con fecha y hora exacta
             marca_baja = ahora_peru_fecha_hora()
 
             row_sheet = index_global + 2

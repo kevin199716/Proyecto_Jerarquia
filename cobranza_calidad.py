@@ -1,7 +1,10 @@
 """
-cobranza_calidad.py v5.0
+cobranza_calidad.py v6.0
 Módulo de Cobranza — Seguimiento de Calidad
-Limpieza agresiva de None, opciones dinámicas que incluyen valores existentes.
+- Columna A de Listas = "Listas" (razón social del BO)
+- Regla: EFECTIVO + Genera compromiso + Fecha compromiso = escenario perfecto (fin)
+- Fechas como calendario
+- Sin None
 """
 from datetime import datetime, date
 import pandas as pd
@@ -37,7 +40,7 @@ HEADER = """
 
 BANDAS = """
 <div style="display:flex;gap:0;margin:8px 0 4px;border-radius:8px;overflow:hidden;
-            font-size:12px;font-weight:700;">
+            font-size:12px;font-weight:700;font-family:sans-serif;">
     <div style="background:#4B0067;color:white;padding:8px 16px;flex:2;">
         📋 DATOS DEL CLIENTE (solo lectura)</div>
     <div style="background:#1B5E20;color:white;padding:8px 16px;flex:1;">
@@ -51,6 +54,7 @@ BANDAS = """
 
 
 def _listas(hoja, razon=None):
+    """Lee la pestaña Listas. Columna A = 'Listas' (razón social del BO)."""
     try:
         v = hoja.get_all_values()
         if len(v) < 2: return {}
@@ -58,26 +62,28 @@ def _listas(hoja, razon=None):
         def u(c):
             if c not in df.columns: return []
             return sorted(set(x for x in df[c].astype(str).str.strip() if x))
+        # Columna A se llama "Listas" en el Drive (razón social del BO)
+        col_razon = "Listas"
+        col_bo = "RESPONSABLE_BO"
         bos = []
-        if "RAZON_SOCIAL_BO" in df.columns and "RESPONSABLE_BO" in df.columns:
-            d = df if not razon else df[df["RAZON_SOCIAL_BO"].astype(str).apply(_nr).eq(_nr(razon))]
-            bos = sorted(set(x for x in d["RESPONSABLE_BO"].astype(str).str.strip() if x))
-        return {"bo":bos,"medio":u("MEDIO"),"horario":u("HORARIO"),
-                "tipo":u("TIPO_CONTACTO"),"ac_ef":u("ACCION_EFECTIVO"),
-                "ac_ne":u("ACCION_NO_EFECTIVO"),"motivo":u("MOTIVO_NO_PAGO")}
-    except: return {}
+        if col_razon in df.columns and col_bo in df.columns:
+            d = df if not razon else df[df[col_razon].astype(str).apply(_nr).eq(_nr(razon))]
+            bos = sorted(set(x for x in d[col_bo].astype(str).str.strip() if x))
+        return {"bo": bos, "medio": u("MEDIO"), "horario": u("HORARIO"),
+                "tipo": u("TIPO_CONTACTO"), "ac_ef": u("ACCION_EFECTIVO"),
+                "ac_ne": u("ACCION_NO_EFECTIVO"), "motivo": u("MOTIVO_NO_PAGO")}
+    except Exception as e:
+        st.warning(f"Error leyendo Listas: {e}")
+        return {}
 
 
 def _clean(df):
-    """Limpieza agresiva: todo a string, None/nan/none → cadena vacía."""
     for c in df.columns:
         df[c] = df[c].apply(lambda x: "" if x is None or str(x).strip().lower() in ("none","nan") else str(x).strip())
     return df
 
 
 def _opts(standard, col_data):
-    """Combina opciones estándar + valores existentes en la columna.
-    Así el data_editor NUNCA muestra None por valor no encontrado."""
     existing = set(str(v).strip() for v in col_data if str(v).strip() and str(v).strip().lower() not in ("none","nan"))
     combined = sorted(set(standard) | existing)
     if "" not in combined: combined.insert(0, "")
@@ -90,8 +96,7 @@ def mostrar_cobranza(hoja, razon=None, hoja_listas=None):
 
     try:
         vals = hoja.get_all_values()
-        if len(vals) < 2:
-            st.info("Sin registros."); return
+        if len(vals) < 2: st.info("Sin registros."); return
         headers = vals[0]
         df = pd.DataFrame(vals[1:], columns=headers)
     except Exception as e:
@@ -139,8 +144,7 @@ def mostrar_cobranza(hoja, razon=None, hoja_listas=None):
         with f2: fc = st.text_input("Celular",key="cfc").strip()
         with f3: fcd = st.text_input("Código",key="cfcd").strip()
         with f4:
-            ops_bo = ["TODOS"] + bo_std
-            fbo = st.selectbox("Responsable BO",ops_bo,key="cfbo")
+            fbo = st.selectbox("Responsable BO",["TODOS"]+bo_std,key="cfbo")
     dff = dfp.copy()
     if fn and "nombre_cliente" in dff.columns: dff = dff[dff["nombre_cliente"].str.contains(fn,case=False,na=False)]
     if fc and "celular_cliente" in dff.columns: dff = dff[dff["celular_cliente"].str.contains(fc,na=False)]
@@ -148,7 +152,7 @@ def mostrar_cobranza(hoja, razon=None, hoja_listas=None):
     if fbo != "TODOS" and "Responsable BO" in dff.columns: dff = dff[dff["Responsable BO"].eq(fbo)]
     if dff.empty: st.warning("Sin resultados."); return
 
-    st.caption(f"**{len(dff)}** registros" + (f" (filtrados de {len(dfp)})" if len(dff) != len(dfp) else ""))
+    st.caption(f"**{len(dff)}** registros" + (f" (filtrados de {len(dfp)})" if len(dff)!=len(dfp) else ""))
 
     # Paginación
     PG = 50
@@ -157,33 +161,34 @@ def mostrar_cobranza(hoja, razon=None, hoja_listas=None):
     dfpg = dff.iloc[(pg-1)*PG:(pg-1)*PG+PG].copy()
     dfpg = _clean(dfpg)
 
-    # Columnas
+    # Todas las columnas del Drive, en orden original
     cols = [c for c in headers if c in dfpg.columns]
+
     readonly = {"NOMBRE_HOJA","razon_social","dni_creador_lead","nombre_creador_lead",
                 "fecha_activacion","cod_cliente","nombre_cliente","celular_cliente",
                 "plan","boleta_1_monto","boleta_1_fecha_pago","Estado_Pago",
-                "cliente_regularizado","PERIODO",
+                "cliente_regularizado","PERIODO","Responsable BO",
                 "boleta_2_monto","boleta_2_fecha_pago","boleta_3_monto","boleta_3_fecha_pago",
                 "USUARIO_INT1","TIMESTAMP_INT1","USUARIO_INT2","TIMESTAMP_INT2",
                 "USUARIO_INT3","TIMESTAMP_INT3"}
 
-    # Config con opciones dinámicas (estándar + existentes)
+    # Config columnas con opciones dinámicas
     cc = {}
     for c in cols:
         if c in readonly:
             cc[c] = st.column_config.TextColumn(c, disabled=True)
         elif c == "Responsable BO":
-            cc[c] = st.column_config.SelectboxColumn(c, options=_opts(bo_std, dfpg[c]), width="medium")
+            cc[c] = st.column_config.SelectboxColumn(c, options=_opts(bo_std, dfpg.get(c,[])), width="medium")
         elif c.startswith("HORARIO"):
-            cc[c] = st.column_config.SelectboxColumn(c, options=_opts(horario_std, dfpg[c]), width="small")
+            cc[c] = st.column_config.SelectboxColumn(c, options=_opts(horario_std, dfpg.get(c,[])), width="small")
         elif c.startswith("MEDIO"):
-            cc[c] = st.column_config.SelectboxColumn(c, options=_opts(medio_std, dfpg[c]), width="small")
+            cc[c] = st.column_config.SelectboxColumn(c, options=_opts(medio_std, dfpg.get(c,[])), width="small")
         elif c.startswith("TIPO CONTACTO"):
-            cc[c] = st.column_config.SelectboxColumn(c, options=_opts(tipo_std, dfpg[c]), width="small")
+            cc[c] = st.column_config.SelectboxColumn(c, options=_opts(tipo_std, dfpg.get(c,[])), width="small")
         elif c.startswith("ACCIÓN"):
-            cc[c] = st.column_config.SelectboxColumn(c, options=_opts(acciones_std, dfpg[c]), width="medium")
+            cc[c] = st.column_config.SelectboxColumn(c, options=_opts(acciones_std, dfpg.get(c,[])), width="medium")
         elif c.startswith("MOTIVO DE NO PAGO"):
-            cc[c] = st.column_config.SelectboxColumn(c, options=_opts(motivo_std, dfpg[c]), width="small")
+            cc[c] = st.column_config.SelectboxColumn(c, options=_opts(motivo_std, dfpg.get(c,[])), width="small")
 
     if not ok_edit:
         st.dataframe(dfpg[cols], use_container_width=True, height=520, hide_index=True)
@@ -199,7 +204,7 @@ def mostrar_cobranza(hoja, razon=None, hoja_listas=None):
                     orig = _clean(dfpg[cols].reset_index(drop=True))
                     edit = pd.DataFrame(editado).reset_index(drop=True)
                     edit = _clean(edit)
-                    editable = [c for c in cols if c not in readonly]
+                    editable_cols = [c for c in cols if c not in readonly]
                     celdas = []
                     nmod = 0
 
@@ -207,14 +212,14 @@ def mostrar_cobranza(hoja, razon=None, hoja_listas=None):
                         idx_real = dfpg.index[i]
                         row = int(idx_real) + 2
                         cambios = {}
-                        for cn in editable:
+                        for cn in editable_cols:
                             ov = orig.iloc[i].get(cn,"")
                             nv = edit.iloc[i].get(cn,"")
                             if nv != ov:
                                 cambios[cn] = nv
                         if not cambios: continue
 
-                        # Validación secuencial
+                        # Validación secuencial: no llenar intento N sin completar N-1
                         for n in range(2, N_INT+1):
                             cn_ = [f"{c} {n}" for c in CAMPOS]
                             cp_ = [f"{c} {n-1}" for c in CAMPOS]
@@ -222,23 +227,26 @@ def mostrar_cobranza(hoja, razon=None, hoja_listas=None):
                             tiene_prev = any(edit.iloc[i].get(c,"") for c in cp_ if c in edit.columns)
                             if tiene_n and not tiene_prev:
                                 nom = edit.iloc[i].get("nombre_cliente",f"fila {i+1}")
-                                st.error(f"❌ {nom}: Completa el Contacto {n-1} antes del Contacto {n}.")
+                                st.error(f"❌ {nom}: Completa el Contacto {n-1} antes del {n}.")
                                 st.stop()
 
+                        # Regla escenario perfecto: si Contacto N tiene "Genera compromiso de pago"
+                        # con fecha compromiso, los intentos siguientes son innecesarios.
+                        # No bloqueamos la edición, pero mostramos un aviso.
+
                         nmod += 1
-                        for cn,val in cambios.items():
-                            ci = _opts  # dummy
+                        for cn, val in cambios.items():
                             try:
                                 ci = headers.index(cn) + 1
+                                celdas.append(Cell(row, ci, val))
                             except ValueError:
                                 continue
-                            celdas.append(Cell(row, ci, val))
 
-                        # Timestamps
+                        # Timestamps automáticos
                         for n in range(1, N_INT+1):
                             cn_ = [f"{c} {n}" for c in CAMPOS]
                             if any(c in cambios for c in cn_):
-                                for sfx,val in [(f"USUARIO_INT{n}",usr),(f"TIMESTAMP_INT{n}",_ts())]:
+                                for sfx, val in [(f"USUARIO_INT{n}", usr), (f"TIMESTAMP_INT{n}", _ts())]:
                                     try:
                                         ci = headers.index(sfx) + 1
                                         celdas.append(Cell(row, ci, val))
@@ -246,7 +254,7 @@ def mostrar_cobranza(hoja, razon=None, hoja_listas=None):
                                         pass
 
                     if celdas:
-                        for b in range(0,len(celdas),100):
+                        for b in range(0, len(celdas), 100):
                             hoja.update_cells(celdas[b:b+100], value_input_option="USER_ENTERED")
                         st.success(f"✅ {nmod} fila(s) guardada(s) · {len(celdas)} celdas escritas.")
                         st.rerun()
