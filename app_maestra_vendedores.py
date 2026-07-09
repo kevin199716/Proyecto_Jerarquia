@@ -47,7 +47,7 @@ if rol == "backoffice":
 elif rol == "dealer":
     opciones_menu = ["Alta", "Bajas", "Presencialidad Dealer"]
 elif rol in ("presencialidad", "presencialidad_dealer"):
-    opciones_menu = ["Presencialidad Dealer"]
+    opciones_menu = ["Bajas", "Presencialidad Dealer"]
 elif rol == "editor":
     opciones_menu = ["Edición", "Presencialidad Dealer"]
 else:
@@ -111,7 +111,12 @@ elif rol == "dealer":
 # PRESENCIALIDAD
 elif rol in ("presencialidad", "presencialidad_dealer"):
     wow_section(f"Presencialidad Dealer: {razon}", "🗓️")
-    if pagina == "Presencialidad Dealer":
+    if pagina == "Bajas":
+        df = mostrar_matriz_jerarquia()
+        if df is not None:
+            st.divider()
+            registro.dar_de_baja(df, hoja_colaboradores, razon)
+    elif pagina == "Presencialidad Dealer":
         mostrar_asistencia(hoja_asistencia, hoja_colaboradores, hoja_sustentos=hoja_sustentos, razon=razon)
         mostrar_matriz_jerarquia()
 

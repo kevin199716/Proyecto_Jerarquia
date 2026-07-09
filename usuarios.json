@@ -28,5 +28,11 @@
     "rol": "presencialidad",
     "estado": "activo",
     "razon": "KONECTA SAC"
+  },
+  "grupocreed_presencialidad": {
+    "password": "GrupoCreed@2026",
+    "rol": "presencialidad",
+    "estado": "activo",
+    "razon": "GRUPO CREED SAC"
   }
 }

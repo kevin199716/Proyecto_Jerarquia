@@ -95,7 +95,6 @@ MOTIVOS = [
     "Renuncia Laboral",
     "NSPP",
     "Baja por Productividad",
-    "Baja por FPD",
     "Baja - VNE3",
     "Baja por politica de Actividad",
     "Abandono Laboral / Faltas Injustificadas",
