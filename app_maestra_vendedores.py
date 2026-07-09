@@ -11,6 +11,7 @@ from ui_inicio import mostrar_bienvenida
 from sheets import conectar_google_sheets
 from formulario import mostrar_formulario
 from asistencia import mostrar_asistencia
+from cobranza_calidad import mostrar_cobranza
 from wow_theme import inject_global_theme, render_app_header, render_sidebar_user, render_sidebar_help, wow_section
 
 st.set_page_config(page_title="WOW", page_icon="🟣", layout="wide", initial_sidebar_state="expanded")
@@ -43,7 +44,7 @@ hoja_sustentos     = get_worksheet("maestra_vendedores", "Sustentos_Bajas")
 render_sidebar_user(usuario=usuario, rol=rol, razon=razon)
 
 if rol == "backoffice":
-    opciones_menu = ["Alta", "Bajas", "Presencialidad Dealer"]
+    opciones_menu = ["Alta", "Bajas", "Presencialidad Dealer", "Cobranza_Calidad"]
 elif rol == "dealer":
     opciones_menu = ["Alta", "Bajas", "Presencialidad Dealer"]
 elif rol in ("presencialidad", "presencialidad_dealer"):
@@ -92,6 +93,17 @@ if rol == "backoffice":
     elif pagina == "Presencialidad Dealer":
         mostrar_asistencia(hoja_asistencia, hoja_colaboradores, hoja_sustentos=hoja_sustentos)
         mostrar_matriz_jerarquia()
+    elif pagina == "Cobranza_Calidad":
+        try:
+            hoja_cobranza = get_worksheet("Facturas - Calidad", "Consolidado")
+        except Exception as e:
+            hoja_cobranza = None
+            st.error(
+                f"❌ No se pudo conectar con la hoja 'Facturas - Calidad' / 'Consolidado': {e}\n\n"
+                "Verifica que el Sheet esté compartido con la cuenta de servicio (rol Editor) "
+                "y que el nombre del archivo sea exactamente 'Facturas - Calidad'."
+            )
+        mostrar_cobranza(hoja_cobranza, razon)
 
 # DEALER
 elif rol == "dealer":
