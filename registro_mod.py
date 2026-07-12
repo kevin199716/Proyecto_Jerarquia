@@ -304,7 +304,8 @@ def dar_de_baja(df, hoja, razon_usuario=None):
     usuario_actual = st.session_state.get("usuario", "")
 
     if rol != "backoffice" and razon_usuario and "RAZON SOCIAL" in df.columns:
-        df = df[df["RAZON SOCIAL"].astype(str).str.strip().eq(razon_usuario)]
+        razon_norm = _normalizar_razon(razon_usuario)
+        df = df[df["RAZON SOCIAL"].astype(str).apply(_normalizar_razon).eq(razon_norm)]
 
     if "DNI" not in df.columns:
         st.error("❌ La base no tiene columna DNI.")
