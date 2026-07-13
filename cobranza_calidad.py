@@ -163,35 +163,43 @@ def _formulario_contacto(n, fila, L, ok):
     tipo_idx  = tipo_opts.index(fila.get(col_tipo,"")) if fila.get(col_tipo,"") in tipo_opts else 0
     tipo      = st.selectbox("🎯 Tipo de contacto", tipo_opts, index=tipo_idx, key=f"f_tipo_{n}")
 
-    accion    = ""
-    fc_date   = None
-    motivo    = ""
-
-    if tipo:
-        acc_list = ACCIONES.get(tipo, [])
-        acc_opts = [""] + acc_list
-        acc_val  = fila.get(col_acc,"")
-        acc_idx  = acc_opts.index(acc_val) if acc_val in acc_opts else 0
-        color    = "🟢" if tipo == "EFECTIVO" else "🔴"
-        accion   = st.selectbox(f"{color} Acción ({tipo})", acc_opts, index=acc_idx, key=f"f_acc_{n}")
-
-        if accion in ACCIONES_REQUIEREN_FC:
-            fc_val = fila.get(col_fc,"")
-            try:
-                fc_def = datetime.strptime(fc_val, "%Y-%m-%d").date() if fc_val else fecha
-            except:
-                fc_def = fecha
-            fc_date = st.date_input("📆 Fecha compromiso de pago", value=fc_def,
-                                    min_value=_hoy(), key=f"f_fc_{n}")
-            st.info("💡 Escenario perfecto — el cliente genera compromiso de pago.")
-
-        if accion in ACCIONES_REQUIEREN_MOTIVO:
-            mot_opts = [""] + L.get("motivo",["Problema técnico","Error en facturación","Económicos"])
-            mot_val  = fila.get(col_mot,"")
-            mot_idx  = mot_opts.index(mot_val) if mot_val in mot_opts else 0
-            motivo   = st.selectbox("❓ Motivo de no pago", mot_opts, index=mot_idx, key=f"f_mot_{n}")
+    # Acción — siempre visible, opciones según tipo ya seleccionado en la fila original
+    # Dentro de st.form la cascada no cambia en tiempo real,
+    # pero sí muestra las opciones correctas según el tipo guardado en Drive
+    tipo_para_opciones = fila.get(col_tipo,"") or tipo  # usa el del drive o el seleccionado
+    if tipo_para_opciones in ACCIONES:
+        acc_list = ACCIONES[tipo_para_opciones]
     else:
-        st.caption("Selecciona el tipo de contacto para ver las acciones.")
+        acc_list = sorted(set(sum(ACCIONES.values(), [])))  # todas si no hay tipo
+
+    acc_opts = [""] + acc_list
+    acc_val  = fila.get(col_acc,"")
+    acc_idx  = acc_opts.index(acc_val) if acc_val in acc_opts else 0
+    color    = "🟢" if "EFECTIVO" in str(tipo_para_opciones) else ("🔴" if tipo_para_opciones else "⚪")
+    accion   = st.selectbox(f"{color} Acción", acc_opts, index=acc_idx, key=f"f_acc_{n}")
+
+    # Fecha compromiso — aparece siempre si la acción lo requiere
+    fc_date = None
+    if accion in ACCIONES_REQUIEREN_FC:
+        fc_val = fila.get(col_fc,"")
+        try:
+            fc_def = datetime.strptime(fc_val, "%Y-%m-%d").date() if fc_val else _hoy()
+        except:
+            fc_def = _hoy()
+        fc_date = st.date_input("📆 Fecha compromiso de pago", value=fc_def,
+                                min_value=_hoy(), key=f"f_fc_{n}")
+        st.info("💡 Escenario perfecto — el cliente genera compromiso de pago.")
+
+    # Motivo — aparece siempre si la acción lo requiere
+    motivo = ""
+    if accion in ACCIONES_REQUIEREN_MOTIVO:
+        mot_opts = [""] + L.get("motivo",["Problema técnico","Error en facturación","Económicos"])
+        mot_val  = fila.get(col_mot,"")
+        mot_idx  = mot_opts.index(mot_val) if mot_val in mot_opts else 0
+        motivo   = st.selectbox("❓ Motivo de no pago", mot_opts, index=mot_idx, key=f"f_mot_{n}")
+
+    if not tipo and not fila.get(col_tipo,""):
+        st.caption("ℹ️ Selecciona el tipo de contacto y guarda para ver las acciones correspondientes.")
 
     return {
         col_fecha: str(fecha),
@@ -402,10 +410,13 @@ def mostrar_cobranza(hoja, razon=None, hoja_listas=None):
             except Exception as e:
                 st.error(f"❌ Error: {e}")
 
-    # Espejo + Descarga
+    # Espejo + Descarga — muestra TODAS las columnas del Drive (incluyendo nuevas)
     st.divider()
-    st.markdown('<div style="background:linear-gradient(90deg,#4B0067,#7B1FA2);padding:8px 16px;border-radius:8px;margin-bottom:8px;"><span style="color:white;font-weight:700;">📊 Espejo Consolidado</span></div>', unsafe_allow_html=True)
-    cols_esp = [c for c in dfp.columns if not c.startswith("USUARIO_INT") and not c.startswith("TIMESTAMP_INT")]
+    st.markdown('<div style="background:linear-gradient(90deg,#4B0067,#7B1FA2);padding:8px 16px;border-radius:8px;margin-bottom:8px;"><span style="color:white;font-weight:700;">📊 Espejo Consolidado — todas las columnas</span></div>', unsafe_allow_html=True)
+    # Ocultar solo timestamps internos, mostrar todo lo demás incluyendo columnas nuevas
+    cols_esp = [c for c in dfp.columns
+                if not c.startswith("USUARIO_INT") and not c.startswith("TIMESTAMP_INT")]
+    st.caption(f"Mostrando {len(cols_esp)} columnas de {len(dfp.columns)} totales del Drive.")
     st.dataframe(dfp[cols_esp], use_container_width=True, height=300, hide_index=True)
     csv = dfp.to_csv(index=False, encoding="utf-8-sig")
     st.download_button(f"⬇️ Descargar {per} ({len(dfp)} reg.)",
