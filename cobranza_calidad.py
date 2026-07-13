@@ -118,7 +118,6 @@ def _build_grid(df, L, editable, readonly):
             if campo in ("FECHA","FECHA COMPROMISO"):
                 hint = "F.Comp" if campo == "FECHA COMPROMISO" else "Fecha"
                 col = _txt(cn, f"{hint} (YYYY-MM-DD)", True, 120)
-                col["tooltipValueGetter"] = {"function": "return 'Formato: AAAA-MM-DD, ej: 2026-07-15'"}
                 ch.append(col)
             elif campo == "HORARIO":
                 ch.append(_sel(cn,"Horario",L.get("horario",[]),110))
