@@ -1,7 +1,6 @@
 """
-cobranza_calidad.py v13.0 — Arquitectura CRM profesional
-Tabla solo lectura (rápida) + Formulario lateral para editar
-Sin AgGrid editable = Sin friseo = Sin errores de componente
+cobranza_calidad.py v14.0
+Fixes: error session_state, filtro en selector cliente, acción siempre visible
 """
 from datetime import datetime, date
 import pandas as pd
@@ -19,26 +18,15 @@ def _nr(s): return str(s).strip().upper().replace(".","").replace("-","").replac
 CAMPOS = ["FECHA","HORARIO","MEDIO","TIPO CONTACTO","ACCIÓN","FECHA COMPROMISO","MOTIVO DE NO PAGO"]
 N_INT = 3
 
-# Árbol de tipificaciones
 ACCIONES = {
-    "EFECTIVO": [
-        "Ya pagó",
-        "Genera compromiso de pago",
-        "Indica no pagará",
-        "Contesta y cuelga",
-        "Contesta y no da razón",
-        "Otros: detallar",
-    ],
-    "NO EFECTIVO": [
-        "Teléfono apagado",
-        "Teléfono suspendido",
-        "Teléfono no existe",
-        "Timbra y no contesta",
-        "Contesta pero desconoce a titular",
-    ],
+    "EFECTIVO": ["Ya pagó","Genera compromiso de pago","Indica no pagará",
+                 "Contesta y cuelga","Contesta y no da razón","Otros: detallar"],
+    "NO EFECTIVO": ["Teléfono apagado","Teléfono suspendido","Teléfono no existe",
+                    "Timbra y no contesta","Contesta pero desconoce a titular"],
 }
-ACCIONES_REQUIEREN_FC = {"Genera compromiso de pago"}
-ACCIONES_REQUIEREN_MOTIVO = {"Indica no pagará", "Otros: detallar"}
+TODAS_ACCIONES = sorted(set(sum(ACCIONES.values(),[])))
+REQUIERE_FC     = {"Genera compromiso de pago"}
+REQUIERE_MOTIVO = {"Indica no pagará","Otros: detallar"}
 
 HEADER = """
 <div style="background:linear-gradient(135deg,#4B0067,#7B1FA2 50%,#EC6608);
@@ -68,7 +56,7 @@ def _listas(hoja, razon=None):
         if "Listas" in df.columns and "RESPONSABLE_BO" in df.columns:
             d = df if not razon else df[df["Listas"].astype(str).apply(_nr).eq(_nr(razon))]
             bos = sorted(set(x for x in d["RESPONSABLE_BO"].astype(str).str.strip() if x))
-        return {"bo":bos, "medio":u("MEDIO"), "horario":u("HORARIO"), "motivo":u("MOTIVO_NO_PAGO")}
+        return {"bo":bos,"medio":u("MEDIO"),"horario":u("HORARIO"),"motivo":u("MOTIVO_NO_PAGO")}
     except: return {}
 
 
@@ -86,8 +74,8 @@ def _kpis(dfp):
     c3 = int((dfp["ACCIÓN 3"].astype(str).str.strip() != "").sum()) if "ACCIÓN 3" in dfp.columns else 0
     ef = sum(int((dfp[f"TIPO CONTACTO {n}"].astype(str).str.strip() == "EFECTIVO").sum())
              for n in range(1,4) if f"TIPO CONTACTO {n}" in dfp.columns)
-    pa = f"{g/total*100:.1f}%" if total > 0 else "0%"
-    pe = f"{ef/total*100:.1f}%" if total > 0 else "0%"
+    pa = f"{g/total*100:.1f}%" if total>0 else "0%"
+    pe = f"{ef/total*100:.1f}%" if total>0 else "0%"
     st.markdown(f"""
     <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin:12px 0;">
         <div style="background:white;border:2px solid #4B0067;border-radius:10px;padding:12px;text-align:center;">
@@ -108,110 +96,6 @@ def _kpis(dfp):
     </div>""", unsafe_allow_html=True)
 
 
-def _formulario_contacto(n, fila, L, ok):
-    """Formulario dentro de st.form — sin keys explícitas para evitar conflictos."""
-    col_fecha = f"FECHA {n}"
-    col_hor   = f"HORARIO {n}"
-    col_med   = f"MEDIO {n}"
-    col_tipo  = f"TIPO CONTACTO {n}"
-    col_acc   = f"ACCIÓN {n}"
-    col_fc    = f"FECHA COMPROMISO {n}"
-    col_mot   = f"MOTIVO DE NO PAGO {n}"
-
-    colors = {1:"#1B5E20", 2:"#E65100", 3:"#B71C1C"}
-    labels = {1:"1️⃣ PRIMER CONTACTO", 2:"2️⃣ SEGUNDO CONTACTO", 3:"3️⃣ TERCER CONTACTO"}
-
-    st.markdown(f"""
-    <div style="background:{colors[n]};color:white;padding:8px 12px;
-                border-radius:6px;margin:12px 0 8px;font-weight:700;font-size:14px;">
-        {labels[n]}
-    </div>""", unsafe_allow_html=True)
-
-    if not ok:
-        c1,c2,c3,c4 = st.columns(4)
-        with c1: st.text_input("Fecha",   value=fila.get(col_fecha,""), disabled=True, key=f"vf{n}")
-        with c2: st.text_input("Horario", value=fila.get(col_hor,""),   disabled=True, key=f"vh{n}")
-        with c3: st.text_input("Medio",   value=fila.get(col_med,""),   disabled=True, key=f"vm{n}")
-        with c4: st.text_input("Tipo",    value=fila.get(col_tipo,""),  disabled=True, key=f"vt{n}")
-        c5,c6,c7 = st.columns(3)
-        with c5: st.text_input("Acción",  value=fila.get(col_acc,""),   disabled=True, key=f"va{n}")
-        with c6: st.text_input("F.Comp.", value=fila.get(col_fc,""),    disabled=True, key=f"vfc{n}")
-        with c7: st.text_input("Motivo",  value=fila.get(col_mot,""),   disabled=True, key=f"vmo{n}")
-        return None
-
-    val_fecha = fila.get(col_fecha,"")
-    try:
-        fecha_def = datetime.strptime(val_fecha, "%Y-%m-%d").date() if val_fecha else _hoy()
-    except:
-        fecha_def = _hoy()
-
-    c1,c2,c3 = st.columns(3)
-    with c1:
-        fecha = st.date_input("📅 Fecha contacto", value=fecha_def,
-                              min_value=date(2024,1,1), max_value=date(2030,12,31),
-                              key=f"f_fecha_{n}")
-    with c2:
-        hor_opts = [""] + L.get("horario",["8AM - 12PM","12PM - 3PM","3PM - 6PM","6PM - Cierre"])
-        hor_idx  = hor_opts.index(fila.get(col_hor,"")) if fila.get(col_hor,"") in hor_opts else 0
-        horario  = st.selectbox("🕐 Horario", hor_opts, index=hor_idx, key=f"f_hor_{n}")
-    with c3:
-        med_opts = [""] + L.get("medio",["Llamada de voz","Whatsapp","Campo"])
-        med_idx  = med_opts.index(fila.get(col_med,"")) if fila.get(col_med,"") in med_opts else 0
-        medio    = st.selectbox("📞 Medio", med_opts, index=med_idx, key=f"f_med_{n}")
-
-    tipo_opts = ["", "EFECTIVO", "NO EFECTIVO"]
-    tipo_idx  = tipo_opts.index(fila.get(col_tipo,"")) if fila.get(col_tipo,"") in tipo_opts else 0
-    tipo      = st.selectbox("🎯 Tipo de contacto", tipo_opts, index=tipo_idx, key=f"f_tipo_{n}")
-
-    # Acción — siempre visible, opciones según tipo ya seleccionado en la fila original
-    # Dentro de st.form la cascada no cambia en tiempo real,
-    # pero sí muestra las opciones correctas según el tipo guardado en Drive
-    tipo_para_opciones = fila.get(col_tipo,"") or tipo  # usa el del drive o el seleccionado
-    if tipo_para_opciones in ACCIONES:
-        acc_list = ACCIONES[tipo_para_opciones]
-    else:
-        acc_list = sorted(set(sum(ACCIONES.values(), [])))  # todas si no hay tipo
-
-    acc_opts = [""] + acc_list
-    acc_val  = fila.get(col_acc,"")
-    acc_idx  = acc_opts.index(acc_val) if acc_val in acc_opts else 0
-    color    = "🟢" if "EFECTIVO" in str(tipo_para_opciones) else ("🔴" if tipo_para_opciones else "⚪")
-    accion   = st.selectbox(f"{color} Acción", acc_opts, index=acc_idx, key=f"f_acc_{n}")
-
-    # Fecha compromiso — aparece siempre si la acción lo requiere
-    fc_date = None
-    if accion in ACCIONES_REQUIEREN_FC:
-        fc_val = fila.get(col_fc,"")
-        try:
-            fc_def = datetime.strptime(fc_val, "%Y-%m-%d").date() if fc_val else _hoy()
-        except:
-            fc_def = _hoy()
-        fc_date = st.date_input("📆 Fecha compromiso de pago", value=fc_def,
-                                min_value=_hoy(), key=f"f_fc_{n}")
-        st.info("💡 Escenario perfecto — el cliente genera compromiso de pago.")
-
-    # Motivo — aparece siempre si la acción lo requiere
-    motivo = ""
-    if accion in ACCIONES_REQUIEREN_MOTIVO:
-        mot_opts = [""] + L.get("motivo",["Problema técnico","Error en facturación","Económicos"])
-        mot_val  = fila.get(col_mot,"")
-        mot_idx  = mot_opts.index(mot_val) if mot_val in mot_opts else 0
-        motivo   = st.selectbox("❓ Motivo de no pago", mot_opts, index=mot_idx, key=f"f_mot_{n}")
-
-    if not tipo and not fila.get(col_tipo,""):
-        st.caption("ℹ️ Selecciona el tipo de contacto y guarda para ver las acciones correspondientes.")
-
-    return {
-        col_fecha: str(fecha),
-        col_hor:   horario,
-        col_med:   medio,
-        col_tipo:  tipo,
-        col_acc:   accion,
-        col_fc:    str(fc_date) if fc_date else "",
-        col_mot:   motivo,
-    }
-
-
 def mostrar_cobranza(hoja, razon=None, hoja_listas=None):
     st.markdown(HEADER, unsafe_allow_html=True)
     if not hoja: return
@@ -230,7 +114,7 @@ def mostrar_cobranza(hoja, razon=None, hoja_listas=None):
 
     L = _listas(hoja_listas, razon if rol != "backoffice" else None) if hoja_listas else {}
     if not L:
-        L = {"bo":[], "medio":["Llamada de voz","Whatsapp","Campo"],
+        L = {"bo":[],"medio":["Llamada de voz","Whatsapp","Campo"],
              "horario":["8AM - 12PM","12PM - 3PM","3PM - 6PM","6PM - Cierre"],
              "motivo":["Problema técnico","Error en facturación","Económicos"]}
 
@@ -258,12 +142,12 @@ def mostrar_cobranza(hoja, razon=None, hoja_listas=None):
 
     _kpis(dfp)
 
-    # Filtros
+    # ── FILTROS (afectan tabla Y selector de cliente) ──
     with st.expander("🔍 Filtros", expanded=False):
         f1,f2,f3,f4 = st.columns(4)
-        with f1: fn  = st.text_input("Nombre",key="cfn").strip()
-        with f2: fc  = st.text_input("Celular",key="cfc").strip()
-        with f3: fcd = st.text_input("Código", key="cfcd").strip()
+        with f1: fn  = st.text_input("Nombre",  key="cfn").strip()
+        with f2: fc  = st.text_input("Celular",  key="cfc").strip()
+        with f3: fcd = st.text_input("Código",   key="cfcd").strip()
         with f4: fbo = st.selectbox("Responsable BO",["TODOS"]+L.get("bo",[]),key="cfbo")
 
     dff = dfp.copy()
@@ -275,30 +159,27 @@ def mostrar_cobranza(hoja, razon=None, hoja_listas=None):
     if dff.empty: st.warning("Sin resultados."); return
     if len(dff) != len(dfp): st.caption(f"**{len(dff)}** de {len(dfp)} registros.")
 
-    # ── TABLA DE SOLO LECTURA (rápida, sin edición) ──
+    # ── TABLA RESUMEN (solo lectura, rápida) ──
     cols_tabla = [c for c in ["cod_cliente","nombre_cliente","celular_cliente",
                                "Estado_Pago","PERIODO","Responsable BO",
                                "TIPO CONTACTO 1","ACCIÓN 1",
                                "TIPO CONTACTO 2","ACCIÓN 2",
-                               "TIPO CONTACTO 3","ACCIÓN 3"]
-                  if c in dff.columns]
+                               "TIPO CONTACTO 3","ACCIÓN 3"] if c in dff.columns]
 
-    # Paginación manual ligera
     PAGE = 25
-    total_pag = max(1, -(-len(dff) // PAGE))
+    total_pag = max(1,-(-len(dff)//PAGE))
     pag = st.number_input(f"Página (de {total_pag})", 1, total_pag, 1, key="pag")
     ini = (pag-1)*PAGE
     df_page = dff.iloc[ini:ini+PAGE].copy()
 
-    # Tabla con color por tipo contacto
-    def _color_row(row):
-        tipo1 = str(row.get("TIPO CONTACTO 1","")).strip()
-        if tipo1 == "EFECTIVO":    return ["background-color:#F1F8E9"]*len(row)
-        if tipo1 == "NO EFECTIVO": return ["background-color:#FFF3E0"]*len(row)
+    def _color(row):
+        t = str(row.get("TIPO CONTACTO 1","")).strip()
+        if t == "EFECTIVO":    return ["background-color:#F1F8E9"]*len(row)
+        if t == "NO EFECTIVO": return ["background-color:#FFF3E0"]*len(row)
         return [""]*len(row)
 
-    styled = df_page[cols_tabla].style.apply(_color_row, axis=1)
-    st.dataframe(styled, use_container_width=True, height=380, hide_index=True)
+    st.dataframe(df_page[cols_tabla].style.apply(_color, axis=1),
+                 use_container_width=True, height=360, hide_index=True)
 
     if not ok:
         st.divider()
@@ -306,34 +187,46 @@ def mostrar_cobranza(hoja, razon=None, hoja_listas=None):
         cols_esp = [c for c in dfp.columns if not c.startswith("USUARIO_INT") and not c.startswith("TIMESTAMP_INT")]
         st.dataframe(dfp[cols_esp], use_container_width=True, height=300, hide_index=True)
         csv = dfp.to_csv(index=False, encoding="utf-8-sig")
-        st.download_button(f"⬇️ Descargar {per} ({len(dfp)} reg.)",
-                           data=csv, file_name=f"cobranza_{per}.csv", mime="text/csv", key="cdl")
+        st.download_button(f"⬇️ Descargar {per} ({len(dfp)} reg.)", data=csv,
+                           file_name=f"cobranza_{per}.csv", mime="text/csv", key="cdl")
         return
 
-    # ── FORMULARIO DE EDICIÓN ──
+    # ── SELECTOR DE CLIENTE (de los filtrados en la página actual) ──
     st.divider()
     st.markdown("""
     <div style="background:linear-gradient(90deg,#4B0067,#7B1FA2);padding:10px 16px;
                 border-radius:8px;margin-bottom:12px;">
         <span style="color:white;font-weight:700;font-size:15px;">
-            ✏️ Registrar gestión — Selecciona un cliente de la tabla
+            ✏️ Registrar gestión
         </span>
     </div>""", unsafe_allow_html=True)
 
-    # Selector de cliente FUERA del form para que filtre la tabla
-    opciones_sel = ["-- Selecciona un cliente --"] + [
-        f"{r.get('cod_cliente','')} · {r.get('nombre_cliente','')} · {r.get('celular_cliente','')}"
-        for _, r in df_page.iterrows()
-    ]
-    sel_idx = st.selectbox("Cliente a gestionar", range(len(opciones_sel)),
-                           format_func=lambda i: opciones_sel[i], key="sel_cliente")
+    # Búsqueda rápida en el selector
+    busq = st.text_input("🔎 Buscar cliente (nombre, celular o código)",
+                         key="busq_sel").strip().lower()
+    filas_sel = df_page
+    if busq:
+        mask = pd.Series(False, index=filas_sel.index)
+        for col in ["nombre_cliente","celular_cliente","cod_cliente"]:
+            if col in filas_sel.columns:
+                mask = mask | filas_sel[col].astype(str).str.lower().str.contains(busq, na=False)
+        filas_sel = filas_sel[mask]
 
-    if sel_idx == 0:
-        st.info("👆 Selecciona un cliente de la lista para registrar su gestión.")
+    if filas_sel.empty:
+        st.info("No hay clientes que coincidan con la búsqueda.")
         return
 
-    fila_idx = df_page.index[sel_idx - 1]
-    fila = dict(dff.loc[fila_idx])
+    opts = [f"{r.get('cod_cliente','')} · {r.get('nombre_cliente','')} · {r.get('celular_cliente','')}"
+            for _, r in filas_sel.iterrows()]
+    sel  = st.selectbox("Cliente a gestionar", ["-- Selecciona --"] + opts, key="sel_cli")
+
+    if sel == "-- Selecciona --":
+        st.info("👆 Selecciona un cliente para registrar su gestión.")
+        return
+
+    sel_pos   = opts.index(sel)
+    fila_idx  = filas_sel.index[sel_pos]
+    fila      = dict(dff.loc[fila_idx])
     row_sheet = int(fila_idx) + 2
 
     # Info del cliente
@@ -352,25 +245,92 @@ def mostrar_cobranza(hoja, razon=None, hoja_listas=None):
         </div>
     </div>""", unsafe_allow_html=True)
 
-    # ── TODO EL FORMULARIO EN st.form → CERO RECARGAS AL EDITAR ──
-    with st.form(key="form_gestion"):
+    # ── FORMULARIO EN st.form → CERO RECARGAS AL EDITAR ──
+    with st.form(key=f"form_{fila_idx}"):
         bo_list = L.get("bo",[])
-        bo_idx = bo_list.index(fila.get("Responsable BO","")) + 1 if fila.get("Responsable BO","") in bo_list else 0
+        bo_idx  = bo_list.index(fila.get("Responsable BO","")) + 1 \
+                  if fila.get("Responsable BO","") in bo_list else 0
         responsable = st.selectbox("👤 Responsable BO", [""] + bo_list, index=bo_idx)
 
         resultados = {}
         for n in range(1, N_INT+1):
-            res = _formulario_contacto(n, fila, L, ok)
-            if res:
-                resultados.update(res)
+            colors = {1:"#1B5E20",2:"#E65100",3:"#B71C1C"}
+            labels = {1:"1️⃣ PRIMER CONTACTO",2:"2️⃣ SEGUNDO CONTACTO",3:"3️⃣ TERCER CONTACTO"}
+            st.markdown(f"""<div style="background:{colors[n]};color:white;padding:8px 12px;
+                border-radius:6px;margin:12px 0 8px;font-weight:700;">{labels[n]}</div>""",
+                unsafe_allow_html=True)
 
-        submitted = st.form_submit_button("💾 Guardar gestión", type="primary", use_container_width=True)
+            col_fecha = f"FECHA {n}"
+            col_hor   = f"HORARIO {n}"
+            col_med   = f"MEDIO {n}"
+            col_tipo  = f"TIPO CONTACTO {n}"
+            col_acc   = f"ACCIÓN {n}"
+            col_fc    = f"FECHA COMPROMISO {n}"
+            col_mot   = f"MOTIVO DE NO PAGO {n}"
+
+            val_fecha = fila.get(col_fecha,"")
+            try: fecha_def = datetime.strptime(val_fecha,"%Y-%m-%d").date() if val_fecha else _hoy()
+            except: fecha_def = _hoy()
+
+            c1,c2,c3 = st.columns(3)
+            with c1:
+                fecha = st.date_input("📅 Fecha contacto", value=fecha_def,
+                                      min_value=date(2024,1,1), max_value=date(2030,12,31),
+                                      key=f"ff{n}")
+            with c2:
+                hor_o = [""] + L.get("horario",["8AM - 12PM","12PM - 3PM","3PM - 6PM","6PM - Cierre"])
+                hor_i = hor_o.index(fila.get(col_hor,"")) if fila.get(col_hor,"") in hor_o else 0
+                horario = st.selectbox("🕐 Horario", hor_o, index=hor_i, key=f"fh{n}")
+            with c3:
+                med_o = [""] + L.get("medio",["Llamada de voz","Whatsapp","Campo"])
+                med_i = med_o.index(fila.get(col_med,"")) if fila.get(col_med,"") in med_o else 0
+                medio = st.selectbox("📞 Medio", med_o, index=med_i, key=f"fm{n}")
+
+            tipo_o = ["","EFECTIVO","NO EFECTIVO"]
+            tipo_i = tipo_o.index(fila.get(col_tipo,"")) if fila.get(col_tipo,"") in tipo_o else 0
+            tipo   = st.selectbox("🎯 Tipo de contacto", tipo_o, index=tipo_i, key=f"ft{n}")
+
+            # Acción — siempre visible con todas las opciones
+            acc_o = [""] + TODAS_ACCIONES
+            acc_v = fila.get(col_acc,"")
+            acc_i = acc_o.index(acc_v) if acc_v in acc_o else 0
+            accion = st.selectbox("⚡ Acción", acc_o, index=acc_i, key=f"fa{n}")
+
+            # Fecha compromiso
+            fc_date = None
+            if accion in REQUIERE_FC:
+                fc_v = fila.get(col_fc,"")
+                try: fc_def = datetime.strptime(fc_v,"%Y-%m-%d").date() if fc_v else _hoy()
+                except: fc_def = _hoy()
+                fc_date = st.date_input("📆 Fecha compromiso de pago",
+                                        value=fc_def, min_value=_hoy(), key=f"ffc{n}")
+                st.success("💡 Escenario perfecto — genera compromiso de pago.")
+
+            # Motivo
+            motivo = ""
+            if accion in REQUIERE_MOTIVO:
+                mot_o = [""] + L.get("motivo",["Problema técnico","Error en facturación","Económicos"])
+                mot_v = fila.get(col_mot,"")
+                mot_i = mot_o.index(mot_v) if mot_v in mot_o else 0
+                motivo = st.selectbox("❓ Motivo de no pago", mot_o, index=mot_i, key=f"fmo{n}")
+
+            resultados.update({
+                col_fecha: str(fecha),
+                col_hor:   horario,
+                col_med:   medio,
+                col_tipo:  tipo,
+                col_acc:   accion,
+                col_fc:    str(fc_date) if fc_date else "",
+                col_mot:   motivo,
+            })
+
+        submitted = st.form_submit_button("💾 Guardar gestión",
+                                          type="primary", use_container_width=True)
 
     if submitted:
         with st.spinner("⏳ Guardando en Drive..."):
             try:
                 celdas = []
-
                 # Responsable BO
                 if responsable != fila.get("Responsable BO",""):
                     try:
@@ -378,20 +338,19 @@ def mostrar_cobranza(hoja, razon=None, hoja_listas=None):
                         celdas.append(Cell(row_sheet, ci, responsable))
                     except ValueError: pass
 
-                # Campos de contacto
-                for campo, nuevo_val in resultados.items():
-                    orig_val = str(fila.get(campo,"")).strip()
-                    if str(nuevo_val).strip() != orig_val:
+                for campo, nv in resultados.items():
+                    ov = str(fila.get(campo,"")).strip()
+                    nv = str(nv).strip()
+                    if nv != ov:
                         try:
                             ci = headers.index(campo) + 1
-                            celdas.append(Cell(row_sheet, ci, nuevo_val))
+                            celdas.append(Cell(row_sheet, ci, nv))
                         except ValueError: pass
 
-                # Timestamps por intento modificado
                 for n in range(1, N_INT+1):
                     cn_ = [f"{c} {n}" for c in CAMPOS if f"{c} {n}" in resultados]
                     if any(str(resultados.get(c,"")).strip() != str(fila.get(c,"")).strip() for c in cn_):
-                        for sfx, val in [(f"USUARIO_INT{n}",usr),(f"TIMESTAMP_INT{n}",_ts())]:
+                        for sfx,val in [(f"USUARIO_INT{n}",usr),(f"TIMESTAMP_INT{n}",_ts())]:
                             try:
                                 ci = headers.index(sfx) + 1
                                 celdas.append(Cell(row_sheet, ci, val))
@@ -401,23 +360,16 @@ def mostrar_cobranza(hoja, razon=None, hoja_listas=None):
                     hoja.update_cells(celdas, value_input_option="USER_ENTERED")
                     st.success(f"✅ Gestión guardada — {len(celdas)} celdas actualizadas en Drive.")
                     st.balloons()
-                    # Limpiar selección
-                    st.session_state["sel_cliente"] = 0
-                    st.rerun()
                 else:
                     st.info("No se detectaron cambios.")
-
             except Exception as e:
                 st.error(f"❌ Error: {e}")
 
-    # Espejo + Descarga — muestra TODAS las columnas del Drive (incluyendo nuevas)
+    # Espejo + Descarga
     st.divider()
-    st.markdown('<div style="background:linear-gradient(90deg,#4B0067,#7B1FA2);padding:8px 16px;border-radius:8px;margin-bottom:8px;"><span style="color:white;font-weight:700;">📊 Espejo Consolidado — todas las columnas</span></div>', unsafe_allow_html=True)
-    # Ocultar solo timestamps internos, mostrar todo lo demás incluyendo columnas nuevas
-    cols_esp = [c for c in dfp.columns
-                if not c.startswith("USUARIO_INT") and not c.startswith("TIMESTAMP_INT")]
-    st.caption(f"Mostrando {len(cols_esp)} columnas de {len(dfp.columns)} totales del Drive.")
+    st.markdown('<div style="background:linear-gradient(90deg,#4B0067,#7B1FA2);padding:8px 16px;border-radius:8px;margin-bottom:8px;"><span style="color:white;font-weight:700;">📊 Espejo Consolidado</span></div>', unsafe_allow_html=True)
+    cols_esp = [c for c in dfp.columns if not c.startswith("USUARIO_INT") and not c.startswith("TIMESTAMP_INT")]
     st.dataframe(dfp[cols_esp], use_container_width=True, height=300, hide_index=True)
     csv = dfp.to_csv(index=False, encoding="utf-8-sig")
-    st.download_button(f"⬇️ Descargar {per} ({len(dfp)} reg.)",
-                       data=csv, file_name=f"cobranza_{per}.csv", mime="text/csv", key="cdl")
+    st.download_button(f"⬇️ Descargar {per} ({len(dfp)} reg.)", data=csv,
+                       file_name=f"cobranza_{per}.csv", mime="text/csv", key="cdl")
