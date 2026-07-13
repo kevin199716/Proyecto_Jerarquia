@@ -1,17 +1,12 @@
 """
-cobranza_calidad.py v12.0 — FINAL
-- Solo editores seguros: agTextCellEditor + agSelectCellEditor
-- Sin JsCode (sin friseo)
-- Fecha como texto YYYY-MM-DD con validación al guardar
-- Paginación de 25 filas por página
-- allow_unsafe_jscode=False
+cobranza_calidad.py v13.0 — Arquitectura CRM profesional
+Tabla solo lectura (rápida) + Formulario lateral para editar
+Sin AgGrid editable = Sin friseo = Sin errores de componente
 """
 from datetime import datetime, date
-import re
 import pandas as pd
 import pytz
 import streamlit as st
-from st_aggrid import AgGrid, GridUpdateMode, DataReturnMode
 from gspread.cell import Cell
 
 zona_peru = pytz.timezone("America/Lima")
@@ -23,12 +18,31 @@ def _nr(s): return str(s).strip().upper().replace(".","").replace("-","").replac
 
 CAMPOS = ["FECHA","HORARIO","MEDIO","TIPO CONTACTO","ACCIÓN","FECHA COMPROMISO","MOTIVO DE NO PAGO"]
 N_INT = 3
-FECHA_RE = re.compile(r"^\d{4}-\d{2}-\d{2}$")
+
+# Árbol de tipificaciones
+ACCIONES = {
+    "EFECTIVO": [
+        "Ya pagó",
+        "Genera compromiso de pago",
+        "Indica no pagará",
+        "Contesta y cuelga",
+        "Contesta y no da razón",
+        "Otros: detallar",
+    ],
+    "NO EFECTIVO": [
+        "Teléfono apagado",
+        "Teléfono suspendido",
+        "Teléfono no existe",
+        "Timbra y no contesta",
+        "Contesta pero desconoce a titular",
+    ],
+}
+ACCIONES_REQUIEREN_FC = {"Genera compromiso de pago"}
+ACCIONES_REQUIEREN_MOTIVO = {"Indica no pagará", "Otros: detallar"}
 
 HEADER = """
 <div style="background:linear-gradient(135deg,#4B0067,#7B1FA2 50%,#EC6608);
-            border-radius:12px;padding:20px 24px;margin-bottom:16px;
-            box-shadow:0 4px 20px rgba(75,0,103,0.2);">
+            border-radius:12px;padding:20px 24px;margin-bottom:16px;">
     <div style="display:flex;align-items:center;gap:12px;">
         <div style="font-size:28px;">💰</div>
         <div>
@@ -40,13 +54,6 @@ HEADER = """
     </div>
 </div>
 """
-
-AGGRID_CSS = {
-    ".header-client":   {"background-color":"#4B0067 !important","color":"white !important","font-weight":"700 !important"},
-    ".header-contact1": {"background-color":"#1B5E20 !important","color":"white !important","font-weight":"700 !important"},
-    ".header-contact2": {"background-color":"#E65100 !important","color":"white !important","font-weight":"700 !important"},
-    ".header-contact3": {"background-color":"#B71C1C !important","color":"white !important","font-weight":"700 !important"},
-}
 
 
 def _listas(hoja, razon=None):
@@ -61,9 +68,7 @@ def _listas(hoja, razon=None):
         if "Listas" in df.columns and "RESPONSABLE_BO" in df.columns:
             d = df if not razon else df[df["Listas"].astype(str).apply(_nr).eq(_nr(razon))]
             bos = sorted(set(x for x in d["RESPONSABLE_BO"].astype(str).str.strip() if x))
-        return {"bo":bos,"medio":u("MEDIO"),"horario":u("HORARIO"),
-                "tipo":u("TIPO_CONTACTO"),"ac_ef":u("ACCION_EFECTIVO"),
-                "ac_ne":u("ACCION_NO_EFECTIVO"),"motivo":u("MOTIVO_NO_PAGO")}
+        return {"bo":bos, "medio":u("MEDIO"), "horario":u("HORARIO"), "motivo":u("MOTIVO_NO_PAGO")}
     except: return {}
 
 
@@ -73,74 +78,6 @@ def _clean(df):
             lambda x: "" if x is None or str(x).strip().lower() in ("none","nan") else str(x).strip()
         )
     return df
-
-
-def _build_grid(df, L, editable, readonly):
-    ac_ef = L.get("ac_ef",["Ya pagó","Genera compromiso de pago","Indica no pagará","Otros: detallar","Contesta y cuelga","Contesta y no da razón"])
-    ac_ne = L.get("ac_ne",["Teléfono apagado","Teléfono suspendido","Teléfono no existe","Timbra y no contesta","Contesta pero desconoce a titular"])
-    todas_acc = sorted(set(ac_ef + ac_ne))
-
-    def _sel(field, header, vals, w=120, pin=None):
-        d = {"field":field,"headerName":header,
-             "editable": editable and field not in readonly,
-             "cellEditor":"agSelectCellEditor",
-             "cellEditorParams":{"values":[""] + vals},
-             "resizable":True,"sortable":True,"filter":True,"width":w,
-             "cellStyle":{"fontSize":"12px"}}
-        if pin: d["pinned"] = pin
-        return d
-
-    def _txt(field, header, edit=True, w=120, pin=None):
-        d = {"field":field,"headerName":header,
-             "editable": editable and edit and field not in readonly,
-             "cellEditor":"agTextCellEditor",
-             "resizable":True,"sortable":True,"filter":True,"width":w,
-             "cellStyle":{"fontSize":"12px"}}
-        if pin: d["pinned"] = pin
-        return d
-
-    pin = {"cod_cliente","nombre_cliente","celular_cliente"}
-    cl = []
-    for c in ["cod_cliente","nombre_cliente","celular_cliente","Estado_Pago","PERIODO"]:
-        if c in df.columns:
-            cl.append(_txt(c, c, False, 140, "left" if c in pin else None))
-    if "Responsable BO" in df.columns:
-        cl.append(_sel("Responsable BO","Responsable BO",L.get("bo",[]),160))
-
-    groups = []
-    clrs = ["header-contact1","header-contact2","header-contact3"]
-    lbls = ["1️⃣ 1er CONTACTO","2️⃣ 2do CONTACTO","3️⃣ 3er CONTACTO"]
-    for n in range(1, N_INT+1):
-        ch = []
-        for campo in CAMPOS:
-            cn = f"{campo} {n}"
-            if cn not in df.columns: continue
-            if campo in ("FECHA","FECHA COMPROMISO"):
-                hint = "F.Comp" if campo == "FECHA COMPROMISO" else "Fecha"
-                col = _txt(cn, f"{hint} (YYYY-MM-DD)", True, 120)
-                ch.append(col)
-            elif campo == "HORARIO":
-                ch.append(_sel(cn,"Horario",L.get("horario",[]),110))
-            elif campo == "MEDIO":
-                ch.append(_sel(cn,"Medio",  L.get("medio",[]),120))
-            elif campo == "TIPO CONTACTO":
-                ch.append(_sel(cn,"Tipo",   L.get("tipo",[]),120))
-            elif campo == "ACCIÓN":
-                ch.append(_sel(cn,"Acción", todas_acc, 190))
-            elif campo == "MOTIVO DE NO PAGO":
-                ch.append(_sel(cn,"Motivo", L.get("motivo",[]),140))
-        if ch:
-            groups.append({"headerName":lbls[n-1],"headerClass":clrs[n-1],"children":ch})
-
-    return {
-        "columnDefs": [{"headerName":"📋 CLIENTE","headerClass":"header-client","children":cl}] + groups,
-        "defaultColDef": {"resizable":True,"sortable":True,"filter":True,"editable":False,"cellStyle":{"fontSize":"12px"}},
-        "pagination": True,
-        "paginationPageSize": 25,
-        "rowHeight": 32,
-        "headerHeight": 35,
-        "groupHeaderHeight": 38,
-    }
 
 
 def _kpis(dfp):
@@ -171,6 +108,107 @@ def _kpis(dfp):
     </div>""", unsafe_allow_html=True)
 
 
+def _formulario_contacto(n, fila, L, ok):
+    """Formulario de un intento de contacto con cascada real y calendario."""
+    col_fecha = f"FECHA {n}"
+    col_hor   = f"HORARIO {n}"
+    col_med   = f"MEDIO {n}"
+    col_tipo  = f"TIPO CONTACTO {n}"
+    col_acc   = f"ACCIÓN {n}"
+    col_fc    = f"FECHA COMPROMISO {n}"
+    col_mot   = f"MOTIVO DE NO PAGO {n}"
+
+    colors = {1:"#1B5E20", 2:"#E65100", 3:"#B71C1C"}
+    labels = {1:"1️⃣ PRIMER CONTACTO", 2:"2️⃣ SEGUNDO CONTACTO", 3:"3️⃣ TERCER CONTACTO"}
+
+    st.markdown(f"""
+    <div style="background:{colors[n]};color:white;padding:8px 12px;
+                border-radius:6px;margin:12px 0 8px;font-weight:700;font-size:14px;">
+        {labels[n]}
+    </div>""", unsafe_allow_html=True)
+
+    if not ok:
+        # Solo lectura
+        c1,c2,c3,c4 = st.columns(4)
+        with c1: st.text_input("Fecha",     value=fila.get(col_fecha,""), disabled=True, key=f"vf{n}")
+        with c2: st.text_input("Horario",   value=fila.get(col_hor,""),   disabled=True, key=f"vh{n}")
+        with c3: st.text_input("Medio",     value=fila.get(col_med,""),   disabled=True, key=f"vm{n}")
+        with c4: st.text_input("Tipo",      value=fila.get(col_tipo,""),  disabled=True, key=f"vt{n}")
+        c5,c6,c7 = st.columns(3)
+        with c5: st.text_input("Acción",    value=fila.get(col_acc,""),   disabled=True, key=f"va{n}")
+        with c6: st.text_input("F.Comp.",   value=fila.get(col_fc,""),    disabled=True, key=f"vfc{n}")
+        with c7: st.text_input("Motivo",    value=fila.get(col_mot,""),   disabled=True, key=f"vmo{n}")
+        return None
+
+    c1,c2,c3 = st.columns(3)
+    val_fecha = fila.get(col_fecha,"")
+    try:
+        fecha_def = datetime.strptime(val_fecha, "%Y-%m-%d").date() if val_fecha else _hoy()
+    except: fecha_def = _hoy()
+
+    with c1:
+        # ← CALENDARIO REAL con st.date_input
+        fecha = st.date_input("📅 Fecha de contacto", value=fecha_def,
+                              min_value=date(2024,1,1), max_value=date(2030,12,31),
+                              key=f"fecha_{n}")
+    with c2:
+        horario = st.selectbox("🕐 Horario", [""] + L.get("horario",["8AM - 12PM","12PM - 3PM","3PM - 6PM","6PM - Cierre"]),
+                               index=([""] + L.get("horario",[])).index(fila.get(col_hor,""))
+                               if fila.get(col_hor,"") in L.get("horario",[]) else 0,
+                               key=f"hor_{n}")
+    with c3:
+        medio = st.selectbox("📞 Medio", [""] + L.get("medio",["Llamada de voz","Whatsapp","Campo"]),
+                             index=([""] + L.get("medio",[])).index(fila.get(col_med,""))
+                             if fila.get(col_med,"") in L.get("medio",[]) else 0,
+                             key=f"med_{n}")
+
+    # Cascada tipo → acción
+    tipo_opts = ["", "EFECTIVO", "NO EFECTIVO"]
+    tipo_idx = tipo_opts.index(fila.get(col_tipo,"")) if fila.get(col_tipo,"") in tipo_opts else 0
+    tipo = st.selectbox("🎯 Tipo de contacto", tipo_opts, index=tipo_idx, key=f"tipo_{n}")
+
+    acc_val = fila.get(col_acc,"")
+    fc_val  = fila.get(col_fc,"")
+    mot_val = fila.get(col_mot,"")
+    fc_date = None
+    motivo  = ""
+
+    if tipo:
+        # Acciones según tipo (cascada real)
+        acc_list = ACCIONES.get(tipo, [])
+        acc_idx = acc_list.index(acc_val) + 1 if acc_val in acc_list else 0
+        acc_color = "🟢" if tipo == "EFECTIVO" else "🔴"
+        accion = st.selectbox(f"{acc_color} Acción ({tipo})", [""] + acc_list,
+                              index=acc_idx, key=f"acc_{n}")
+
+        if accion in ACCIONES_REQUIEREN_FC:
+            try: fc_def = datetime.strptime(fc_val, "%Y-%m-%d").date() if fc_val else fecha
+            except: fc_def = fecha
+            fc_date = st.date_input("📆 Fecha compromiso de pago",
+                                    value=fc_def, min_value=_hoy(),
+                                    key=f"fc_{n}")
+            st.info("💡 Escenario perfecto — el cliente genera compromiso de pago.")
+
+        if accion in ACCIONES_REQUIEREN_MOTIVO:
+            mot_list = L.get("motivo",["Problema técnico","Error en facturación","Económicos"])
+            mot_idx = mot_list.index(mot_val) + 1 if mot_val in mot_list else 0
+            motivo = st.selectbox("❓ Motivo de no pago", [""] + mot_list,
+                                  index=mot_idx, key=f"mot_{n}")
+    else:
+        accion = ""
+        st.caption("Selecciona el tipo de contacto para ver las acciones disponibles.")
+
+    return {
+        col_fecha: str(fecha),
+        col_hor:   horario,
+        col_med:   medio,
+        col_tipo:  tipo,
+        col_acc:   accion if tipo else "",
+        col_fc:    str(fc_date) if fc_date else "",
+        col_mot:   motivo,
+    }
+
+
 def mostrar_cobranza(hoja, razon=None, hoja_listas=None):
     st.markdown(HEADER, unsafe_allow_html=True)
     if not hoja: return
@@ -189,11 +227,8 @@ def mostrar_cobranza(hoja, razon=None, hoja_listas=None):
 
     L = _listas(hoja_listas, razon if rol != "backoffice" else None) if hoja_listas else {}
     if not L:
-        L = {"bo":[],"medio":["Llamada de voz","Whatsapp","Campo"],
+        L = {"bo":[], "medio":["Llamada de voz","Whatsapp","Campo"],
              "horario":["8AM - 12PM","12PM - 3PM","3PM - 6PM","6PM - Cierre"],
-             "tipo":["EFECTIVO","NO EFECTIVO"],
-             "ac_ef":["Ya pagó","Genera compromiso de pago","Indica no pagará","Otros: detallar","Contesta y cuelga","Contesta y no da razón"],
-             "ac_ne":["Teléfono apagado","Teléfono suspendido","Teléfono no existe","Timbra y no contesta","Contesta pero desconoce a titular"],
              "motivo":["Problema técnico","Error en facturación","Económicos"]}
 
     if rol != "backoffice" and not razon:
@@ -223,9 +258,9 @@ def mostrar_cobranza(hoja, razon=None, hoja_listas=None):
     # Filtros
     with st.expander("🔍 Filtros", expanded=False):
         f1,f2,f3,f4 = st.columns(4)
-        with f1: fn  = st.text_input("Nombre", key="cfn").strip()
-        with f2: fc  = st.text_input("Celular", key="cfc").strip()
-        with f3: fcd = st.text_input("Código",  key="cfcd").strip()
+        with f1: fn  = st.text_input("Nombre",key="cfn").strip()
+        with f2: fc  = st.text_input("Celular",key="cfc").strip()
+        with f3: fcd = st.text_input("Código", key="cfcd").strip()
         with f4: fbo = st.selectbox("Responsable BO",["TODOS"]+L.get("bo",[]),key="cfbo")
 
     dff = dfp.copy()
@@ -237,122 +272,144 @@ def mostrar_cobranza(hoja, razon=None, hoja_listas=None):
     if dff.empty: st.warning("Sin resultados."); return
     if len(dff) != len(dfp): st.caption(f"**{len(dff)}** de {len(dfp)} registros.")
 
-    # Ocultar columnas internas
-    ocultar = {c for c in dff.columns
-               if c.startswith("USUARIO_INT") or c.startswith("TIMESTAMP_INT")
-               or c in ("NOMBRE_HOJA","razon_social","dni_creador_lead","nombre_creador_lead",
-                        "fecha_activacion","plan","boleta_1_monto","boleta_1_fecha_pago",
-                        "cliente_regularizado","boleta_2_monto","boleta_2_fecha_pago",
-                        "boleta_3_monto","boleta_3_fecha_pago")}
-    dff_vis = _clean(dff.drop(columns=[c for c in ocultar if c in dff.columns], errors="ignore"))
+    # ── TABLA DE SOLO LECTURA (rápida, sin edición) ──
+    cols_tabla = [c for c in ["cod_cliente","nombre_cliente","celular_cliente",
+                               "Estado_Pago","PERIODO","Responsable BO",
+                               "TIPO CONTACTO 1","ACCIÓN 1",
+                               "TIPO CONTACTO 2","ACCIÓN 2",
+                               "TIPO CONTACTO 3","ACCIÓN 3"]
+                  if c in dff.columns]
 
-    readonly = {"cod_cliente","nombre_cliente","celular_cliente","Estado_Pago","PERIODO"} | ocultar
+    # Paginación manual ligera
+    PAGE = 25
+    total_pag = max(1, -(-len(dff) // PAGE))
+    pag = st.number_input(f"Página (de {total_pag})", 1, total_pag, 1, key="pag")
+    ini = (pag-1)*PAGE
+    df_page = dff.iloc[ini:ini+PAGE].copy()
 
-    gopt = _build_grid(dff_vis, L, ok, readonly)
+    # Tabla con color por tipo contacto
+    def _color_row(row):
+        tipo1 = str(row.get("TIPO CONTACTO 1","")).strip()
+        if tipo1 == "EFECTIVO":    return ["background-color:#F1F8E9"]*len(row)
+        if tipo1 == "NO EFECTIVO": return ["background-color:#FFF3E0"]*len(row)
+        return [""]*len(row)
 
-    gr = AgGrid(
-        dff_vis,
-        gridOptions=gopt,
-        update_mode=GridUpdateMode.MANUAL,
-        data_return_mode=DataReturnMode.AS_INPUT,
-        fit_columns_on_grid_load=False,
-        height=480,
-        allow_unsafe_jscode=False,
-        theme="streamlit",
-        custom_css=AGGRID_CSS,
-        key="ag_cob",
-    )
+    styled = df_page[cols_tabla].style.apply(_color_row, axis=1)
+    st.dataframe(styled, use_container_width=True, height=380, hide_index=True)
 
-    if ok:
-        if st.button("💾 Guardar cambios", type="primary", use_container_width=True, key="cg"):
-            with st.spinner("⏳ Guardando en Drive..."):
-                try:
-                    de = _clean(pd.DataFrame(gr["data"]))
-                    do = _clean(dff_vis.reset_index(drop=True))
-                    ec = [c for c in do.columns if c not in readonly]
+    if not ok:
+        st.divider()
+        st.markdown('<div style="background:linear-gradient(90deg,#4B0067,#7B1FA2);padding:8px 16px;border-radius:8px;margin-bottom:8px;"><span style="color:white;font-weight:700;">📊 Espejo Consolidado</span></div>', unsafe_allow_html=True)
+        cols_esp = [c for c in dfp.columns if not c.startswith("USUARIO_INT") and not c.startswith("TIMESTAMP_INT")]
+        st.dataframe(dfp[cols_esp], use_container_width=True, height=300, hide_index=True)
+        csv = dfp.to_csv(index=False, encoding="utf-8-sig")
+        st.download_button(f"⬇️ Descargar {per} ({len(dfp)} reg.)",
+                           data=csv, file_name=f"cobranza_{per}.csv", mime="text/csv", key="cdl")
+        return
 
-                    de_c = de[ec].fillna("").astype(str)
-                    do_c = do[ec].fillna("").astype(str)
-                    changed = (de_c != do_c).any(axis=1)
-                    idx_changed = changed[changed].index.tolist()
+    # ── FORMULARIO DE EDICIÓN ──
+    st.divider()
+    st.markdown("""
+    <div style="background:linear-gradient(90deg,#4B0067,#7B1FA2);padding:10px 16px;
+                border-radius:8px;margin-bottom:12px;">
+        <span style="color:white;font-weight:700;font-size:15px;">
+            ✏️ Registrar gestión — Selecciona un cliente de la tabla
+        </span>
+    </div>""", unsafe_allow_html=True)
 
-                    if not idx_changed:
-                        st.info("No se detectaron cambios."); return
+    # Selector de cliente
+    opciones_sel = ["-- Selecciona un cliente --"] + [
+        f"{r.get('cod_cliente','')} · {r.get('nombre_cliente','')} · {r.get('celular_cliente','')}"
+        for _, r in df_page.iterrows()
+    ]
+    sel_idx = st.selectbox("Cliente a gestionar", range(len(opciones_sel)),
+                           format_func=lambda i: opciones_sel[i], key="sel_cliente")
 
-                    errores = []
-                    celdas  = []
+    if sel_idx == 0:
+        st.info("👆 Selecciona un cliente de la lista para registrar su gestión.")
+        return
 
-                    for i in idx_changed:
-                        idx_real = dff_vis.index[i] if i < len(dff_vis.index) else i
-                        row = int(idx_real) + 2
+    fila_idx = df_page.index[sel_idx - 1]
+    fila = dict(dff.loc[fila_idx])
+    row_sheet = int(fila_idx) + 2
 
-                        # Validar formato fechas
-                        for n in range(1, N_INT+1):
-                            for fc_col in [f"FECHA {n}", f"FECHA COMPROMISO {n}"]:
-                                v = str(de_c.iloc[i].get(fc_col,"")).strip()
-                                if v and not FECHA_RE.match(v):
-                                    nom = de.iloc[i].get("nombre_cliente",f"fila {i+1}")
-                                    errores.append(f"❌ {nom} — {fc_col}: '{v}' debe ser AAAA-MM-DD")
+    # Info del cliente
+    st.markdown(f"""
+    <div style="background:white;border:1px solid #E0D5EA;border-radius:10px;
+                padding:14px 18px;margin:8px 0;">
+        <div style="display:flex;gap:32px;flex-wrap:wrap;">
+            <div><span style="color:#6B6175;font-size:11px;">CLIENTE</span><br>
+                 <b style="font-size:15px;">{fila.get('nombre_cliente','')}</b></div>
+            <div><span style="color:#6B6175;font-size:11px;">CELULAR</span><br>
+                 <b>{fila.get('celular_cliente','')}</b></div>
+            <div><span style="color:#6B6175;font-size:11px;">CÓDIGO</span><br>
+                 <b>{fila.get('cod_cliente','')}</b></div>
+            <div><span style="color:#6B6175;font-size:11px;">ESTADO PAGO</span><br>
+                 <b style="color:#C62828;">{fila.get('Estado_Pago','')}</b></div>
+        </div>
+    </div>""", unsafe_allow_html=True)
 
-                        # Validar secuencial
-                        for n in range(2, N_INT+1):
-                            cn_ = [f"{c} {n}"   for c in CAMPOS if f"{c} {n}"   in de_c.columns]
-                            cp_ = [f"{c} {n-1}" for c in CAMPOS if f"{c} {n-1}" in de_c.columns]
-                            if any(de_c.iloc[i].get(c,"") for c in cn_) and not any(de_c.iloc[i].get(c,"") for c in cp_):
-                                nom = de.iloc[i].get("nombre_cliente",f"fila {i+1}")
-                                errores.append(f"❌ {nom}: Completa Contacto {n-1} antes del {n}.")
+    # Responsable BO
+    bo_list = L.get("bo",[])
+    bo_idx = bo_list.index(fila.get("Responsable BO","")) + 1 if fila.get("Responsable BO","") in bo_list else 0
+    responsable = st.selectbox("👤 Responsable BO", [""] + bo_list, index=bo_idx, key="resp_bo")
 
-                        # Validar cascada acción-tipo
-                        ac_ef_s = set(L.get("ac_ef",[]))
-                        ac_ne_s = set(L.get("ac_ne",[]))
-                        for n in range(1, N_INT+1):
-                            tipo = str(de_c.iloc[i].get(f"TIPO CONTACTO {n}","")).strip()
-                            acc  = str(de_c.iloc[i].get(f"ACCIÓN {n}","")).strip()
-                            if tipo == "EFECTIVO" and acc and acc in ac_ne_s:
-                                nom = de.iloc[i].get("nombre_cliente",f"fila {i+1}")
-                                errores.append(f"⚠️ {nom} C{n}: '{acc}' no es acción EFECTIVO.")
-                            elif tipo == "NO EFECTIVO" and acc and acc in ac_ef_s and acc not in ("Contesta y cuelga","Contesta y no da razón"):
-                                nom = de.iloc[i].get("nombre_cliente",f"fila {i+1}")
-                                errores.append(f"⚠️ {nom} C{n}: '{acc}' no es acción NO EFECTIVO.")
+    # Formularios de los 3 contactos
+    resultados = {}
+    for n in range(1, N_INT+1):
+        res = _formulario_contacto(n, fila, L, ok)
+        if res: resultados.update(res)
 
-                        for cn in ec:
-                            ov = do_c.iloc[i].get(cn,"")
-                            nv = de_c.iloc[i].get(cn,"")
-                            if nv != ov:
-                                try:
-                                    ci = headers.index(cn) + 1
-                                    celdas.append(Cell(row, ci, nv))
-                                except ValueError: pass
+    # Guardar
+    if st.button("💾 Guardar gestión", type="primary", use_container_width=True, key="guardar"):
+        with st.spinner("⏳ Guardando en Drive..."):
+            try:
+                celdas = []
 
-                        # Timestamps
-                        for n in range(1, N_INT+1):
-                            cn_ = [f"{c} {n}" for c in CAMPOS if f"{c} {n}" in de_c.columns]
-                            if any(de_c.iloc[i].get(c,"") != do_c.iloc[i].get(c,"") for c in cn_):
-                                for sfx, val in [(f"USUARIO_INT{n}",usr),(f"TIMESTAMP_INT{n}",_ts())]:
-                                    try:
-                                        ci = headers.index(sfx) + 1
-                                        celdas.append(Cell(row, ci, val))
-                                    except ValueError: pass
+                # Responsable BO
+                if responsable != fila.get("Responsable BO",""):
+                    try:
+                        ci = headers.index("Responsable BO") + 1
+                        celdas.append(Cell(row_sheet, ci, responsable))
+                    except ValueError: pass
 
-                    if errores:
-                        for e in errores: st.warning(e)
+                # Campos de contacto
+                for campo, nuevo_val in resultados.items():
+                    orig_val = str(fila.get(campo,"")).strip()
+                    if str(nuevo_val).strip() != orig_val:
+                        try:
+                            ci = headers.index(campo) + 1
+                            celdas.append(Cell(row_sheet, ci, nuevo_val))
+                        except ValueError: pass
 
-                    if celdas:
-                        for b in range(0, len(celdas), 100):
-                            hoja.update_cells(celdas[b:b+100], value_input_option="USER_ENTERED")
-                        st.success(f"✅ Guardado — {len(idx_changed)} fila(s) · {len(celdas)} celdas en Drive.")
-                        st.balloons()
-                    else:
-                        if not errores: st.info("No hay cambios válidos.")
+                # Timestamps por intento modificado
+                for n in range(1, N_INT+1):
+                    cn_ = [f"{c} {n}" for c in CAMPOS if f"{c} {n}" in resultados]
+                    if any(str(resultados.get(c,"")).strip() != str(fila.get(c,"")).strip() for c in cn_):
+                        for sfx, val in [(f"USUARIO_INT{n}",usr),(f"TIMESTAMP_INT{n}",_ts())]:
+                            try:
+                                ci = headers.index(sfx) + 1
+                                celdas.append(Cell(row_sheet, ci, val))
+                            except ValueError: pass
 
-                except Exception as e:
-                    st.error(f"❌ Error: {e}")
+                if celdas:
+                    hoja.update_cells(celdas, value_input_option="USER_ENTERED")
+                    st.success(f"✅ Gestión guardada — {len(celdas)} celdas actualizadas en Drive.")
+                    st.balloons()
+                    # Limpiar selección
+                    st.session_state["sel_cliente"] = 0
+                    st.rerun()
+                else:
+                    st.info("No se detectaron cambios.")
+
+            except Exception as e:
+                st.error(f"❌ Error: {e}")
 
     # Espejo + Descarga
     st.divider()
     st.markdown('<div style="background:linear-gradient(90deg,#4B0067,#7B1FA2);padding:8px 16px;border-radius:8px;margin-bottom:8px;"><span style="color:white;font-weight:700;">📊 Espejo Consolidado</span></div>', unsafe_allow_html=True)
     cols_esp = [c for c in dfp.columns if not c.startswith("USUARIO_INT") and not c.startswith("TIMESTAMP_INT")]
-    st.dataframe(dfp[cols_esp], use_container_width=True, height=320, hide_index=True)
+    st.dataframe(dfp[cols_esp], use_container_width=True, height=300, hide_index=True)
     csv = dfp.to_csv(index=False, encoding="utf-8-sig")
-    st.download_button(f"⬇️ Descargar {per} ({len(dfp)} registros)",
+    st.download_button(f"⬇️ Descargar {per} ({len(dfp)} reg.)",
                        data=csv, file_name=f"cobranza_{per}.csv", mime="text/csv", key="cdl")
