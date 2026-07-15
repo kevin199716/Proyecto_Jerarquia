@@ -370,10 +370,10 @@ def dar_de_baja(df, hoja, razon_usuario=None):
     fecha = st.date_input(
         "Fecha de cese (FECHA_CESE)",
         value=hoy,
-        min_value=max(hoy - timedelta(days=3), fecha_creacion) if fecha_creacion else hoy - timedelta(days=3),
+        min_value=max(hoy - timedelta(days=4), fecha_creacion) if fecha_creacion else hoy - timedelta(days=4),
         max_value=hoy,
         key="fecha_cese_baja",
-        help="Solo permite hasta 72 horas atrás (antier, ayer, hoy). No puede ser anterior a la fecha de alta."
+        help="Permite hasta 4 días atrás + hoy. No puede ser anterior a la fecha de alta del colaborador."
     )
 
     motivo = st.selectbox("Motivo de baja", MOTIVOS, key="motivo_baja")
