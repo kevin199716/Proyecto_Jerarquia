@@ -703,9 +703,11 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
         # Regla comercial:
         # - Dealers (MULTIPLE FORCE, INTERCONEXION, NOGALES, GRUPO CREED) → VENTAS INDIRECTAS
         # - WOW TEL → VENTAS DIRECTAS con sus propios canales
+        # - "ALL" (razón de admin/capacitación, no es una empresa real) → NO es Dealer;
+        #   cae al mismo bloque que backoffice sin razón, con el selector de CANAL libre.
         razon_norm = limpiar_texto(razon).upper()
         ES_WOW_TEL = razon_norm == "WOW TEL"
-        ES_DEALER  = razon_norm and not ES_WOW_TEL
+        ES_DEALER  = bool(razon_norm) and razon_norm != "ALL" and not ES_WOW_TEL
 
         if ES_DEALER:
             # ── DEALERS INDIRECTOS ──────────────────────────────────────
