@@ -1,4 +1,3 @@
-import re
 import streamlit as st
 import pandas as pd
 import datetime
@@ -7,22 +6,6 @@ import pydeck as pdk
 
 # Validadores
 
-def validar_correo(correo: str, cargo: str, dominios_permitidos: list[str]) -> bool:
-    correo = str(correo).strip()
-    patron_correo = r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$"
-
-    if not re.fullmatch(patron_correo, correo):
-        st.error("❌ El correo electrónico no tiene un formato válido.")
-        return False
-
-    dominio = correo.rsplit("@", 1)[-1].strip().lower()
-    dominios_permitidos = [str(d).strip().lower() for d in (dominios_permitidos or [])]
-
-    if dominios_permitidos and dominio not in dominios_permitidos and cargo != "Freelance":
-        st.error(f"❌ El dominio '{dominio}' no está permitido.")
-        return False
-
-    return True
 def validacion_dni(hoja_colaboradores, numero_documento):
 
     sheet = hoja_colaboradores.get_all_records()

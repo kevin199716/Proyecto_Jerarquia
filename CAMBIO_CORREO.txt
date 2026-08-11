@@ -1,0 +1,6 @@
+VERSIÓN FINAL SIN VALIDADOR DE CORREO
+
+Se eliminó completamente la validación de formato/dominio del correo.
+El correo se conserva como texto y el único control en edición es que el campo no esté vacío,
+tal como la lógica existente de 'datos completos'.
+No se modificó la lógica de DNI, Google Sheets, altas, bajas ni blacklist.
