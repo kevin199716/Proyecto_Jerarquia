@@ -96,33 +96,27 @@
     "razon": "GRUPO CREED SAC"
   },
   "capacitacion1": {
-    "password": "Cap5lPMhAGx@26",
+    "password": "Cap1#A7mQ26",
     "rol": "capacitacion",
     "estado": "activo",
     "razon": "ALL"
   },
   "capacitacion2": {
-    "password": "CapFsZ0SSDK@26",
+    "password": "Cap2#K9vR26",
     "rol": "capacitacion",
     "estado": "activo",
     "razon": "ALL"
   },
   "capacitacion3": {
-    "password": "CapIb3LlQGs@26",
+    "password": "Cap3#T4xL26",
     "rol": "capacitacion",
     "estado": "activo",
     "razon": "ALL"
   },
-  "seislan": {
-    "password": "CapI4THW3S7@26",
-    "rol": "presencialidad_basico",
+  "seislan.presencialidad": {
+    "password": "SeiP3r$26Xk9",
+    "rol": "seislan",
     "estado": "activo",
     "razon": "SEISLAN"
-  },
-  "salesland.presencneialidad": {
-    "password": "SalesPres@2026!",
-    "rol": "presencialidad_basico",
-    "estado": "activo",
-    "razon": "SALESLAND"
   }
 }

@@ -82,14 +82,11 @@ def serie_columna(df: pd.DataFrame, columna: str) -> pd.Series:
 
 
 def normalizar_dni(valor) -> str:
-    """
-    Normaliza el DNI para búsquedas/histórico y para el ETL.
-    No completa ceros a la izquierda: los ceros iniciales pueden perderse
-    al guardar en Google Sheets sin afectar la validación previa.
-    """
     dni = limpiar_texto(valor).replace(".0", "")
     dni = re.sub(r"\D", "", dni)
-    return dni.lstrip("0") or ("0" if dni else "")
+    if dni and len(dni) < 8:
+        dni = dni.zfill(8)
+    return dni
 
 
 def limpiar_celular(valor) -> str:
@@ -258,16 +255,18 @@ def buscar_dni_por_nombre(df: pd.DataFrame, columna_nombre: str, columna_dni: st
 # VALIDACIONES DE NEGOCIO
 # =========================
 def validar_formulario(campos: dict, df_colab: pd.DataFrame) -> list[str]:
-    """Valida completamente un alta antes de escribirla en Google Sheets."""
+    """
+    Validación completa del módulo de Altas.
+    No permite guardar datos incompletos o con formatos inválidos.
+    """
     errores: list[str] = []
 
-    def vacio(clave: str) -> bool:
-        return limpiar_texto(campos.get(clave, "")) == ""
+    def _vacio(clave: str) -> bool:
+        return not limpiar_texto(campos.get(clave, "")).strip()
 
-    canal = limpiar_texto(campos.get("CANAL", "")).upper()
-    tipo_doc = limpiar_texto(campos.get("TIPO DE DOC", "")).upper()
+    canal_val = limpiar_texto(campos.get("CANAL", "")).upper()
 
-    # Campos generales obligatorios
+    # Campos obligatorios para todo colaborador.
     requeridos = [
         ("RAZON SOCIAL", "Razón social"),
         ("CANAL", "Canal"),
@@ -286,17 +285,20 @@ def validar_formulario(campos: dict, df_colab: pd.DataFrame) -> list[str]:
         ("CONTRATO FIRMADO", "Contrato firmado"),
     ]
 
-    if canal == "VENTAS DIRECTAS":
+    if canal_val == "VENTAS DIRECTAS":
         requeridos += [
             ("SUPERVISOR", "Supervisor"),
             ("CAPACITADOR", "Capacitador"),
-            ("ORIGEN_INGRESO", "Origen de ingreso"),
-            ("FUENTE_INGRESO", "Fuente de ingreso"),
+            ("ORIGEN_INGRESO", "Origen ingreso"),
+            ("FUENTE_INGRESO", "Fuente ingreso"),
+            ("DEPARTAMENTO", "Departamento"),
+            ("PROVINCIA", "Provincia"),
         ]
-    else:
+    elif canal_val == "VENTAS INDIRECTAS":
         requeridos += [
             ("DEPARTAMENTO", "Departamento"),
             ("PROVINCIA", "Provincia"),
+            ("DISTRITO", "Distrito"),
             ("SUPERVISOR A CARGO", "Supervisor a cargo"),
             ("DNI SUPERVISOR", "DNI supervisor"),
             ("COORDINADOR", "Coordinador"),
@@ -304,35 +306,41 @@ def validar_formulario(campos: dict, df_colab: pd.DataFrame) -> list[str]:
         ]
 
     for clave, etiqueta in requeridos:
-        if vacio(clave):
+        if _vacio(clave):
             errores.append(f"❌ Falta completar: {etiqueta}")
 
-    # DNI: se valida sobre lo que realmente escribió el usuario.
-    # NO se rellena con ceros para hacer pasar un DNI corto.
-    dni_original = limpiar_texto(campos.get("DNI", "")).replace(".0", "")
-    if tipo_doc == "DNI":
-        if not dni_original:
-            errores.append("❌ El DNI es obligatorio.")
-        elif not dni_original.isdigit():
+    # DNI: debe ingresarse con EXACTAMENTE 8 dígitos.
+    # Los ceros a la izquierda se conservan; la normalización histórica
+    # solo sirve para evitar que Google Sheets pierda esos ceros.
+    dni_original = limpiar_texto(campos.get("DNI", ""))
+    dni_sin_punto = dni_original.replace(".0", "")
+    tipo_doc = limpiar_texto(campos.get("TIPO DE DOC", "")).upper()
+
+    if dni_original:
+        if not dni_sin_punto.isdigit():
             errores.append("❌ El DNI solo debe contener números.")
-        elif len(dni_original) != 8:
-            errores.append("❌ El DNI debe tener exactamente 8 dígitos numéricos.")
-    elif dni_original and not dni_original.isdigit():
-        errores.append("❌ El documento solo debe contener números.")
+        elif tipo_doc == "DNI" and len(dni_sin_punto) != 8:
+            errores.append(
+                f"❌ El DNI '{dni_sin_punto}' debe tener exactamente 8 dígitos. "
+                "Si empieza con cero, escríbelo también (ejemplo: 01234567)."
+            )
 
-    # Celular: exactamente 9 dígitos y empieza en 9.
-    celular = limpiar_celular(campos.get("CELULAR", ""))
-    if not celular:
-        errores.append("❌ El CELULAR es obligatorio.")
-    elif not celular.isdigit() or len(celular) != 9 or not celular.startswith("9"):
-        errores.append("❌ El CELULAR debe tener exactamente 9 dígitos y comenzar con 9.")
+    # Celular: exactamente 9 dígitos y debe empezar con 9.
+    celular_original = limpiar_texto(campos.get("CELULAR", ""))
+    if celular_original:
+        if not celular_original.isdigit():
+            errores.append("❌ El CELULAR solo debe contener números.")
+        elif len(celular_original) != 9:
+            errores.append("❌ El CELULAR debe tener exactamente 9 dígitos.")
+        elif not celular_original.startswith("9"):
+            errores.append("❌ El CELULAR debe comenzar con 9.")
 
-    # Correo
+    # Correo.
     correo = limpiar_texto(campos.get("CORREO", ""))
-    if correo and not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", correo):
+    if correo and not re.match(r"^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$", correo):
         errores.append("❌ El CORREO no tiene un formato válido.")
 
-    # Reglas de catálogo
+    # Valores controlados.
     region = limpiar_texto(campos.get("REGION", "")).upper()
     if region and region not in ("CENTRAL", "NORORIENTE", "SUR"):
         errores.append("❌ REGIÓN inválida. Solo se permite CENTRAL, NORORIENTE o SUR.")
@@ -345,13 +353,16 @@ def validar_formulario(campos: dict, df_colab: pd.DataFrame) -> list[str]:
     if firmado != "SI":
         errores.append("❌ CONTRATO FIRMADO debe quedar en SI para registrar el alta.")
 
-    if canal == "VENTAS INDIRECTAS" and limpiar_texto(campos.get("TIPO_GESTION", "")).upper() != "CAMPO":
-        errores.append("❌ Para VENTAS INDIRECTAS, TIPO_GESTION debe ser CAMPO.")
+    if canal_val == "VENTAS INDIRECTAS":
+        if limpiar_texto(campos.get("TIPO_GESTION", "")).upper() != "CAMPO":
+            errores.append("❌ Para VENTAS INDIRECTAS, TIPO_GESTION debe ser CAMPO.")
 
-    # Histórico/duplicado. Se ejecuta solo cuando el formato base ya es válido.
+    # Validación histórica: DNI activo / reingreso / fecha de baja.
     dni_limpio = normalizar_dni(dni_original)
     fecha_alta = campos.get("FECHA DE CREACION USUARIO")
-    if fecha_alta and dni_limpio and not any("DNI debe tener" in e or "DNI solo" in e for e in errores):
+    if fecha_alta and dni_limpio and not any(
+        "DNI" in e and "exactamente 8" in e for e in errores
+    ):
         ok, msg = validar_dni_unico_historico(df_colab, dni_limpio, fecha_alta)
         if not ok:
             errores.append(msg)
@@ -684,7 +695,7 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
 
     with col_der:
         st.markdown("**Datos comerciales**")
-        if rol == "backoffice":
+        if rol in ("backoffice", "capacitacion"):
             razon = st.selectbox("RAZÓN SOCIAL", [""] + razones, key=k("razon"))
         else:
             razon = razon_usuario
@@ -929,8 +940,6 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             "APELLIDO MATERNO": limpiar_texto(apellido_m).upper(),
             "CELULAR": celular_limpio,
             "TIPO DE DOC": tipo_doc,
-            # El Drive puede conservarlo como número/texto sin cero inicial;
-            # la validación de 8 dígitos ya ocurrió antes de llegar aquí.
             "DNI": dni_limpio,
             "CORREO": correo_limpio,
             "CORREO (USUARIO SGC/PRONTO)": correo_limpio,

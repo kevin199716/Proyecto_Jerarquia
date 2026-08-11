@@ -47,12 +47,14 @@ if rol == "backoffice":
     opciones_menu = ["Alta", "Bajas", "Presencialidad Dealer", "Cobranza_Calidad"]
 elif rol == "dealer":
     opciones_menu = ["Alta", "Bajas", "Presencialidad Dealer"]
-elif rol == "capacitacion":
-    opciones_menu = ["Alta"]
-elif rol == "presencialidad_basico":
-    opciones_menu = ["Bajas", "Presencialidad Dealer"]
 elif rol in ("presencialidad", "presencialidad_dealer"):
     opciones_menu = ["Bajas", "Presencialidad Dealer", "Cobranza_Calidad"]
+elif rol == "capacitacion":
+    # Usuarios de capacitación: únicamente pueden registrar ALTAS.
+    opciones_menu = ["Alta"]
+elif rol == "seislan":
+    # Seislan: únicamente Bajas y seguimiento de Presencialidad.
+    opciones_menu = ["Bajas", "Presencialidad Dealer"]
 elif rol == "editor":
     opciones_menu = ["Edición", "Presencialidad Dealer"]
 else:
@@ -120,21 +122,29 @@ elif rol == "dealer":
         mostrar_asistencia(hoja_asistencia, hoja_colaboradores, hoja_sustentos=hoja_sustentos, razon=razon)
         mostrar_matriz_jerarquia()
 
-# CAPACITACIÓN — SOLO ALTAS
+# CAPACITACIÓN
 elif rol == "capacitacion":
+    # Este rol solo tiene acceso al registro de ALTAS.
+    wow_section("Registro de Altas — Capacitación", "📝")
     if pagina == "Alta":
         mostrar_formulario(hoja_colaboradores, hoja_ubicaciones)
 
-# PRESENCIALIDAD BÁSICA — BAJAS + PRESENCIALIDAD
-elif rol == "presencialidad_basico":
-    wow_section(f"Presencialidad Dealer: {razon}", "🗓️")
+# SEISLAN
+elif rol == "seislan":
+    # Seislan solo puede gestionar BAJAS y dar seguimiento a PRESENCIALIDAD.
+    wow_section(f"Gestión Seislan: {razon}", "🗓️")
     if pagina == "Bajas":
         df = mostrar_matriz_jerarquia()
         if df is not None:
             st.divider()
             registro.dar_de_baja(df, hoja_colaboradores, razon)
     elif pagina == "Presencialidad Dealer":
-        mostrar_asistencia(hoja_asistencia, hoja_colaboradores, hoja_sustentos=hoja_sustentos, razon=razon)
+        mostrar_asistencia(
+            hoja_asistencia,
+            hoja_colaboradores,
+            hoja_sustentos=hoja_sustentos,
+            razon=razon,
+        )
         mostrar_matriz_jerarquia()
 
 # PRESENCIALIDAD
