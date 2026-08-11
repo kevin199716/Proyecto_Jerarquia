@@ -694,7 +694,10 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
 
     with col_der:
         st.markdown("**Datos comerciales**")
-        if rol == "backoffice":
+        # Capacitación (razón fija "ALL", no es empresa real) también elige
+        # razón social libremente, igual que backoffice — así sus altas quedan
+        # con la empresa correcta en vez de guardarse literalmente como "ALL".
+        if rol in ("backoffice", "capacitacion"):
             razon = st.selectbox("RAZÓN SOCIAL", [""] + razones, key=k("razon"))
         else:
             razon = razon_usuario
@@ -873,7 +876,16 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             st.text_input("SUPERVISOR", value=supervisor_directo, disabled=True, key=k("sup_directo_display"))
 
     st.markdown("")
-    submit = st.button("Guardar Alta", key=k("btn_guardar_alta"))
+    guardando_key = k("guardando_alta")
+    if guardando_key not in st.session_state:
+        st.session_state[guardando_key] = False
+    submit = st.button(
+        "Guardar Alta",
+        key=k("btn_guardar_alta"),
+        disabled=st.session_state[guardando_key],
+    )
+    if st.session_state[guardando_key] and not submit:
+        st.caption("⏳ Procesando el alta anterior, espera un momento...")
 
     # Mensaje también cerca del botón porque el navegador suele quedarse abajo luego del guardado.
     if msg_ok_pendiente:
@@ -899,6 +911,7 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
         st.session_state.pop("mensaje_sync_warning", None)
 
     if submit:
+        st.session_state[guardando_key] = True
         dni_limpio = normalizar_dni(dni)
         celular_limpio = limpiar_celular(celular)
         correo_limpio = limpiar_texto(correo).lower()
@@ -978,6 +991,7 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
         if errores:
             for err in errores:
                 st.error(err)
+            st.session_state[guardando_key] = False
             return
 
         # Popup de advertencia de reingreso (no bloquea, solo advierte)
@@ -1034,4 +1048,5 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             limpiar_form()
             st.rerun()
         except Exception as e:
+            st.session_state[guardando_key] = False
             st.error(f"❌ Error al registrar el alta: {e}")
