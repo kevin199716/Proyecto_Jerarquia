@@ -290,14 +290,13 @@ def validar_formulario(campos: dict, df_colab: pd.DataFrame) -> list[str]:
         ("CONTRATO FIRMADO", "Contrato firmado"),
     ]
 
-    if canal == "VENTAS DIRECTAS":
-        requeridos += [
-            ("SUPERVISOR", "Supervisor"),
-            ("CAPACITADOR", "Capacitador"),
-            ("ORIGEN_INGRESO", "Origen de ingreso"),
-            ("FUENTE_INGRESO", "Fuente de ingreso"),
-        ]
-    else:
+    # Ojo: WOW TEL usa canal D2D/ATC/RETAIL/CEX (nunca el texto literal
+    # "VENTAS DIRECTAS"; ese valor fijo va en SUB CANAL). Por eso se compara
+    # contra "VENTAS INDIRECTAS" -igual que "es_indirecto" más abajo en este
+    # mismo archivo- y no al revés, o WOW TEL siempre caía en el bloque de
+    # Dealers (Supervisor a cargo / DNI supervisor / Coordinador) sin poder
+    # completarlos nunca, porque esos campos no existen en su formulario.
+    if canal == "VENTAS INDIRECTAS":
         requeridos += [
             ("DEPARTAMENTO", "Departamento"),
             ("PROVINCIA", "Provincia"),
@@ -305,6 +304,13 @@ def validar_formulario(campos: dict, df_colab: pd.DataFrame) -> list[str]:
             ("DNI SUPERVISOR", "DNI supervisor"),
             ("COORDINADOR", "Coordinador"),
             ("DNI COORDINADOR", "DNI coordinador"),
+        ]
+    else:
+        requeridos += [
+            ("SUPERVISOR", "Supervisor"),
+            ("CAPACITADOR", "Capacitador"),
+            ("ORIGEN_INGRESO", "Origen de ingreso"),
+            ("FUENTE_INGRESO", "Fuente de ingreso"),
         ]
 
     for clave, etiqueta in requeridos:
