@@ -47,6 +47,10 @@ if rol == "backoffice":
     opciones_menu = ["Alta", "Bajas", "Presencialidad Dealer", "Cobranza_Calidad"]
 elif rol == "dealer":
     opciones_menu = ["Alta", "Bajas", "Presencialidad Dealer"]
+elif rol == "capacitacion":
+    opciones_menu = ["Alta"]
+elif rol == "presencialidad_basico":
+    opciones_menu = ["Bajas", "Presencialidad Dealer"]
 elif rol in ("presencialidad", "presencialidad_dealer"):
     opciones_menu = ["Bajas", "Presencialidad Dealer", "Cobranza_Calidad"]
 elif rol == "editor":
@@ -108,6 +112,23 @@ elif rol == "dealer":
         mostrar_formulario(hoja_colaboradores, hoja_ubicaciones)
         mostrar_matriz_jerarquia()
     elif pagina == "Bajas":
+        df = mostrar_matriz_jerarquia()
+        if df is not None:
+            st.divider()
+            registro.dar_de_baja(df, hoja_colaboradores, razon)
+    elif pagina == "Presencialidad Dealer":
+        mostrar_asistencia(hoja_asistencia, hoja_colaboradores, hoja_sustentos=hoja_sustentos, razon=razon)
+        mostrar_matriz_jerarquia()
+
+# CAPACITACIÓN — SOLO ALTAS
+elif rol == "capacitacion":
+    if pagina == "Alta":
+        mostrar_formulario(hoja_colaboradores, hoja_ubicaciones)
+
+# PRESENCIALIDAD BÁSICA — BAJAS + PRESENCIALIDAD
+elif rol == "presencialidad_basico":
+    wow_section(f"Presencialidad Dealer: {razon}", "🗓️")
+    if pagina == "Bajas":
         df = mostrar_matriz_jerarquia()
         if df is not None:
             st.divider()
