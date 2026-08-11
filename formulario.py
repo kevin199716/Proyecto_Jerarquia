@@ -1,7 +1,6 @@
 import streamlit as st
 from datetime import date, timedelta
 import pandas as pd
-import re
 
 def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones):
 
@@ -114,14 +113,6 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones):
         # VALIDACIONES
         # =========================
         if submit:
-
-            # Normalizar y validar correo
-            correo = correo.strip()
-            patron_correo = r"^[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}$"
-
-            if not re.fullmatch(patron_correo, correo):
-                st.error("❌ El CORREO no tiene un formato válido.")
-                return
 
             if not razon_social or not departamento or not provincia:
                 st.error("❌ Completa los campos obligatorios")
