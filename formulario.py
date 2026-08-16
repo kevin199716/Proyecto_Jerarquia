@@ -726,14 +726,17 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
 
         elif ES_WOW_TEL:
             # ── WOW TEL → VENTAS DIRECTAS ──────────────────────────────
-            canal = st.selectbox(
-                "CANAL",
+            # Mismo patrón que Dealers (arriba): CANAL = categoría amplia fija,
+            # SUB CANAL = el canal específico que elige el usuario. Antes estaba
+            # al revés (CANAL=D2D/ATC/..., SUB CANAL="VENTAS DIRECTAS" fijo),
+            # lo que no calzaba con el histórico ya guardado en la hoja.
+            canal = "VENTAS DIRECTAS"
+            st.text_input("CANAL", value=canal, disabled=True, key=k("canal_wowtel_display"))
+            subcanal = st.selectbox(
+                "SUB CANAL",
                 ["", "D2D", "ATC", "RETAIL", "CEX"],
-                key=k("canal_wowtel"),
+                key=k("subcanal_wowtel"),
             )
-            subcanal = "VENTAS DIRECTAS"
-            if canal:
-                st.text_input("SUB CANAL", value=subcanal, disabled=True, key=k("subcanal_wowtel"))
             tipo_gestion = ""
 
         else:
@@ -785,9 +788,9 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             "FECHA CREACIÓN USUARIO",
             value=hoy_alta,
             min_value=hoy_alta - timedelta(days=1),
-            max_value=hoy_alta + timedelta(days=1),
+            max_value=hoy_alta + timedelta(days=3),
             key=k("fecha_creacion"),
-            help="Solo permite ayer, hoy o mañana."
+            help="Permite ayer, hoy o hasta 3 días hacia adelante (para cubrir fines de semana)."
         )
         contrato_firmado = st.selectbox("CONTRATO FIRMADO", ["SI"], index=0, key=k("contrato_firmado"))
 

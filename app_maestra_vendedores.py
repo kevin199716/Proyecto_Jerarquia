@@ -124,6 +124,7 @@ elif rol == "dealer":
 elif rol == "capacitacion":
     if pagina == "Alta":
         mostrar_formulario(hoja_colaboradores, hoja_ubicaciones)
+        mostrar_matriz_jerarquia()
 
 # PRESENCIALIDAD BÁSICA — BAJAS + PRESENCIALIDAD
 elif rol == "presencialidad_basico":

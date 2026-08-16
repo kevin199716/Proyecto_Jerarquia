@@ -124,5 +124,11 @@
     "rol": "presencialidad_basico",
     "estado": "activo",
     "razon": "SALESLAND"
+  },
+  "capacitacion4": {
+    "password": "Cap4#86weRq",
+    "rol": "capacitacion",
+    "razon": "ALL",
+    "estado": "activo"
   }
 }

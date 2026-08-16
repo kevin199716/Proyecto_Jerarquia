@@ -176,16 +176,20 @@ def mostrar_tabla(hoja, razon_usuario=None):
         return None
 
     rol = st.session_state.get("rol", "")
+    # Capacitación (razón "ALL", cuentas de práctica sin empresa fija) ve todo
+    # sin filtrar, igual que backoffice — así pueden validar/descargar cualquier
+    # alta que hayan registrado, sea cual sea la empresa que eligieron.
+    sin_restriccion = rol in ("backoffice", "capacitacion")
 
     # VALIDACIÓN: si es dealer pero no tiene razon_usuario asignada, error
-    if rol != "backoffice" and not razon_usuario:
+    if not sin_restriccion and not razon_usuario:
         st.error(
             "❌ Error: Tu usuario es dealer pero no tiene razón social asignada en el sistema. "
             "Contacta al administrador para que corrija tus credenciales."
         )
         return None
 
-    if rol != "backoffice" and razon_usuario and "RAZON SOCIAL" in df.columns:
+    if not sin_restriccion and razon_usuario and "RAZON SOCIAL" in df.columns:
         # Normalizar la comparación: ignorar mayúsculas y caracteres especiales
         razon_normalizada = _normalizar_razon(razon_usuario)
         df = df[df["RAZON SOCIAL"].astype(str).apply(_normalizar_razon).eq(razon_normalizada)]
