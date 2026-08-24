@@ -778,7 +778,6 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
                 "Coordinador - D2D",
                 "JEFE CEX",
                 "Supervisor - D2D",
-                "Promotor D2D",
             ]
 
         cargo = st.selectbox("CARGO (ROL)", opciones_cargo, key=k("cargo"))
