@@ -1,9 +1,12 @@
 """
-asistencia.py v5.0
+asistencia.py v5.1
 - Espejo: matriz profesional de días DM/VAC por colaborador
 - Documentos: tarjetas profesionales con todos los datos
 - Sin congelamiento (session_state)
 - Guarda en Asistencia (DIA_1..DIA_31) y Sustentos_Bajas
+- FIX v5.1: al buscar por DNI, si hay varios registros (reingresos),
+  se prioriza el que esta ACTIVO para no arrastrar la FECHA DE CESE
+  de una etapa anterior ya finalizada.
 """
 import pandas as pd
 import streamlit as st
@@ -274,7 +277,18 @@ def mostrar_asistencia(hoja_asistencia, hoja_colaboradores, hoja_sustentos=None,
                 st.session_state["asist_colab"] = None
                 st.warning("⚠️ No encontrado")
             else:
-                st.session_state["asist_colab"] = res.iloc[0].to_dict()
+                # FIX v5.1: si el DNI tiene varios registros (reingresos: uno
+                # INACTIVO con FECHA DE CESE antigua y uno ACTIVO por el
+                # reingreso), se prioriza el ACTIVO. Antes se tomaba siempre
+                # res.iloc[0] (la primera fila encontrada), lo que arrastraba
+                # la fecha de cese de una etapa anterior ya finalizada y
+                # bloqueaba descansos válidos del período activo actual.
+                if len(res) > 1 and "ESTADO" in res.columns:
+                    activos = res[res["ESTADO"].astype(str).str.strip().str.upper().eq("ACTIVO")]
+                    fila_elegida = activos.iloc[0] if not activos.empty else res.iloc[0]
+                else:
+                    fila_elegida = res.iloc[0]
+                st.session_state["asist_colab"] = fila_elegida.to_dict()
                 visibles = ["DNI", "NOMBRES", "RAZON SOCIAL", "ESTADO"]
                 st.success(f"✅ {len(res)} resultado(s)")
                 st.dataframe(res[[c for c in visibles if c in res.columns]], use_container_width=True, hide_index=True)
