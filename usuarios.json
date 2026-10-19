@@ -42,7 +42,7 @@
     "razon": "MULTIPLE FORCE SAC"
   },
   "nogales_presencialidad": {
-    "password": "Nogales@123",
+    "password": "No_olvidar2026@",
     "rol": "presencialidad",
     "estado": "activo",
     "razon": "NOGALES HIGH SAC"
@@ -130,5 +130,11 @@
     "rol": "capacitacion",
     "razon": "ALL",
     "estado": "activo"
+  },
+  "academia_karla": {
+    "password": "Aca_q63jb4ro#26",
+    "rol": "capacitacion",
+    "estado": "activo",
+    "razon": "ALL"
   }
 }
