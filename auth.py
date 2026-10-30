@@ -90,6 +90,10 @@ def login(usuarios):
                 st.session_state["usuario"] = usuario
                 st.session_state["rol"] = datos_usuario.get("rol")
                 st.session_state["razon"] = datos_usuario.get("razon", "")
+                # Sub canal fijo opcional (ej. "ATC" o "OUTBOUND"): si el usuario
+                # lo tiene configurado, formulario.py bloquea el selector de
+                # SUB CANAL en ese valor, igual que ya se bloquea la razón social.
+                st.session_state["subcanal_fijo"] = datos_usuario.get("subcanal_fijo", "")
                 st.success("✅ Ingreso correcto")
                 st.rerun()
             else:

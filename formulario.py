@@ -6,6 +6,24 @@ import pandas as pd
 import pytz
 import streamlit as st
 
+from auth import cargar_usuarios
+from certificados import validar_certificado_aprobado
+from concurrencia import LOCK_ALTAS, intentar_lock_sheet
+from documentos_onedrive import validar_documentos_promotor
+from zonas import lista_zonas_agrupadas
+
+# Cargos de promotor por canal: a estos cargos (y solo a estos) se les exige
+# contrato + DNI en OneDrive y certificado de evaluación aprobado. Supervisor,
+# Coordinador y Back office quedan exentos de esta validación documental.
+CARGOS_PROMOTOR = {"Promotor D2D - Dealer", "Promotor - D2D"}
+
+# Cargos de Supervisor/Coordinador por canal, usados para construir los
+# desplegables dinámicos desde colaboradores (ya no desde la hoja ubicaciones).
+CARGOS_SUPERVISOR_INDIRECTO = {"Supervisor D2D - Dealer"}
+CARGOS_COORDINADOR_INDIRECTO = {"Coordinador D2D - Dealer"}
+CARGOS_SUPERVISOR_DIRECTO = {"Supervisor - D2D"}
+CARGOS_COORDINADOR_DIRECTO = {"Coordinador - D2D"}
+
 # =========================
 # HORA PERÚ
 # =========================
@@ -259,6 +277,96 @@ def buscar_dni_por_nombre(df: pd.DataFrame, columna_nombre: str, columna_dni: st
 
 
 # =========================
+# RAZONES / SUPERVISOR-COORDINADOR DINÁMICOS (desde colaboradores, no desde
+# la hoja auxiliar ubicaciones)
+# =========================
+def razones_dinamicas() -> list[str]:
+    """Dealers (Indirecto) + WOW TEL (Directo), derivados de usuarios.json en vez
+    de una lista fija en código: un dealer nuevo solo necesita su usuario ahí."""
+    try:
+        usuarios = cargar_usuarios()
+    except Exception:
+        usuarios = {}
+    dealers = sorted({
+        str(u.get("razon", "")).strip()
+        for u in usuarios.values()
+        if str(u.get("rol", "")).strip() == "dealer" and str(u.get("razon", "")).strip()
+    })
+    return dealers + ["WOW TEL"]
+
+
+def _normalizar_razon(s: str) -> str:
+    """Misma normalización que registro_mod.py: ignora mayúsculas y puntuación
+    (ej. 'NOGALES HIGH SAC' == 'NOGALES HIGH S.A.C.'), porque la razón social
+    no siempre se escribe igual en usuarios.json que en colaboradores."""
+    return re.sub(r"\s+", " ", str(s).strip().upper().replace(".", "").replace("-", "")).strip()
+
+
+def _nombre_completo(row) -> str:
+    return " ".join([
+        limpiar_texto(row.get("NOMBRES", row.get("NOMBRE", ""))),
+        limpiar_texto(row.get("APELLIDO PATERNO", "")),
+        limpiar_texto(row.get("APELLIDO MATERNO", "")),
+    ]).strip()
+
+
+def opciones_supervisor_coordinador(
+    df_colab: pd.DataFrame,
+    cargos: set,
+    razon: str = None,
+    subcanal: str = None,
+    mostrar_dni: bool = True,
+) -> list[str]:
+    """
+    Opciones de colaboradores ACTIVOS cuyo cargo está en `cargos`. Si se pasa
+    razon, filtra por esa razón social (un supervisor de un dealer no debe
+    ofrecerse al registrar promotores de otro dealer). Si se pasa subcanal,
+    prioriza coincidencias de SUB CANAL (p. ej. CEX) antes de caer al resto del
+    canal. Indirecto muestra "NOMBRE COMPLETO — DNI" (mostrar_dni=True); Directo
+    y CEX muestran solo "NOMBRE COMPLETO" (mostrar_dni=False), igual que hoy.
+    """
+    if df_colab.empty or "CARGO (ROL)" not in df_colab.columns:
+        return []
+
+    df = df_colab.copy()
+    if "ESTADO" in df.columns:
+        df = df[df["ESTADO"].astype(str).str.strip().str.upper().eq("ACTIVO")]
+    df = df[df["CARGO (ROL)"].astype(str).str.strip().isin(cargos)]
+
+    if razon and "RAZON SOCIAL" in df.columns:
+        razon_norm = _normalizar_razon(razon)
+        df = df[df["RAZON SOCIAL"].astype(str).apply(_normalizar_razon).eq(razon_norm)]
+
+    if subcanal and "SUB CANAL" in df.columns:
+        df_subcanal = df[df["SUB CANAL"].astype(str).str.strip().str.upper().eq(str(subcanal).strip().upper())]
+        if not df_subcanal.empty:
+            df = df_subcanal
+
+    opciones = []
+    for _, row in df.iterrows():
+        nombre = _nombre_completo(row)
+        if not nombre:
+            continue
+        dni = limpiar_texto(row.get("DNI", "")).replace(".0", "")
+        opciones.append(f"{nombre} — {dni}" if (mostrar_dni and dni) else nombre)
+    return sorted(set(opciones))
+
+
+def dni_de_opcion(opcion: str) -> str:
+    if not opcion or "—" not in opcion:
+        return ""
+    return opcion.rsplit("—", 1)[-1].strip()
+
+
+def nombre_de_opcion(opcion: str) -> str:
+    if not opcion:
+        return ""
+    if "—" not in opcion:
+        return opcion.strip()
+    return opcion.rsplit("—", 1)[0].strip()
+
+
+# =========================
 # VALIDACIONES DE NEGOCIO
 # =========================
 def validar_formulario(campos: dict, df_colab: pd.DataFrame) -> list[str]:
@@ -300,6 +408,7 @@ def validar_formulario(campos: dict, df_colab: pd.DataFrame) -> list[str]:
         requeridos += [
             ("DEPARTAMENTO", "Departamento"),
             ("PROVINCIA", "Provincia"),
+            ("ZONA AGRUPADA", "Zona agrupada"),
             ("SUPERVISOR A CARGO", "Supervisor a cargo"),
             ("DNI SUPERVISOR", "DNI supervisor"),
             ("COORDINADOR", "Coordinador"),
@@ -365,6 +474,20 @@ def validar_formulario(campos: dict, df_colab: pd.DataFrame) -> list[str]:
         ok, msg = validar_dni_unico_historico(df_colab, dni_limpio, fecha_alta)
         if not ok:
             errores.append(msg)
+
+    # Requisitos documentales: SOLO para cargos de promotor (Supervisor,
+    # Coordinador y Agente BO quedan exentos, como se pidió). Se valida solo si
+    # el DNI ya tiene el formato correcto, para no duplicar el mismo error.
+    cargo_rol = limpiar_texto(campos.get("CARGO (ROL)", ""))
+    if cargo_rol in CARGOS_PROMOTOR and dni_limpio and not any("DNI debe tener" in e or "DNI solo" in e for e in errores):
+        if canal == "VENTAS INDIRECTAS":
+            ok_doc, msg_doc = validar_documentos_promotor(campos.get("RAZON SOCIAL", ""), dni_limpio)
+            if not ok_doc:
+                errores.append(msg_doc)
+
+            ok_cert, msg_cert = validar_certificado_aprobado(dni_limpio)
+            if not ok_cert:
+                errores.append(msg_cert)
 
     return errores
 
@@ -599,7 +722,7 @@ def valor_por_columna(headers: list[str], campos: dict) -> list[str]:
 # =========================
 # FORMULARIO
 # =========================
-def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=None):
+def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=None, hoja_locks=None):
     st.markdown("<span class='wow-section-title'>📋 Alta de Vendedores</span>", unsafe_allow_html=True)
 
     msg_ok_pendiente = st.session_state.get("mensaje_ok")
@@ -629,6 +752,10 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
     usuario_actual = st.session_state.get("usuario", "")
     rol = st.session_state.get("rol", "")
     razon_usuario = st.session_state.get("razon", "")
+    # Sub canal fijo opcional (ej. usuarios de ATC o de Outbound): si el usuario
+    # lo tiene configurado en usuarios.json, el selector de SUB CANAL queda
+    # bloqueado en ese valor más abajo, igual que ya se bloquea la razón social.
+    subcanal_fijo = limpiar_texto(st.session_state.get("subcanal_fijo", "")).upper()
 
     # Versión dinámica de llaves: cuando el alta se guarda correctamente,
     # se incrementa y todos los campos vuelven limpios como si se abriera el módulo desde cero.
@@ -642,38 +769,27 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
         st.error("❌ No se pudo leer la hoja de ubicaciones.")
         return
 
-    razones = [
-        "MULTIPLE FORCE SAC",
-        "INTERCONEXION 360 SAC",
-        "NOGALES HIGH S.A.C.",
-        "GRUPO CREED S.A.C.",
-        "WOW TEL",
-    ]
+    # Colaboradores también se lee al cargar (cacheado 60s) para alimentar los
+    # desplegables de Supervisor/Coordinador desde los registros reales, en vez
+    # de la hoja auxiliar 'ubicaciones'. La relectura FORZADA para validar
+    # duplicados sigue ocurriendo solo al guardar (más abajo), sin cambios ahí.
+    df_colab_ref = leer_colaboradores(hoja_colaboradores)
+
+    razones = razones_dinamicas()
 
     departamentos = lista_limpia(df_ubi, "DEPARTAMENTO")
-    supervisores = lista_limpia(df_ubi, "SUPERVISOR A CARGO FINAL")
-    coordinadores = lista_limpia(df_ubi, "COORDINADOR FINAL")
 
-    # Aviso controlado: si alguna lista de jerarquía viene vacía, el desplegable
-    # mostrará "No results". Avisamos cuál columna de 'ubicaciones' está vacía o
-    # mal nombrada para que no parezca un bug del formulario.
-    _faltan_ref = [
-        nombre for nombre, lst in [
-            ("DEPARTAMENTO", departamentos),
-            ("SUPERVISOR A CARGO FINAL", supervisores),
-            ("COORDINADOR FINAL", coordinadores),
-        ] if not lst
-    ]
-    if _faltan_ref:
+    # Aviso controlado: si DEPARTAMENTO viene vacío, el desplegable mostrará
+    # "No results". Avisamos para que no parezca un bug del formulario.
+    if not departamentos:
         st.warning(
-            "⚠️ Estas columnas de la hoja **ubicaciones** vienen vacías o con otro "
-            f"nombre, por eso su desplegable saldrá como 'No results': {', '.join(_faltan_ref)}. "
-            "Revisa que existan y tengan datos en la hoja de referencia."
+            "⚠️ La columna **DEPARTAMENTO** de la hoja **ubicaciones** viene vacía o con "
+            "otro nombre, por eso su desplegable saldrá como 'No results'. "
+            "Revisa que exista y tenga datos en la hoja de referencia."
         )
 
     # Listas adicionales para canal VENTAS DIRECTAS (mismo worksheet ubicaciones).
     # Si la columna no existe, queda lista vacía y se muestra alerta controlada.
-    supervisores_directo = lista_limpia(df_ubi, "SUPERVISOR")
     capacitadores = lista_limpia(df_ubi, "CAPACITADOR")
     origenes_ingreso = lista_limpia(df_ubi, "ORIGEN_INGRESO")
     fuentes_ingreso = lista_limpia(df_ubi, "FUENTE_INGRESO")
@@ -694,11 +810,13 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
 
     with col_der:
         st.markdown("**Datos comerciales**")
-        # Capacitación (razón fija "ALL", no es empresa real) también elige
-        # razón social libremente, igual que backoffice — así sus altas quedan
-        # con la empresa correcta en vez de guardarse literalmente como "ALL".
-        if rol in ("backoffice", "capacitacion"):
+        if rol == "backoffice":
             razon = st.selectbox("RAZÓN SOCIAL", [""] + razones, key=k("razon"))
+        elif rol == "capacitacion":
+            # Academia solo registra en Directo (WOW TEL): queda fija, sin poder
+            # elegir un dealer por error.
+            razon = "WOW TEL"
+            st.text_input("RAZÓN SOCIAL", value=razon, disabled=True, key=k("razon_academia"))
         else:
             razon = razon_usuario
             st.text_input("RAZÓN SOCIAL", value=razon, disabled=True, key=k("razon_dealer"))
@@ -716,12 +834,18 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             # ── DEALERS INDIRECTOS ──────────────────────────────────────
             canal = "VENTAS INDIRECTAS"
             st.text_input("CANAL", value=canal, disabled=True, key=k("canal_indirecto_fijo"))
-            subcanal = st.selectbox(
-                "SUB CANAL",
-                ["VENTAS INDIRECTAS", "OUTBOUND"],
-                index=0,
-                key=k("subcanal_indirecto"),
-            )
+            if subcanal_fijo:
+                # Usuario de sub canal fijo (ej. Outbound de Konecta/Salesland/
+                # Grupo Creed): no puede cambiarlo a VENTAS INDIRECTAS.
+                subcanal = subcanal_fijo
+                st.text_input("SUB CANAL", value=subcanal, disabled=True, key=k("subcanal_indirecto_fijo"))
+            else:
+                subcanal = st.selectbox(
+                    "SUB CANAL",
+                    ["VENTAS INDIRECTAS", "OUTBOUND"],
+                    index=0,
+                    key=k("subcanal_indirecto"),
+                )
             tipo_gestion = "CAMPO"
 
         elif ES_WOW_TEL:
@@ -732,11 +856,17 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             # lo que no calzaba con el histórico ya guardado en la hoja.
             canal = "VENTAS DIRECTAS"
             st.text_input("CANAL", value=canal, disabled=True, key=k("canal_wowtel_display"))
-            subcanal = st.selectbox(
-                "SUB CANAL",
-                ["", "D2D", "ATC", "RETAIL", "CEX"],
-                key=k("subcanal_wowtel"),
-            )
+            if subcanal_fijo:
+                # Usuario de sub canal fijo (ej. equipo ATC): no puede cambiarlo
+                # a D2D/RETAIL/CEX.
+                subcanal = subcanal_fijo
+                st.text_input("SUB CANAL", value=subcanal, disabled=True, key=k("subcanal_wowtel_fijo"))
+            else:
+                subcanal = st.selectbox(
+                    "SUB CANAL",
+                    ["", "D2D", "ATC", "RETAIL", "CEX"],
+                    key=k("subcanal_wowtel"),
+                )
             tipo_gestion = ""
 
         else:
@@ -801,7 +931,13 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
 
         if canal != "VENTAS INDIRECTAS" and canal:
             st.markdown("**Datos adicionales**")
-            supervisor_directo = st.selectbox("SUPERVISOR",       [""] + supervisores_directo, key=k("supervisor_directo"))
+            # Supervisor dinámico desde colaboradores (cargo "Supervisor - D2D"),
+            # ya no desde la hoja auxiliar ubicaciones. Para CEX prioriza
+            # supervisores cuyo propio registro también sea SUB CANAL=CEX.
+            opciones_sup_directo = opciones_supervisor_coordinador(
+                df_colab_ref, CARGOS_SUPERVISOR_DIRECTO, subcanal=subcanal, mostrar_dni=False,
+            )
+            supervisor_directo = st.selectbox("SUPERVISOR",       [""] + opciones_sup_directo, key=k("supervisor_directo"))
             capacitador        = st.selectbox("CAPACITADOR",      [""] + capacitadores,        key=k("capacitador"))
             origen_ingreso     = st.selectbox("ORIGEN INGRESO",   [""] + origenes_ingreso,     key=k("origen_ingreso"))
             fuente_ingreso     = st.selectbox("FUENTE INGRESO",   [""] + fuentes_ingreso,      key=k("fuente_ingreso"))
@@ -813,6 +949,7 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
     provincia = ""
     coordinador = ""
     dni_coordinador = ""
+    zona_agrupada = ""
 
     if canal == "VENTAS INDIRECTAS":
         # ── DEALERS: jerarquía completa ────────────────────────────────
@@ -838,13 +975,26 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
                 st.session_state[k("distrito")] = ""
             distrito = st.selectbox("DISTRITO", [""] + distritos, key=k("distrito"))
 
-            coordinador = st.selectbox("COORDINADOR", [""] + coordinadores, key=k("coordinador"))
-            dni_coordinador = buscar_dni_por_nombre(df_ubi, "COORDINADOR FINAL", "DNI COORDINADOR", coordinador)
+            # Zona Agrupada: selector dinámico desde el Excel de ubigeos (data/).
+            # st.selectbox ya filtra al escribir (ej. "Lima" muestra LIMA NORTE,
+            # LIMA SUR, etc.), no requiere un componente aparte.
+            zona_agrupada = st.selectbox("ZONA AGRUPADA", [""] + lista_zonas_agrupadas(), key=k("zona_agrupada"))
+
+            # Coordinador dinámico desde colaboradores (cargo "Coordinador D2D -
+            # Dealer", ACTIVO, del mismo dealer), ya no desde ubicaciones.
+            opciones_coord = opciones_supervisor_coordinador(df_colab_ref, CARGOS_COORDINADOR_INDIRECTO, razon=razon)
+            coordinador_sel = st.selectbox("COORDINADOR", [""] + opciones_coord, key=k("coordinador"))
+            coordinador = nombre_de_opcion(coordinador_sel)
+            dni_coordinador = dni_de_opcion(coordinador_sel)
             st.text_input("DNI COORDINADOR", value=dni_coordinador, disabled=True, key=k("dni_coordinador"))
 
         with col_u2:
-            supervisor = st.selectbox("SUPERVISOR A CARGO", [""] + supervisores, key=k("supervisor"))
-            dni_supervisor = buscar_dni_por_nombre(df_ubi, "SUPERVISOR A CARGO FINAL", "DNI SUPERVISOR", supervisor)
+            # Supervisor dinámico desde colaboradores (cargo "Supervisor D2D -
+            # Dealer", ACTIVO, del mismo dealer), ya no desde ubicaciones.
+            opciones_sup = opciones_supervisor_coordinador(df_colab_ref, CARGOS_SUPERVISOR_INDIRECTO, razon=razon)
+            supervisor_sel = st.selectbox("SUPERVISOR A CARGO", [""] + opciones_sup, key=k("supervisor"))
+            supervisor = nombre_de_opcion(supervisor_sel)
+            dni_supervisor = dni_de_opcion(supervisor_sel)
             st.text_input("DNI SUPERVISOR", value=dni_supervisor, disabled=True, key=k("dni_supervisor"))
 
     else:
@@ -932,6 +1082,7 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             "DEPARTAMENTO": departamento,
             "PROVINCIA": provincia,
             "DISTRITO": limpiar_texto(distrito),
+            "ZONA AGRUPADA": limpiar_texto(zona_agrupada) if es_indirecto else "",
             # ─── SUPERVISOR ────────────────────────────────────────────────
             # INDIRECTAS (Dealers) → SUPERVISOR A CARGO / SUPERVISOR A CARGO FINAL
             # DIRECTAS y WOW TEL   → SUPERVISOR
@@ -977,78 +1128,92 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             "USUARIO BAJA": "",
         }
 
-        # Colaboradores se lee SOLO al guardar para validar histórico/duplicados.
-        # Así no se congela el formulario mientras llenas campos.
-        df_colab = leer_colaboradores(hoja_colaboradores, forzar=True)
-        errores = validar_formulario(campos, df_colab)
-
-        # Validar reingreso (bloqueo + popup advertencia)
-        dni_limpio = normalizar_dni(limpiar_texto(campos.get("DNI", "")))
-        fecha_alta = campos.get("FECHA DE CREACION USUARIO")
-        ok_reingreso, msg_reingreso, es_reingreso = validar_reingreso(df_colab, dni_limpio, fecha_alta)
-
-        if not ok_reingreso:
-            errores.append(msg_reingreso)
-
-        if errores:
-            for err in errores:
-                st.error(err)
-            st.session_state[guardando_key] = False
-            return
-
-        # Popup de advertencia de reingreso (no bloquea, solo advierte)
-        if es_reingreso and not ok_reingreso is False:
-            st.warning(
-                f"⚠️ **REINGRESO DETECTADO** — DNI: {dni_limpio}\n\n"
-                "**Por favor, revisar urgentemente el resultado de indicadores "
-                "de calidad y productividad en los últimos 6 meses:**\n\n"
-                "• BN2 / BN3 (Buena Nota)\n"
-                "• Productividad venta cero\n"
-                "• Indicadores de actividad y cumplimiento\n\n"
-                "Si los indicadores no califican, rechazar el alta antes de confirmar."
-            )
-
-        try:
-            columnas_nuevas = [
-                "TIPO_GESTION",
-                "SUPERVISOR",
-                "CAPACITADOR",
-                "ORIGEN_INGRESO",
-                "FUENTE_INGRESO",
-            ]
-            headers = asegurar_columnas_colaboradores(hoja_colaboradores, columnas_nuevas)
-            if not headers:
-                st.error("❌ La hoja colaboradores no tiene cabecera. No se puede registrar.")
+        # ── BLOQUEO DE DUPLICADOS (punto D) ──────────────────────────────────
+        # LOCK_ALTAS serializa este bloque entre todas las sesiones del mismo
+        # proceso (doble pestaña, dos usuarios atendidos por el mismo servicio).
+        # intentar_lock_sheet agrega además un candado en la propia hoja de
+        # cálculo para cubrir el caso de dos procesos distintos. Ninguno de los
+        # dos reemplaza las validaciones existentes de abajo: las refuerza.
+        with LOCK_ALTAS:
+            ok_lock, motivo_lock = intentar_lock_sheet(hoja_locks, dni_limpio, usuario_actual)
+            if not ok_lock:
+                st.error(f"⚠️ {motivo_lock}")
+                st.session_state[guardando_key] = False
                 return
 
-            fila = valor_por_columna(headers, campos)
-            hoja_colaboradores.append_row(fila, value_input_option="USER_ENTERED")
-            leer_colaboradores(hoja_colaboradores, forzar=True)
-            # Limpiar cache de jerarquía para actualización inmediata
+            # Colaboradores se lee SOLO al guardar para validar histórico/duplicados.
+            # Así no se congela el formulario mientras llenas campos.
+            df_colab = leer_colaboradores(hoja_colaboradores, forzar=True)
+            errores = validar_formulario(campos, df_colab)
+
+            # Validar reingreso (bloqueo + popup advertencia)
+            dni_limpio = normalizar_dni(limpiar_texto(campos.get("DNI", "")))
+            fecha_alta = campos.get("FECHA DE CREACION USUARIO")
+            ok_reingreso, msg_reingreso, es_reingreso = validar_reingreso(df_colab, dni_limpio, fecha_alta)
+
+            if not ok_reingreso:
+                errores.append(msg_reingreso)
+
+            if errores:
+                for err in errores:
+                    st.error(err)
+                st.session_state[guardando_key] = False
+                return
+
+            # Popup de advertencia de reingreso (no bloquea, solo advierte)
+            if es_reingreso and not ok_reingreso is False:
+                st.warning(
+                    f"⚠️ **REINGRESO DETECTADO** — DNI: {dni_limpio}\n\n"
+                    "**Por favor, revisar urgentemente el resultado de indicadores "
+                    "de calidad y productividad en los últimos 6 meses:**\n\n"
+                    "• BN2 / BN3 (Buena Nota)\n"
+                    "• Productividad venta cero\n"
+                    "• Indicadores de actividad y cumplimiento\n\n"
+                    "Si los indicadores no califican, rechazar el alta antes de confirmar."
+                )
+
             try:
-                from registro_mod import _leer_matriz_cached
-                _leer_matriz_cached.clear()
-            except Exception:
-                pass
+                columnas_nuevas = [
+                    "TIPO_GESTION",
+                    "SUPERVISOR",
+                    "CAPACITADOR",
+                    "ORIGEN_INGRESO",
+                    "FUENTE_INGRESO",
+                    "ZONA AGRUPADA",
+                ]
+                headers = asegurar_columnas_colaboradores(hoja_colaboradores, columnas_nuevas)
+                if not headers:
+                    st.error("❌ La hoja colaboradores no tiene cabecera. No se puede registrar.")
+                    return
 
-            if hoja_asistencia is not None:
+                fila = valor_por_columna(headers, campos)
+                hoja_colaboradores.append_row(fila, value_input_option="USER_ENTERED")
+                leer_colaboradores(hoja_colaboradores, forzar=True)
+                # Limpiar cache de jerarquía para actualización inmediata
                 try:
-                    # No se ejecuta Sincronizar mes completo aquí porque eso lee toda la base
-                    # y hacía lento el alta. Solo se intenta agregar este DNI al periodo actual
-                    # de Presencialidad, sin tocar marcajes existentes.
-                    from asistencia import registrar_alta_en_asistencia
-                    estado_pres = registrar_alta_en_asistencia(hoja_asistencia, campos)
-                    st.session_state["mensaje_ok"] = f"✅ Alta registrada correctamente. {estado_pres}"
-                except Exception as e_sync:
-                    st.session_state["mensaje_ok"] = "✅ Alta registrada correctamente. Aparecerá en Presencialidad automáticamente."
-                    st.session_state["mensaje_sync_warning"] = f"⚠️ No se pudo actualizar presencialidad en automático: {e_sync}"
-            else:
-                st.session_state["mensaje_ok"] = "✅ Alta registrada correctamente. Aparecerá en Presencialidad automáticamente."
+                    from registro_mod import _leer_matriz_cached
+                    _leer_matriz_cached.clear()
+                except Exception:
+                    pass
 
-            # Fuerza que el próximo render use llaves nuevas y todos los campos queden en blanco.
-            st.session_state["alta_form_version"] = int(st.session_state.get("alta_form_version", 0)) + 1
-            limpiar_form()
-            st.rerun()
-        except Exception as e:
-            st.session_state[guardando_key] = False
-            st.error(f"❌ Error al registrar el alta: {e}")
+                if hoja_asistencia is not None:
+                    try:
+                        # No se ejecuta Sincronizar mes completo aquí porque eso lee toda la base
+                        # y hacía lento el alta. Solo se intenta agregar este DNI al periodo actual
+                        # de Presencialidad, sin tocar marcajes existentes.
+                        from asistencia import registrar_alta_en_asistencia
+                        estado_pres = registrar_alta_en_asistencia(hoja_asistencia, campos)
+                        st.session_state["mensaje_ok"] = f"✅ Alta registrada correctamente. {estado_pres}"
+                    except Exception as e_sync:
+                        st.session_state["mensaje_ok"] = "✅ Alta registrada correctamente. Aparecerá en Presencialidad automáticamente."
+                        st.session_state["mensaje_sync_warning"] = f"⚠️ No se pudo actualizar presencialidad en automático: {e_sync}"
+                else:
+                    st.session_state["mensaje_ok"] = "✅ Alta registrada correctamente. Aparecerá en Presencialidad automáticamente."
+
+                # Fuerza que el próximo render use llaves nuevas y todos los campos queden en blanco.
+                st.session_state["alta_form_version"] = int(st.session_state.get("alta_form_version", 0)) + 1
+                limpiar_form()
+                st.rerun()
+            except Exception as e:
+                st.session_state[guardando_key] = False
+                st.error(f"❌ Error al registrar el alta: {e}")

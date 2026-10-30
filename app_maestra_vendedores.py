@@ -9,6 +9,7 @@ import registro_mod as registro
 from auth import cargar_usuarios, login
 from ui_inicio import mostrar_bienvenida
 from sheets import conectar_google_sheets, conectar_google_sheets_opcional
+from concurrencia import obtener_hoja_locks
 from formulario import mostrar_formulario
 from asistencia import mostrar_asistencia
 from cobranza_calidad import mostrar_cobranza
@@ -39,6 +40,10 @@ hoja_colaboradores = get_worksheet("maestra_vendedores", "colaboradores")
 hoja_ubicaciones   = get_worksheet("maestra_vendedores", "ubicaciones")
 hoja_asistencia    = get_worksheet("maestra_vendedores", "Asistencia")
 hoja_sustentos     = get_worksheet("maestra_vendedores", "Sustentos_Bajas")
+# Candado anti-duplicados (ver concurrencia.py). obtener_hoja_locks nunca
+# detiene la app: si falla, retorna None y el alta sigue funcionando apoyada
+# solo en el lock en memoria del proceso (LOCK_ALTAS).
+hoja_locks = obtener_hoja_locks("maestra_vendedores", "LOCKS_ALTA")
 
 # SIDEBAR
 render_sidebar_user(usuario=usuario, rol=rol, razon=razon)
@@ -65,7 +70,7 @@ else:
 
 st.sidebar.markdown("<div style='height:14px;'></div>", unsafe_allow_html=True)
 if st.sidebar.button("🚪 Cerrar sesión", key="btn_logout"):
-    for k in ["autenticado", "usuario", "rol", "razon", "user", "pass"]:
+    for k in ["autenticado", "usuario", "rol", "razon", "subcanal_fijo", "user", "pass"]:
         if k in st.session_state:
             del st.session_state[k]
     st.rerun()
@@ -87,7 +92,7 @@ def mostrar_matriz_jerarquia(titulo="Estado actual de la jerarquía", icono="�
 # BACKOFFICE
 if rol == "backoffice":
     if pagina == "Alta":
-        mostrar_formulario(hoja_colaboradores, hoja_ubicaciones)
+        mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_locks=hoja_locks)
         mostrar_matriz_jerarquia()
     elif pagina == "Bajas":
         df = mostrar_matriz_jerarquia()
@@ -109,7 +114,7 @@ if rol == "backoffice":
 elif rol == "dealer":
     wow_section(f"Socio: {razon}", "📌")
     if pagina == "Alta":
-        mostrar_formulario(hoja_colaboradores, hoja_ubicaciones)
+        mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_locks=hoja_locks)
         mostrar_matriz_jerarquia()
     elif pagina == "Bajas":
         df = mostrar_matriz_jerarquia()
@@ -123,7 +128,7 @@ elif rol == "dealer":
 # CAPACITACIÓN — SOLO ALTAS
 elif rol == "capacitacion":
     if pagina == "Alta":
-        mostrar_formulario(hoja_colaboradores, hoja_ubicaciones)
+        mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_locks=hoja_locks)
         mostrar_matriz_jerarquia()
 
 # PRESENCIALIDAD BÁSICA — BAJAS + PRESENCIALIDAD
