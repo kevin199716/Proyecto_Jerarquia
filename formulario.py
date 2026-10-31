@@ -233,9 +233,22 @@ def asegurar_columnas_colaboradores(hoja_colaboradores, columnas_requeridas: lis
 
     headers_set = {h.strip().upper() for h in headers}
     col_actual = len(headers)
-    for col in columnas_requeridas:
-        col_up = str(col).strip().upper()
-        if col_up and col_up not in headers_set:
+    nuevas = [str(c).strip().upper() for c in columnas_requeridas if str(c).strip().upper() and str(c).strip().upper() not in headers_set]
+
+    if nuevas:
+        # La grilla del Sheet tiene un límite de columnas propio (ej. 50) que no
+        # crece solo al escribir más allá de él: hay que ampliarla primero, o
+        # update_cell revienta con "exceeds grid limits" aunque los datos estén
+        # bien (visto en producción: Range colaboradores!AY1 exceeds grid limits).
+        col_necesario = col_actual + len(nuevas)
+        try:
+            col_hoja = hoja_colaboradores.col_count
+        except Exception:
+            col_hoja = col_actual
+        if col_necesario > col_hoja:
+            hoja_colaboradores.add_cols(col_necesario - col_hoja)
+
+        for col_up in nuevas:
             col_actual += 1
             hoja_colaboradores.update_cell(1, col_actual, col_up)
             headers.append(col_up)
@@ -467,13 +480,11 @@ def validar_formulario(campos: dict, df_colab: pd.DataFrame) -> list[str]:
     if canal == "VENTAS INDIRECTAS" and limpiar_texto(campos.get("TIPO_GESTION", "")).upper() != "CAMPO":
         errores.append("❌ Para VENTAS INDIRECTAS, TIPO_GESTION debe ser CAMPO.")
 
-    # Histórico/duplicado. Se ejecuta solo cuando el formato base ya es válido.
+    # Histórico/duplicado (DNI activo, fecha de alta vs. última baja) NO se
+    # valida aquí: lo hace validar_reingreso justo después, en el bloque de
+    # guardado. Antes ambas funciones revisaban lo mismo con textos distintos
+    # y el usuario veía dos mensajes de error diferentes para el mismo motivo.
     dni_limpio = normalizar_dni(dni_original)
-    fecha_alta = campos.get("FECHA DE CREACION USUARIO")
-    if fecha_alta and dni_limpio and not any("DNI debe tener" in e or "DNI solo" in e for e in errores):
-        ok, msg = validar_dni_unico_historico(df_colab, dni_limpio, fecha_alta)
-        if not ok:
-            errores.append(msg)
 
     # Requisitos documentales: SOLO para cargos de promotor (Supervisor,
     # Coordinador y Agente BO quedan exentos, como se pidió). Se valida solo si
@@ -490,76 +501,6 @@ def validar_formulario(campos: dict, df_colab: pd.DataFrame) -> list[str]:
                 errores.append(msg_cert)
 
     return errores
-
-
-def validar_dni_unico_historico(df_colab: pd.DataFrame, dni_limpio: str, fecha_alta) -> tuple[bool, str]:
-    fecha_alta = parse_fecha(fecha_alta)
-    if fecha_alta is None:
-        return False, "❌ La FECHA DE CREACION USUARIO no es válida."
-    if df_colab.empty or "DNI" not in df_colab.columns:
-        return True, ""
-
-    df = df_colab.copy()
-    df["DNI_NORM"] = df["DNI"].apply(normalizar_dni)
-    encontrados = df[df["DNI_NORM"].eq(dni_limpio)].copy()
-
-    if encontrados.empty:
-        return True, ""
-
-    if "ESTADO" in encontrados.columns:
-        activos = encontrados[encontrados["ESTADO"].astype(str).str.strip().str.upper().eq("ACTIVO")]
-    else:
-        activos = pd.DataFrame()
-
-    if not activos.empty:
-        detalle = activos.iloc[0]
-        razon = limpiar_texto(detalle.get("RAZON SOCIAL", ""))
-        nombre = " ".join([
-            limpiar_texto(detalle.get("NOMBRES", detalle.get("NOMBRE", ""))),
-            limpiar_texto(detalle.get("APELLIDO PATERNO", "")),
-            limpiar_texto(detalle.get("APELLIDO MATERNO", "")),
-        ]).strip()
-        return False, (
-            f"❌ El DNI {dni_limpio} ya se encuentra ACTIVO en la base. "
-            f"No se puede registrar nuevamente, indistintamente del dealer. "
-            f"Registro activo: {razon} / {nombre}."
-        )
-
-    # Para histórico de reingreso solo se evalúan bajas reales.
-    # FECHA MOV NO se llena en altas; se usa únicamente al aplicar baja.
-    # Si por datos antiguos existe FECHA MOV en un registro ACTIVO, se ignora.
-    columnas_baja_base = [
-        "FECHA DE CESE",
-        "FECHA CESE",
-        "FECHA_BAJA_REGISTRO",
-        "FECHA BAJA REGISTRO",
-    ]
-
-    fechas_baja = []
-    for _, row in encontrados.iterrows():
-        estado_row = limpiar_texto(row.get("ESTADO", "")).upper()
-
-        for col in columnas_baja_base:
-            if col in encontrados.columns:
-                f = parse_fecha(row.get(col))
-                if f:
-                    fechas_baja.append(f)
-
-        # FECHA MOV solo cuenta como baja si la fila ya está INACTIVA.
-        if estado_row == "INACTIVO" and "FECHA MOV" in encontrados.columns:
-            f_mov = parse_fecha(row.get("FECHA MOV"))
-            if f_mov:
-                fechas_baja.append(f_mov)
-
-    if fechas_baja:
-        ultima_baja = max(fechas_baja)
-        if fecha_alta <= ultima_baja:
-            return False, (
-                f"❌ La fecha de alta ({fecha_alta}) debe ser MAYOR a la última baja/movimiento "
-                f"del DNI {dni_limpio}: {ultima_baja}. No puede ser igual ni menor."
-            )
-
-    return True, ""
 
 
 def validar_reingreso(df_colab: pd.DataFrame, dni_limpio: str, fecha_alta) -> tuple[bool, str, bool]:
@@ -626,72 +567,6 @@ def validar_reingreso(df_colab: pd.DataFrame, dni_limpio: str, fecha_alta) -> tu
         return True, "", True
 
     return True, "", False
-    errores = []
-
-    canal_val = limpiar_texto(campos.get("CANAL", "")).upper()
-    requeridos = [
-        "RAZON SOCIAL", "CANAL", "SUB CANAL", "REGION", "CARGO (ROL)",
-        "NOMBRES", "APELLIDO PATERNO", "CELULAR",
-        "TIPO DE DOC", "DNI", "CORREO", "TIPO DE CONTRATO",
-        "FECHA DE CREACION USUARIO", "CONTRATO FIRMADO",
-    ]
-
-    if canal_val == "VENTAS DIRECTAS":
-        requeridos += ["SUPERVISOR", "CAPACITADOR", "ORIGEN_INGRESO", "FUENTE_INGRESO"]
-    else:
-        requeridos += ["DEPARTAMENTO", "PROVINCIA", "SUPERVISOR A CARGO", "DNI SUPERVISOR", "COORDINADOR", "DNI COORDINADOR"]
-
-    for c in requeridos:
-        if limpiar_texto(campos.get(c, "")) == "":
-            errores.append(f"❌ Campo obligatorio pendiente: {c}")
-
-    celular = limpiar_celular(campos.get("CELULAR", ""))
-    if celular and (not celular.isdigit() or len(celular) != 9):
-        errores.append("❌ El CELULAR debe tener exactamente 9 dígitos.")
-
-    dni_original = limpiar_texto(campos.get("DNI", ""))
-    dni_limpio = normalizar_dni(dni_original)
-    dni_sin_punto = dni_original.replace(".0", "")
-    if not dni_original:
-        errores.append("❌ El DNI es obligatorio.")
-    elif not dni_sin_punto.isdigit():
-        errores.append("❌ El DNI solo debe contener números.")
-    elif len(dni_sin_punto) > 8:
-        errores.append("❌ El DNI no puede tener más de 8 dígitos.")
-    elif len(dni_limpio) != 8:
-        errores.append("❌ El DNI debe quedar con exactamente 8 dígitos.")
-
-    correo = limpiar_texto(campos.get("CORREO", ""))
-    if correo and not re.match(r"^[^@\s]+@[^@\s]+\.[^@\s]+$", correo):
-        errores.append("❌ El CORREO no tiene un formato válido.")
-
-    region = limpiar_texto(campos.get("REGION", "")).upper()
-    if region and region not in ("CENTRAL", "NORORIENTE", "SUR"):
-        errores.append("❌ REGIÓN inválida. Solo se permite CENTRAL, NORORIENTE o SUR.")
-
-    contrato = limpiar_texto(campos.get("TIPO DE CONTRATO", "")).upper()
-    if contrato and contrato not in ("PLANILLA", "MEDIA PLANILLA"):
-        errores.append("❌ Tipo de contrato inválido. Solo se permite PLANILLA o MEDIA PLANILLA.")
-
-    firmado = limpiar_texto(campos.get("CONTRATO FIRMADO", "")).upper()
-    if firmado != "SI":
-        errores.append("❌ CONTRATO FIRMADO debe quedar en SI para registrar el alta.")
-
-    if canal_val == "VENTAS DIRECTAS":
-        for c in ["SUPERVISOR", "CAPACITADOR", "ORIGEN_INGRESO", "FUENTE_INGRESO"]:
-            if limpiar_texto(campos.get(c, "")) == "":
-                errores.append(f"❌ Campo obligatorio pendiente para Ventas Directas: {c}")
-    elif canal_val == "VENTAS INDIRECTAS":
-        if limpiar_texto(campos.get("TIPO_GESTION", "")).upper() != "CAMPO":
-            errores.append("❌ Para VENTAS INDIRECTAS, TIPO_GESTION debe ser CAMPO.")
-
-    fecha_alta = campos.get("FECHA DE CREACION USUARIO")
-    if fecha_alta and dni_limpio:
-        ok, msg = validar_dni_unico_historico(df_colab, dni_limpio, fecha_alta)
-        if not ok:
-            errores.append(msg)
-
-    return errores
 
 
 # =========================
@@ -931,11 +806,16 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
 
         if canal != "VENTAS INDIRECTAS" and canal:
             st.markdown("**Datos adicionales**")
-            # Supervisor dinámico desde colaboradores (cargo "Supervisor - D2D"),
-            # ya no desde la hoja auxiliar ubicaciones. Para CEX prioriza
-            # supervisores cuyo propio registro también sea SUB CANAL=CEX.
+            # Jefe directo dinámico desde colaboradores: en Directo, tanto
+            # Supervisor ("Supervisor - D2D") como Coordinador ("Coordinador -
+            # D2D") pueden ser el responsable directo del colaborador, así que
+            # ambos cargos entran en un solo listado "SUPERVISOR" (a diferencia
+            # de Indirecto, que sí distingue supervisor de coordinador en dos
+            # campos separados). Para CEX prioriza responsables cuyo propio
+            # registro también sea SUB CANAL=CEX.
             opciones_sup_directo = opciones_supervisor_coordinador(
-                df_colab_ref, CARGOS_SUPERVISOR_DIRECTO, subcanal=subcanal, mostrar_dni=False,
+                df_colab_ref, CARGOS_SUPERVISOR_DIRECTO | CARGOS_COORDINADOR_DIRECTO,
+                subcanal=subcanal, mostrar_dni=False,
             )
             supervisor_directo = st.selectbox("SUPERVISOR",       [""] + opciones_sup_directo, key=k("supervisor_directo"))
             capacitador        = st.selectbox("CAPACITADOR",      [""] + capacitadores,        key=k("capacitador"))
