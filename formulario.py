@@ -304,7 +304,9 @@ def razones_dinamicas() -> list[str]:
         str(u.get("razon", "")).strip()
         for u in usuarios.values()
         if str(u.get("rol", "")).strip() == "dealer" and str(u.get("razon", "")).strip()
-    })
+    } - {"WOW TEL"})  # ej. "atc_alta" es rol=dealer con razon=WOW TEL; sin este
+    # descarte, WOW TEL salía duplicado en RAZON SOCIAL (una vez por dealers,
+    # otra por el fijo de abajo).
     return dealers + ["WOW TEL"]
 
 
@@ -1014,13 +1016,15 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
         # intentar_lock_sheet agrega además un candado en la propia hoja de
         # cálculo para cubrir el caso de dos procesos distintos. Ninguno de los
         # dos reemplaza las validaciones existentes de abajo: las refuerza.
+        #
+        # El candado de Sheets se toma RECIÉN cuando el alta ya pasó todas las
+        # validaciones (justo antes de escribir). Antes se tomaba primero y
+        # quedaba una fila de candado en LOCKS_ALTA aunque el alta fallara por
+        # un campo faltante; si el usuario corregía y volvía a guardar el mismo
+        # DNI dentro de los 30s del TTL, chocaba con su propia fila anterior y
+        # veía "Otro registro... se está procesando" sin que nadie más
+        # estuviera registrando ese DNI.
         with LOCK_ALTAS:
-            ok_lock, motivo_lock = intentar_lock_sheet(hoja_locks, dni_limpio, usuario_actual)
-            if not ok_lock:
-                st.error(f"⚠️ {motivo_lock}")
-                st.session_state[guardando_key] = False
-                return
-
             # Colaboradores se lee SOLO al guardar para validar histórico/duplicados.
             # Así no se congela el formulario mientras llenas campos.
             df_colab = leer_colaboradores(hoja_colaboradores, forzar=True)
@@ -1037,6 +1041,12 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             if errores:
                 for err in errores:
                     st.error(err)
+                st.session_state[guardando_key] = False
+                return
+
+            ok_lock, motivo_lock = intentar_lock_sheet(hoja_locks, dni_limpio, usuario_actual)
+            if not ok_lock:
+                st.error(f"⚠️ {motivo_lock}")
                 st.session_state[guardando_key] = False
                 return
 
