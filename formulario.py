@@ -215,10 +215,17 @@ def leer_colaboradores(hoja_colaboradores, forzar=False):
 
 
 def obtener_headers(hoja_colaboradores) -> list[str]:
-    valores = hoja_colaboradores.get_all_values()
+    # row_values(1) trae solo la fila de cabecera (una llamada liviana). Antes
+    # usaba get_all_values(), que descarga TODA la hoja (18,840+ filas) nada
+    # más para leer la fila 1 — esto se ejecuta en cada Alta guardada, y era
+    # la demora que se notaba al guardar.
+    try:
+        valores = hoja_colaboradores.row_values(1)
+    except Exception:
+        return []
     if not valores:
         return []
-    return [str(h).strip().upper() for h in valores[0]]
+    return [str(h).strip().upper() for h in valores]
 
 
 def asegurar_columnas_colaboradores(hoja_colaboradores, columnas_requeridas: list[str]) -> list[str]:
@@ -318,10 +325,14 @@ def _normalizar_razon(s: str) -> str:
 
 
 def _nombre_completo(row) -> str:
+    # Solo Nombres + Apellido Paterno: es el término histórico con el que
+    # siempre se guardó SUPERVISOR/COORDINADOR en colaboradores (en Directo e
+    # Indirecto). Incluir Apellido Materno aquí rompía esa consistencia: un
+    # supervisor con los 3 datos completos en su ficha salía con 3 palabras,
+    # mientras todos los registros anteriores (altas viejas) solo tienen 2.
     return " ".join([
         limpiar_texto(row.get("NOMBRES", row.get("NOMBRE", ""))),
         limpiar_texto(row.get("APELLIDO PATERNO", "")),
-        limpiar_texto(row.get("APELLIDO MATERNO", "")),
     ]).strip()
 
 
