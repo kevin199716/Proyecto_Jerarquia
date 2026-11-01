@@ -141,66 +141,77 @@
     "password": "InterAlta@2026!",
     "rol": "dealer",
     "estado": "activo",
+    "activo_comercial": true,
     "razon": "INTERCONEXION 360 SAC"
   },
   "multiforce_alta": {
     "password": "MultiAlta@2026!",
     "rol": "dealer",
     "estado": "activo",
+    "activo_comercial": true,
     "razon": "MULTIPLE FORCE SAC"
   },
   "nogales_alta": {
     "password": "NogalesAlta@2026!",
     "rol": "dealer",
     "estado": "activo",
+    "activo_comercial": true,
     "razon": "NOGALES HIGH SAC"
   },
   "konecta_alta": {
     "password": "KonectaAlta@2026!",
     "rol": "dealer",
     "estado": "activo",
+    "activo_comercial": true,
     "razon": "KONECTA SAC"
   },
   "grupocreed_alta": {
     "password": "CreedAlta@2026!",
     "rol": "dealer",
     "estado": "activo",
+    "activo_comercial": true,
     "razon": "GRUPO CREED SAC"
   },
   "2connect_alta": {
     "password": "2ConnectAlta@2026!",
     "rol": "dealer",
     "estado": "activo",
+    "activo_comercial": true,
     "razon": "2CONNECT SERVICES S.A.C"
   },
   "malutech_alta": {
     "password": "MalutechAlta@2026!",
     "rol": "dealer",
     "estado": "activo",
+    "activo_comercial": true,
     "razon": "MALUTECH S.A.C"
   },
   "multiforce_alta2": {
     "password": "MultiAlta2@2026!",
     "rol": "dealer",
     "estado": "activo",
+    "activo_comercial": true,
     "razon": "MULTIPLE FORCE SAC"
   },
   "interconexion_alta2": {
     "password": "InterAlta2@2026!",
     "rol": "dealer",
     "estado": "activo",
+    "activo_comercial": true,
     "razon": "INTERCONEXION 360 SAC"
   },
   "nogales_alta2": {
     "password": "NogalesAlta2@2026!",
     "rol": "dealer",
     "estado": "activo",
+    "activo_comercial": true,
     "razon": "NOGALES HIGH SAC"
   },
   "atc_alta": {
     "password": "ATCAlta@2026!",
     "rol": "dealer",
     "estado": "activo",
+    "activo_comercial": true,
     "razon": "WOW TEL",
     "subcanal_fijo": "ATC"
   },
@@ -208,6 +219,7 @@
     "password": "KonectaOut@2026!",
     "rol": "dealer",
     "estado": "activo",
+    "activo_comercial": true,
     "razon": "KONECTA SAC",
     "subcanal_fijo": "OUTBOUND"
   },
@@ -215,6 +227,7 @@
     "password": "SaleslandOut@2026!",
     "rol": "dealer",
     "estado": "activo",
+    "activo_comercial": true,
     "razon": "SALESLAND",
     "subcanal_fijo": "OUTBOUND"
   },
@@ -222,6 +235,7 @@
     "password": "CreedOut@2026!",
     "rol": "dealer",
     "estado": "activo",
+    "activo_comercial": true,
     "razon": "GRUPO CREED SAC",
     "subcanal_fijo": "OUTBOUND"
   }

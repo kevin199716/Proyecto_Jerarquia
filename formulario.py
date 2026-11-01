@@ -307,10 +307,16 @@ def razones_dinamicas() -> list[str]:
         usuarios = cargar_usuarios()
     except Exception:
         usuarios = {}
+    # activo_comercial (en usuarios.json): si la empresa deja de ser socia, se
+    # pone en false en TODAS sus cuentas "dealer" y desaparece de RAZÓN
+    # SOCIAL sin tocar código. Si falta el campo (dato viejo) se asume activo,
+    # para no ocultar un dealer por un olvido de configuración.
     dealers = sorted({
         str(u.get("razon", "")).strip()
         for u in usuarios.values()
-        if str(u.get("rol", "")).strip() == "dealer" and str(u.get("razon", "")).strip()
+        if str(u.get("rol", "")).strip() == "dealer"
+        and str(u.get("razon", "")).strip()
+        and bool(u.get("activo_comercial", True))
     } - {"WOW TEL"})  # ej. "atc_alta" es rol=dealer con razon=WOW TEL; sin este
     # descarte, WOW TEL salía duplicado en RAZON SOCIAL (una vez por dealers,
     # otra por el fijo de abajo).
