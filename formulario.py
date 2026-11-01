@@ -325,13 +325,18 @@ def _normalizar_razon(s: str) -> str:
 
 
 def _nombre_completo(row) -> str:
-    # Solo Nombres + Apellido Paterno: es el término histórico con el que
-    # siempre se guardó SUPERVISOR/COORDINADOR en colaboradores (en Directo e
-    # Indirecto). Incluir Apellido Materno aquí rompía esa consistencia: un
-    # supervisor con los 3 datos completos en su ficha salía con 3 palabras,
-    # mientras todos los registros anteriores (altas viejas) solo tienen 2.
+    # SOLO primer nombre + apellido paterno: es el término exacto con el que
+    # SIEMPRE se guardó SUPERVISOR/COORDINADOR en colaboradores, en Directo e
+    # Indirecto (confirmado contra el histórico real de la hoja: "Flavia
+    # Rojas", "Cesar Aguilar", "Johan Ordinola", etc. — nunca nombre compuesto
+    # completo ni apellido materno). Usar el campo NOMBRES completo rompía
+    # esto apenas la ficha de la persona tenía más de un nombre (ej. "Flavia
+    # Lizeth Leonor" salía como "Flavia Lizeth Leonor Rojas" en vez de
+    # "Flavia Rojas"). La etiqueta debe quedar igual para un supervisor ya
+    # existente y para uno nuevo: no se diferencia caso por caso.
+    primer_nombre = limpiar_texto(row.get("NOMBRES", row.get("NOMBRE", ""))).split(" ")[0] if limpiar_texto(row.get("NOMBRES", row.get("NOMBRE", ""))) else ""
     return " ".join([
-        limpiar_texto(row.get("NOMBRES", row.get("NOMBRE", ""))),
+        primer_nombre,
         limpiar_texto(row.get("APELLIDO PATERNO", "")),
     ]).strip()
 
@@ -1089,7 +1094,13 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
 
                 fila = valor_por_columna(headers, campos)
                 hoja_colaboradores.append_row(fila, value_input_option="USER_ENTERED")
-                leer_colaboradores(hoja_colaboradores, forzar=True)
+                # Solo invalida el cache (no lo vuelve a descargar aquí): forzar=True
+                # releía inmediatamente las 18,840+ filas de colaboradores una SEGUNDA
+                # vez en el mismo guardado (la primera es la de la validación, arriba),
+                # haciendo esperar al usuario por una descarga completa que no hacía
+                # falta en ese momento — el próximo que lea colaboradores ya la trae
+                # fresca por el cache vacío.
+                _leer_colaboradores_cached.clear()
                 # Limpiar cache de jerarquía para actualización inmediata
                 try:
                     from registro_mod import _leer_matriz_cached
