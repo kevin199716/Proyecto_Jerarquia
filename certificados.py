@@ -14,7 +14,7 @@ COL_DNI = "DNI O CE"
 COL_RESULTADO = "Puntuación"  # formato "20 / 20"
 COL_FECHA = "Marca temporal"  # formato "D/M/AAAA HH:MM:SS"
 NOTA_MINIMA_APROBATORIA = 80  # % mínimo para aprobar.
-VENTANA_VALIDEZ_HORAS = 72  # el examen debe estar rendido dentro de las últimas 72h.
+VENTANA_VALIDEZ_HORAS = 120  # el examen debe estar rendido dentro de las últimas 120h (5 días). Confirmado 31/10/2026.
 
 zona_peru = pytz.timezone("America/Lima")
 

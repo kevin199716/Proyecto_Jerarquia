@@ -507,8 +507,13 @@ def validar_formulario(campos: dict, df_colab: pd.DataFrame) -> list[str]:
     # Requisitos documentales: SOLO para cargos de promotor (Supervisor,
     # Coordinador y Agente BO quedan exentos, como se pidió). Se valida solo si
     # el DNI ya tiene el formato correcto, para no duplicar el mismo error.
+    # Excepción canal OUT (SUB CANAL = OUTBOUND, ej. Konecta/Salesland/Grupo
+    # Creed outbound): no es obligatorio tener contrato/DNI/certificado al
+    # momento del alta, hay tolerancia para regularizar y cargarlos después.
+    # Confirmado 31/10/2026.
     cargo_rol = limpiar_texto(campos.get("CARGO (ROL)", ""))
-    if cargo_rol in CARGOS_PROMOTOR and dni_limpio and not any("DNI debe tener" in e or "DNI solo" in e for e in errores):
+    es_outbound = limpiar_texto(campos.get("SUB CANAL", "")).upper() == "OUTBOUND"
+    if cargo_rol in CARGOS_PROMOTOR and dni_limpio and not es_outbound and not any("DNI debe tener" in e or "DNI solo" in e for e in errores):
         if canal == "VENTAS INDIRECTAS":
             ok_doc, msg_doc = validar_documentos_promotor(campos.get("RAZON SOCIAL", ""), dni_limpio)
             if not ok_doc:
