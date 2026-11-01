@@ -103,6 +103,45 @@ def conectar_google_drive():
         st.stop()
 
 
+def _obtener_o_crear_subcarpeta_drive(service, nombre_subcarpeta: str, carpeta_padre_id: str = ID_CARPETA_SUSTENTOS) -> str:
+    """Busca una subcarpeta por nombre dentro de carpeta_padre_id; si no existe, la crea."""
+    nombre_escapado = str(nombre_subcarpeta).replace("'", "\\'").strip() or "SIN_RAZON"
+    query = (
+        f"'{carpeta_padre_id}' in parents and name = '{nombre_escapado}' "
+        "and mimeType = 'application/vnd.google-apps.folder' and trashed = false"
+    )
+    resultados = service.files().list(q=query, fields="files(id, name)", pageSize=1).execute()
+    encontrados = resultados.get("files", [])
+    if encontrados:
+        return encontrados[0]["id"]
+    metadata = {
+        "name": nombre_escapado,
+        "mimeType": "application/vnd.google-apps.folder",
+        "parents": [carpeta_padre_id],
+    }
+    carpeta = service.files().create(body=metadata, fields="id").execute()
+    return carpeta["id"]
+
+
+def subir_documento_privado(nombre_archivo: str, contenido_bytes: bytes, mime_type: str, subcarpeta: str) -> str:
+    """
+    Sube un archivo a Google Drive dentro de ID_CARPETA_SUSTENTOS/<subcarpeta>/
+    (una subcarpeta por socio/dealer, igual que la estructura que ya tenían en
+    OneDrive). A diferencia de subir_archivo_drive (que sube a catbox.moe,
+    público y accesible por cualquiera con el link), esto queda privado:
+    solo lo ve quien tenga permiso sobre ID_CARPETA_SUSTENTOS en Drive.
+
+    Requiere que esa carpeta de Drive esté compartida como Editor con el
+    email de la cuenta de servicio (campo "client_email" de las credenciales).
+    """
+    service = conectar_google_drive()
+    carpeta_id = _obtener_o_crear_subcarpeta_drive(service, subcarpeta)
+    media = MediaIoBaseUpload(io.BytesIO(contenido_bytes), mimetype=mime_type, resumable=False)
+    metadata = {"name": nombre_archivo, "parents": [carpeta_id]}
+    archivo = service.files().create(body=metadata, media_body=media, fields="id, webViewLink").execute()
+    return archivo.get("webViewLink") or f"https://drive.google.com/file/d/{archivo['id']}/view"
+
+
 def subir_archivo_drive(nombre_archivo: str, contenido_bytes: bytes, mime_type: str) -> str:
     """Sube el archivo a catbox.moe y retorna la URL pública permanente."""
     import requests, re

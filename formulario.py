@@ -9,7 +9,7 @@ import streamlit as st
 from auth import cargar_usuarios
 from certificados import validar_certificado_aprobado
 from concurrencia import LOCK_ALTAS, intentar_lock_sheet
-from documentos_onedrive import validar_documentos_promotor
+from sheets import subir_documento_privado
 from zonas import lista_zonas_agrupadas
 
 # Cargos de promotor por canal: a estos cargos (y solo a estos) se les exige
@@ -23,6 +23,12 @@ CARGOS_SUPERVISOR_INDIRECTO = {"Supervisor D2D - Dealer"}
 CARGOS_COORDINADOR_INDIRECTO = {"Coordinador D2D - Dealer"}
 CARGOS_SUPERVISOR_DIRECTO = {"Supervisor - D2D"}
 CARGOS_COORDINADOR_DIRECTO = {"Coordinador - D2D"}
+
+# Únicos dealers que realmente operan OUTBOUND. Confirmado 31/10/2026: el
+# resto de Indirecto (Nogales, Interconexión, Multiple Force, Malutech,
+# 2Connect) NO debe ni ver la opción OUTBOUND en SUB CANAL, porque usarla por
+# error se saltaba la validación obligatoria de documentos/certificado.
+DEALERS_CON_OUTBOUND = {"KONECTA SAC", "SALESLAND", "GRUPO CREED SAC"}
 
 # =========================
 # HORA PERÚ
@@ -517,14 +523,14 @@ def validar_formulario(campos: dict, df_colab: pd.DataFrame) -> list[str]:
     # Creed outbound): no es obligatorio tener contrato/DNI/certificado al
     # momento del alta, hay tolerancia para regularizar y cargarlos después.
     # Confirmado 31/10/2026.
+    # El contrato y la copia de DNI ya NO se buscan en OneDrive (el VPS no
+    # puede acceder a esa carpeta, que vive en la PC local de cada usuario):
+    # ahora se suben directamente en el propio formulario. Esa presencia se
+    # valida en mostrar_formulario (archivo_contrato/archivo_dni), no aquí.
     cargo_rol = limpiar_texto(campos.get("CARGO (ROL)", ""))
     es_outbound = limpiar_texto(campos.get("SUB CANAL", "")).upper() == "OUTBOUND"
     if cargo_rol in CARGOS_PROMOTOR and dni_limpio and not es_outbound and not any("DNI debe tener" in e or "DNI solo" in e for e in errores):
         if canal == "VENTAS INDIRECTAS":
-            ok_doc, msg_doc = validar_documentos_promotor(campos.get("RAZON SOCIAL", ""), dni_limpio)
-            if not ok_doc:
-                errores.append(msg_doc)
-
             ok_cert, msg_cert = validar_certificado_aprobado(dni_limpio)
             if not ok_cert:
                 errores.append(msg_cert)
@@ -743,13 +749,21 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
                 # Grupo Creed): no puede cambiarlo a VENTAS INDIRECTAS.
                 subcanal = subcanal_fijo
                 st.text_input("SUB CANAL", value=subcanal, disabled=True, key=k("subcanal_indirecto_fijo"))
-            else:
+            elif razon_norm in DEALERS_CON_OUTBOUND:
                 subcanal = st.selectbox(
                     "SUB CANAL",
                     ["VENTAS INDIRECTAS", "OUTBOUND"],
                     index=0,
                     key=k("subcanal_indirecto"),
                 )
+            else:
+                # Solo Konecta, Salesland y Grupo Creed operan OUTBOUND. Para el
+                # resto de dealers (Nogales, Interconexión, Multiple Force,
+                # Malutech, 2Connect) ni siquiera se ofrece la opción, porque
+                # usarla por error saltaba la validación de documentos y
+                # certificado que para ellos sí es obligatoria.
+                subcanal = "VENTAS INDIRECTAS"
+                st.text_input("SUB CANAL", value=subcanal, disabled=True, key=k("subcanal_indirecto_sin_out"))
             tipo_gestion = "CAMPO"
 
         elif ES_WOW_TEL:
@@ -815,7 +829,10 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             ]
 
         cargo = st.selectbox("CARGO (ROL)", opciones_cargo, key=k("cargo"))
-        tipo_contrato = st.selectbox("TIPO DE CONTRATO", ["PLANILLA", "MEDIA PLANILLA"], key=k("tipo_contrato"))
+        # Fijo en PLANILLA para toda gestión, sin excepción (confirmado
+        # 31/10/2026) — ya no se ofrece MEDIA PLANILLA como opción.
+        tipo_contrato = "PLANILLA"
+        st.text_input("TIPO DE CONTRATO", value=tipo_contrato, disabled=True, key=k("tipo_contrato_display"))
         hoy_alta = datetime.now(zona_peru).date()
         fecha_creacion = st.date_input(
             "FECHA CREACIÓN USUARIO",
@@ -850,6 +867,29 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             capacitador        = st.selectbox("CAPACITADOR",      [""] + capacitadores,        key=k("capacitador"))
             origen_ingreso     = st.selectbox("ORIGEN INGRESO",   [""] + origenes_ingreso,     key=k("origen_ingreso"))
             fuente_ingreso     = st.selectbox("FUENTE INGRESO",   [""] + fuentes_ingreso,      key=k("fuente_ingreso"))
+
+    # =====================================================
+    # DOCUMENTOS (solo Promotor Indirecto, fuera de OUTBOUND)
+    # =====================================================
+    # Reemplaza la validación contra OneDrive (el VPS no puede leer la
+    # carpeta local de cada PC): ahora el contrato y la copia de DNI se
+    # suben aquí mismo y se guardan en Drive (subir_archivo_drive), igual
+    # que ya se hace en Presencialidad (asistencia.py).
+    archivo_contrato = None
+    archivo_dni = None
+    requiere_documentos = (
+        canal == "VENTAS INDIRECTAS"
+        and cargo in CARGOS_PROMOTOR
+        and limpiar_texto(subcanal).upper() != "OUTBOUND"
+    )
+    if requiere_documentos:
+        st.divider()
+        st.markdown("**Documentos (obligatorio para Promotor)**")
+        col_d1, col_d2 = st.columns(2)
+        with col_d1:
+            archivo_contrato = st.file_uploader("Contrato firmado (PDF)", type=["pdf"], key=k("archivo_contrato"))
+        with col_d2:
+            archivo_dni = st.file_uploader("Copia de DNI (PDF)", type=["pdf"], key=k("archivo_dni"))
 
     # =====================================================
     # UBICACIÓN / JERARQUÍA
@@ -1035,7 +1075,20 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             "USUARIO ALTA": usuario_actual,
             "USUARIO_BAJA": "",
             "USUARIO BAJA": "",
+            "URL CONTRATO": "",
+            "URL DNI": "",
         }
+
+        # ── DOCUMENTOS: validar que estén subidos antes de pasar a Sheets ──
+        if requiere_documentos and (archivo_contrato is None or archivo_dni is None):
+            faltantes_doc = []
+            if archivo_contrato is None:
+                faltantes_doc.append("contrato firmado")
+            if archivo_dni is None:
+                faltantes_doc.append("copia de DNI")
+            st.error(f"❌ Falta subir: {', '.join(faltantes_doc)}.")
+            st.session_state[guardando_key] = False
+            return
 
         # ── BLOQUEO DE DUPLICADOS (punto D) ──────────────────────────────────
         # LOCK_ALTAS serializa este bloque entre todas las sesiones del mismo
@@ -1089,6 +1142,29 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
                     "Si los indicadores no califican, rechazar el alta antes de confirmar."
                 )
 
+            # Subir documentos a Drive (recién ahora, con todo validado y el
+            # candado tomado, para no subir archivos de intentos que de todos
+            # modos iban a fallar por otro motivo).
+            if requiere_documentos:
+                try:
+                    razon_carpeta = campos.get("RAZON SOCIAL", "") or "SIN_RAZON"
+                    campos["URL CONTRATO"] = subir_documento_privado(
+                        nombre_archivo=f"CONTRATO_{dni_limpio}_{archivo_contrato.name}",
+                        contenido_bytes=archivo_contrato.getvalue(),
+                        mime_type=archivo_contrato.type or "application/pdf",
+                        subcarpeta=razon_carpeta,
+                    )
+                    campos["URL DNI"] = subir_documento_privado(
+                        nombre_archivo=f"DNI_{dni_limpio}_{archivo_dni.name}",
+                        contenido_bytes=archivo_dni.getvalue(),
+                        mime_type=archivo_dni.type or "application/pdf",
+                        subcarpeta=razon_carpeta,
+                    )
+                except Exception as e:
+                    st.error(f"❌ No se pudo subir el contrato/DNI: {e}. Vuelve a intentarlo.")
+                    st.session_state[guardando_key] = False
+                    return
+
             try:
                 columnas_nuevas = [
                     "TIPO_GESTION",
@@ -1097,6 +1173,8 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
                     "ORIGEN_INGRESO",
                     "FUENTE_INGRESO",
                     "ZONA AGRUPADA",
+                    "URL CONTRATO",
+                    "URL DNI",
                 ]
                 headers = asegurar_columnas_colaboradores(hoja_colaboradores, columnas_nuevas)
                 if not headers:
