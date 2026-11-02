@@ -179,20 +179,6 @@
     "activo_comercial": true,
     "razon": "GRUPO CREED SAC"
   },
-  "2connect_alta": {
-    "password": "2ConnectAlta@2026!",
-    "rol": "dealer",
-    "estado": "activo",
-    "activo_comercial": false,
-    "razon": "2CONNECT SERVICES S.A.C"
-  },
-  "malutech_alta": {
-    "password": "MalutechAlta@2026!",
-    "rol": "dealer",
-    "estado": "activo",
-    "activo_comercial": false,
-    "razon": "MALUTECH S.A.C"
-  },
   "multiforce_alta2": {
     "password": "MultiAlta2@2026!",
     "rol": "dealer",

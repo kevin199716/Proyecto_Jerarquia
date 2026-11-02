@@ -809,12 +809,11 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
                 subcanal = subcanal_fijo
                 st.text_input("SUB CANAL", value=subcanal, disabled=True, key=k("subcanal_indirecto_fijo"))
             elif razon_norm in DEALERS_CON_OUTBOUND:
-                subcanal = st.selectbox(
-                    "SUB CANAL",
-                    ["VENTAS INDIRECTAS", "OUTBOUND"],
-                    index=0,
-                    key=k("subcanal_indirecto"),
-                )
+                # Konecta, Grupo Creed y Salesland SON Outbound, no "también
+                # pueden" ser Outbound: no se ofrece opción de elegir, queda
+                # fijo. Confirmado 02/11/2026.
+                subcanal = "OUTBOUND"
+                st.text_input("SUB CANAL", value=subcanal, disabled=True, key=k("subcanal_indirecto_out_fijo"))
             else:
                 # Solo Konecta, Salesland y Grupo Creed operan OUTBOUND. Para el
                 # resto de dealers (Nogales, Interconexión, Multiple Force,
