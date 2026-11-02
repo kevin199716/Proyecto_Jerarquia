@@ -125,6 +125,13 @@
     "estado": "activo",
     "razon": "SALESLAND"
   },
+  "salesland_alta": {
+    "password": "SaleslandAlta@2026!",
+    "rol": "dealer",
+    "estado": "activo",
+    "activo_comercial": true,
+    "razon": "SALESLAND"
+  },
   "capacitacion4": {
     "password": "Cap4#86weRq",
     "rol": "capacitacion",
