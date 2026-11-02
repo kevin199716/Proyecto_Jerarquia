@@ -10,7 +10,6 @@ import streamlit as st
 from auth import cargar_usuarios
 from certificados import validar_certificado_aprobado
 from concurrencia import LOCK_ALTAS, intentar_lock_sheet
-from sheets import subir_documento_privado
 from zonas import lista_zonas_agrupadas
 
 # Cargos de promotor por canal: a estos cargos (y solo a estos) se les exige
@@ -1303,35 +1302,16 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
                     "Si los indicadores no califican, rechazar el alta antes de confirmar."
                 )
 
-            # Subir documentos a Drive (recién ahora, con todo validado y el
-            # candado tomado, para no subir archivos de intentos que de todos
-            # modos iban a fallar por otro motivo).
+            # Guardar documentos directo en el VPS, con la misma estructura de
+            # carpetas que OneDrive (RAZON SOCIAL / CONTRATOS NUEVOS USUARIOS
+            # y DNI NUEVOS USUARIOS). El script de sincronización inversa
+            # (ops/sync_vps_to_onedrive.ps1, cada 20 min) los lleva de vuelta
+            # a la carpeta real de OneDrive del socio — ahí quedan, no en
+            # Google Drive (se sacó: las cuentas de servicio de Google no
+            # tienen cuota de almacenamiento propia y la subida fallaba con
+            # "storageQuotaExceeded"). Confirmado 02/11/2026.
             if requiere_documentos:
-                try:
-                    razon_carpeta = campos.get("RAZON SOCIAL", "") or "SIN_RAZON"
-                    campos["URL CONTRATO"] = subir_documento_privado(
-                        nombre_archivo=f"CONTRATO_{dni_limpio}_{archivo_contrato.name}",
-                        contenido_bytes=archivo_contrato.getvalue(),
-                        mime_type=archivo_contrato.type or "application/pdf",
-                        subcarpeta=razon_carpeta,
-                    )
-                    campos["URL DNI"] = subir_documento_privado(
-                        nombre_archivo=f"DNI_{dni_limpio}_{archivo_dni.name}",
-                        contenido_bytes=archivo_dni.getvalue(),
-                        mime_type=archivo_dni.type or "application/pdf",
-                        subcarpeta=razon_carpeta,
-                    )
-                except Exception as e:
-                    st.error(f"❌ No se pudo subir el contrato/DNI: {e}. Vuelve a intentarlo.")
-                    st.session_state[guardando_key] = False
-                    return
-
-                # Copia local en el VPS, con la misma estructura de carpetas
-                # que OneDrive, para que el script de sincronización inversa
-                # (ops/sync_vps_to_onedrive.ps1) la lleve de vuelta a la
-                # carpeta real de OneDrive del socio. Si esto falla (ej. el
-                # disco /mnt no está montado todavía), NO bloquea el alta: el
-                # documento ya quedó a salvo en Drive (arriba).
+                razon_carpeta = campos.get("RAZON SOCIAL", "") or "SIN_RAZON"
                 try:
                     nombre_doc = f"{dni_limpio} - {campos.get('NOMBRES','')} {campos.get('APELLIDO PATERNO','')}".strip()
                     carpeta_contrato = os.path.join(RUTA_WEB_UPLOADS_ONEDRIVE, razon_carpeta, "CONTRATOS NUEVOS USUARIOS")
@@ -1342,8 +1322,12 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
                         fh.write(archivo_contrato.getvalue())
                     with open(os.path.join(carpeta_dni, f"{nombre_doc}.pdf"), "wb") as fh:
                         fh.write(archivo_dni.getvalue())
-                except Exception:
-                    pass
+                    campos["URL CONTRATO"] = f"OneDrive: {razon_carpeta}/CONTRATOS NUEVOS USUARIOS/{nombre_doc}.pdf"
+                    campos["URL DNI"] = f"OneDrive: {razon_carpeta}/DNI NUEVOS USUARIOS/{nombre_doc}.pdf"
+                except Exception as e:
+                    st.error(f"❌ No se pudo guardar el contrato/DNI: {e}. Vuelve a intentarlo.")
+                    st.session_state[guardando_key] = False
+                    return
 
             try:
                 columnas_nuevas = [
