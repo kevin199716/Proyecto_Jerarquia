@@ -417,6 +417,17 @@ def opciones_supervisor_coordinador(
         if not df_subcanal.empty:
             df = df_subcanal
 
+    # Una misma persona (mismo DNI) puede tener más de una fila ACTIVA con el
+    # nombre escrito distinto (mayúsculas/minúsculas, con o sin "ñ") por
+    # errores de digitación al registrarla. Si no se filtra, el desplegable
+    # ofrece varias "versiones" de la misma persona y cada alta nueva termina
+    # guardando un texto distinto para el mismo Supervisor/Coordinador. Se
+    # deja solo UNA fila por DNI (la última, es decir la más reciente en la
+    # hoja) como fuente del nombre a mostrar. Confirmado 02/11/2026.
+    if "DNI" in df.columns:
+        df = df[df["DNI"].astype(str).str.strip() != ""]
+        df = df.drop_duplicates(subset="DNI", keep="last")
+
     opciones = []
     for _, row in df.iterrows():
         nombre = _nombre_completo(row)
