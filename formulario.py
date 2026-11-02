@@ -465,14 +465,21 @@ def validar_formulario(campos: dict, df_colab: pd.DataFrame) -> list[str]:
     canal = limpiar_texto(campos.get("CANAL", "")).upper()
     tipo_doc = limpiar_texto(campos.get("TIPO DE DOC", "")).upper()
     cargo_rol_temprano = limpiar_texto(campos.get("CARGO (ROL)", ""))
-    # Un dealer nuevo (ej. Konecta, Grupo Creed, Salesland recién habilitados)
-    # no tiene todavía ningún Supervisor/Coordinador registrado, así que el
-    # desplegable sale vacío. Si no se exime este caso, nunca se podría
-    # registrar al PRIMER Supervisor/Coordinador de ese dealer (no hay nadie
-    # arriba de ellos para elegir). Confirmado 01/11/2026.
-    es_primer_eslabon = cargo_rol_temprano in (
-        CARGOS_SUPERVISOR_INDIRECTO | CARGOS_COORDINADOR_INDIRECTO
-        | CARGOS_SUPERVISOR_DIRECTO | CARGOS_COORDINADOR_DIRECTO | CARGOS_JEFE_DIRECTO
+    # Jerarquía real: Coordinador es el rango más alto (no reporta a nadie),
+    # Supervisor reporta a un Coordinador (no a otro Supervisor), y recién
+    # Promotor/Agente BO reportan a ambos. Antes se exigían los 4 campos
+    # (Supervisor+Coordinador) para CUALQUIER cargo salvo la primerísima vez
+    # de cada dealer nuevo; eso rompía la jerarquía (un Coordinador no debe
+    # tener que elegir supervisor/coordinador NUNCA, no solo la primera vez)
+    # y dejaba huérfano el caso donde ya hay Supervisor pero aún no hay
+    # Coordinador. Confirmado 02/11/2026.
+    es_coordinador_indirecto = cargo_rol_temprano in CARGOS_COORDINADOR_INDIRECTO
+    es_supervisor_indirecto = cargo_rol_temprano in CARGOS_SUPERVISOR_INDIRECTO
+    # Directo/CEX/ATC usa un único campo "SUPERVISOR" (Jefe/Supervisor/
+    # Coordinador mezclados); ahí se mantiene la excepción solo para el
+    # primer registro de ese rango, como antes.
+    es_primer_eslabon_directo = cargo_rol_temprano in (
+        CARGOS_SUPERVISOR_DIRECTO | CARGOS_COORDINADOR_DIRECTO | CARGOS_JEFE_DIRECTO
     )
 
     # Campos generales obligatorios
@@ -506,15 +513,20 @@ def validar_formulario(campos: dict, df_colab: pd.DataFrame) -> list[str]:
             ("PROVINCIA", "Provincia"),
             ("ZONA AGRUPADA", "Zona agrupada"),
         ]
-        if not es_primer_eslabon:
+        if not es_coordinador_indirecto:
+            # Supervisor Y Promotor/Agente BO necesitan Coordinador.
             requeridos += [
-                ("SUPERVISOR A CARGO", "Supervisor a cargo"),
-                ("DNI SUPERVISOR", "DNI supervisor"),
                 ("COORDINADOR", "Coordinador"),
                 ("DNI COORDINADOR", "DNI coordinador"),
             ]
+            if not es_supervisor_indirecto:
+                # Solo Promotor/Agente BO necesitan además Supervisor.
+                requeridos += [
+                    ("SUPERVISOR A CARGO", "Supervisor a cargo"),
+                    ("DNI SUPERVISOR", "DNI supervisor"),
+                ]
     else:
-        if not es_primer_eslabon:
+        if not es_primer_eslabon_directo:
             requeridos += [
                 ("SUPERVISOR", "Supervisor"),
             ]
@@ -1002,22 +1014,37 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             # LIMA SUR, etc.), no requiere un componente aparte.
             zona_agrupada = st.selectbox("ZONA AGRUPADA", [""] + lista_zonas_agrupadas(), key=k("zona_agrupada"))
 
-            # Coordinador dinámico desde colaboradores (cargo "Coordinador D2D -
-            # Dealer", ACTIVO, del mismo dealer), ya no desde ubicaciones.
-            opciones_coord = opciones_supervisor_coordinador(df_colab_ref, CARGOS_COORDINADOR_INDIRECTO, razon=razon)
-            coordinador_sel = st.selectbox("COORDINADOR", [""] + opciones_coord, key=k("coordinador"))
-            coordinador = nombre_de_opcion(coordinador_sel)
-            dni_coordinador = dni_de_opcion(coordinador_sel)
-            st.text_input("DNI COORDINADOR", value=dni_coordinador, disabled=True, key=k("dni_coordinador"))
+            # Jerarquía: Coordinador es el rango más alto, no reporta a nadie
+            # — no tiene sentido pedirle que se elija un Coordinador a sí
+            # mismo. Para cualquier otro cargo (Supervisor, Promotor, Agente
+            # BO), sí se pide. Confirmado 02/11/2026.
+            coordinador = ""
+            dni_coordinador = ""
+            if cargo not in CARGOS_COORDINADOR_INDIRECTO:
+                # Coordinador dinámico desde colaboradores (cargo "Coordinador
+                # D2D - Dealer" / "Coordinador OUT - Dealer", ACTIVO, del
+                # mismo dealer), ya no desde ubicaciones.
+                opciones_coord = opciones_supervisor_coordinador(df_colab_ref, CARGOS_COORDINADOR_INDIRECTO, razon=razon)
+                coordinador_sel = st.selectbox("COORDINADOR", [""] + opciones_coord, key=k("coordinador"))
+                coordinador = nombre_de_opcion(coordinador_sel)
+                dni_coordinador = dni_de_opcion(coordinador_sel)
+                st.text_input("DNI COORDINADOR", value=dni_coordinador, disabled=True, key=k("dni_coordinador"))
 
         with col_u2:
-            # Supervisor dinámico desde colaboradores (cargo "Supervisor D2D -
-            # Dealer", ACTIVO, del mismo dealer), ya no desde ubicaciones.
-            opciones_sup = opciones_supervisor_coordinador(df_colab_ref, CARGOS_SUPERVISOR_INDIRECTO, razon=razon)
-            supervisor_sel = st.selectbox("SUPERVISOR A CARGO", [""] + opciones_sup, key=k("supervisor"))
-            supervisor = nombre_de_opcion(supervisor_sel)
-            dni_supervisor = dni_de_opcion(supervisor_sel)
-            st.text_input("DNI SUPERVISOR", value=dni_supervisor, disabled=True, key=k("dni_supervisor"))
+            # Jerarquía: Supervisor reporta a un Coordinador, no a otro
+            # Supervisor — por eso Supervisor y Coordinador NO ven este
+            # campo, solo lo ve Promotor/Agente BO. Confirmado 02/11/2026.
+            supervisor = ""
+            dni_supervisor = ""
+            if cargo not in (CARGOS_COORDINADOR_INDIRECTO | CARGOS_SUPERVISOR_INDIRECTO):
+                # Supervisor dinámico desde colaboradores (cargo "Supervisor
+                # D2D - Dealer" / "Supervisor OUT - Dealer", ACTIVO, del mismo
+                # dealer), ya no desde ubicaciones.
+                opciones_sup = opciones_supervisor_coordinador(df_colab_ref, CARGOS_SUPERVISOR_INDIRECTO, razon=razon)
+                supervisor_sel = st.selectbox("SUPERVISOR A CARGO", [""] + opciones_sup, key=k("supervisor"))
+                supervisor = nombre_de_opcion(supervisor_sel)
+                dni_supervisor = dni_de_opcion(supervisor_sel)
+                st.text_input("DNI SUPERVISOR", value=dni_supervisor, disabled=True, key=k("dni_supervisor"))
 
     else:
         # ── WOW TEL / VENTAS DIRECTAS: solo ubicación ──────────────────
