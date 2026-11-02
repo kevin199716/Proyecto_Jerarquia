@@ -176,14 +176,14 @@
     "password": "2ConnectAlta@2026!",
     "rol": "dealer",
     "estado": "activo",
-    "activo_comercial": true,
+    "activo_comercial": false,
     "razon": "2CONNECT SERVICES S.A.C"
   },
   "malutech_alta": {
     "password": "MalutechAlta@2026!",
     "rol": "dealer",
     "estado": "activo",
-    "activo_comercial": true,
+    "activo_comercial": false,
     "razon": "MALUTECH S.A.C"
   },
   "multiforce_alta2": {

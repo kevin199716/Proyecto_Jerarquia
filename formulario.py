@@ -1,4 +1,5 @@
 # FIX_FORMULARIO_WOW_TEL_CANAL_SUBCANAL_DEFAULT_20260602
+import os
 import re
 from datetime import datetime, timedelta
 
@@ -29,6 +30,16 @@ CARGOS_COORDINADOR_DIRECTO = {"Coordinador - D2D"}
 # 2Connect) NO debe ni ver la opción OUTBOUND en SUB CANAL, porque usarla por
 # error se saltaba la validación obligatoria de documentos/certificado.
 DEALERS_CON_OUTBOUND = {"KONECTA SAC", "SALESLAND", "GRUPO CREED SAC"}
+
+# Carpeta local en el VPS donde se deja una copia del contrato/DNI subidos por
+# la web, con la MISMA estructura de carpetas que OneDrive (RAZON SOCIAL /
+# CONTRATOS NUEVOS USUARIOS | DNI NUEVOS USUARIOS). Un script en la PC de
+# Kevin (ops/sync_vps_to_onedrive.ps1, tarea programada cada 20 min) descarga
+# lo nuevo de aquí y lo deja en la carpeta real de OneDrive, para que el
+# equipo siga viendo los documentos donde siempre los vio. Confirmado
+# 01/11/2026: reemplaza a la sincronización OneDrive -> VPS (ya innecesaria,
+# porque ahora el documento se sube directo en el formulario).
+RUTA_WEB_UPLOADS_ONEDRIVE = os.getenv("RUTA_WEB_UPLOADS_ONEDRIVE", "/mnt/web_uploads_to_onedrive")
 
 # =========================
 # HORA PERÚ
@@ -1164,6 +1175,25 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
                     st.error(f"❌ No se pudo subir el contrato/DNI: {e}. Vuelve a intentarlo.")
                     st.session_state[guardando_key] = False
                     return
+
+                # Copia local en el VPS, con la misma estructura de carpetas
+                # que OneDrive, para que el script de sincronización inversa
+                # (ops/sync_vps_to_onedrive.ps1) la lleve de vuelta a la
+                # carpeta real de OneDrive del socio. Si esto falla (ej. el
+                # disco /mnt no está montado todavía), NO bloquea el alta: el
+                # documento ya quedó a salvo en Drive (arriba).
+                try:
+                    nombre_doc = f"{dni_limpio} - {campos.get('NOMBRES','')} {campos.get('APELLIDO PATERNO','')}".strip()
+                    carpeta_contrato = os.path.join(RUTA_WEB_UPLOADS_ONEDRIVE, razon_carpeta, "CONTRATOS NUEVOS USUARIOS")
+                    carpeta_dni = os.path.join(RUTA_WEB_UPLOADS_ONEDRIVE, razon_carpeta, "DNI NUEVOS USUARIOS")
+                    os.makedirs(carpeta_contrato, exist_ok=True)
+                    os.makedirs(carpeta_dni, exist_ok=True)
+                    with open(os.path.join(carpeta_contrato, f"{nombre_doc}.pdf"), "wb") as fh:
+                        fh.write(archivo_contrato.getvalue())
+                    with open(os.path.join(carpeta_dni, f"{nombre_doc}.pdf"), "wb") as fh:
+                        fh.write(archivo_dni.getvalue())
+                except Exception:
+                    pass
 
             try:
                 columnas_nuevas = [
