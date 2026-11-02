@@ -513,20 +513,28 @@ def validar_formulario(campos: dict, df_colab: pd.DataFrame) -> list[str]:
             ("PROVINCIA", "Provincia"),
             ("ZONA AGRUPADA", "Zona agrupada"),
         ]
-        if not es_coordinador_indirecto:
+        # Si el socio todavía no tiene a NADIE con ese cargo (desplegable
+        # vacío), no se le puede exigir elegir uno — se deja continuar sin
+        # asignarlo, se completa cuando el socio registre al suyo.
+        # Confirmado 02/11/2026.
+        if not es_coordinador_indirecto and campos.get("_HAY_COORDINADOR_DISPONIBLE", True):
             # Supervisor Y Promotor/Agente BO necesitan Coordinador.
             requeridos += [
                 ("COORDINADOR", "Coordinador"),
                 ("DNI COORDINADOR", "DNI coordinador"),
             ]
-            if not es_supervisor_indirecto:
-                # Solo Promotor/Agente BO necesitan además Supervisor.
-                requeridos += [
-                    ("SUPERVISOR A CARGO", "Supervisor a cargo"),
-                    ("DNI SUPERVISOR", "DNI supervisor"),
-                ]
+        if (
+            not es_coordinador_indirecto
+            and not es_supervisor_indirecto
+            and campos.get("_HAY_SUPERVISOR_DISPONIBLE", True)
+        ):
+            # Solo Promotor/Agente BO necesitan además Supervisor.
+            requeridos += [
+                ("SUPERVISOR A CARGO", "Supervisor a cargo"),
+                ("DNI SUPERVISOR", "DNI supervisor"),
+            ]
     else:
-        if not es_primer_eslabon_directo:
+        if not es_primer_eslabon_directo and campos.get("_HAY_SUPERVISOR_DIRECTO_DISPONIBLE", True):
             requeridos += [
                 ("SUPERVISOR", "Supervisor"),
             ]
@@ -944,17 +952,20 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
                 df_colab_ref, CARGOS_SUPERVISOR_DIRECTO | CARGOS_COORDINADOR_DIRECTO | CARGOS_JEFE_DIRECTO,
                 subcanal=subcanal, mostrar_dni=False,
             )
+            hay_supervisor_directo_disponible = True
             if opciones_sup_directo:
                 supervisor_directo = st.selectbox("SUPERVISOR", [""] + opciones_sup_directo, key=k("supervisor_directo"))
             elif cargo in (CARGOS_SUPERVISOR_DIRECTO | CARGOS_COORDINADOR_DIRECTO | CARGOS_JEFE_DIRECTO):
                 supervisor_directo = ""
             else:
                 # Sin nadie registrado todavía en este sub canal: se oculta
-                # el desplegable vacío en vez de confundir. Confirmado 02/11/2026.
+                # el desplegable vacío y NO se bloquea el alta — no se puede
+                # exigir elegir algo que no existe. Confirmado 02/11/2026.
                 supervisor_directo = ""
-                st.warning(
-                    f"⚠️ Todavía no hay ningún Supervisor/Jefe registrado en {subcanal}. "
-                    "Regístralo primero antes de continuar."
+                hay_supervisor_directo_disponible = False
+                st.info(
+                    f"ℹ️ Todavía no hay ningún Supervisor/Jefe registrado en {subcanal}. "
+                    "Puedes continuar sin asignarlo; se podrá completar más adelante."
                 )
             capacitador        = st.selectbox("CAPACITADOR",      [""] + capacitadores,        key=k("capacitador"))
             origen_ingreso     = st.selectbox("ORIGEN INGRESO",   [""] + origenes_ingreso,     key=k("origen_ingreso"))
@@ -995,6 +1006,9 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
     coordinador = ""
     dni_coordinador = ""
     zona_agrupada = ""
+    hay_coordinador_disponible = True
+    hay_supervisor_disponible = True
+    hay_supervisor_directo_disponible = True
 
     if canal == "VENTAS INDIRECTAS":
         # ── DEALERS: jerarquía completa ────────────────────────────────
@@ -1031,11 +1045,13 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             # BO), sí se pide. Confirmado 02/11/2026.
             coordinador = ""
             dni_coordinador = ""
+            hay_coordinador_disponible = True
             if cargo not in CARGOS_COORDINADOR_INDIRECTO:
                 # Coordinador dinámico desde colaboradores (cargo "Coordinador
                 # D2D - Dealer" / "Coordinador OUT - Dealer", ACTIVO, del
                 # mismo dealer), ya no desde ubicaciones.
                 opciones_coord = opciones_supervisor_coordinador(df_colab_ref, CARGOS_COORDINADOR_INDIRECTO, razon=razon)
+                hay_coordinador_disponible = bool(opciones_coord)
                 if opciones_coord:
                     coordinador_sel = st.selectbox("COORDINADOR", [""] + opciones_coord, key=k("coordinador"))
                     coordinador = nombre_de_opcion(coordinador_sel)
@@ -1044,11 +1060,13 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
                 elif razon:
                     # No hay ningún Coordinador registrado todavía para este
                     # socio: no tiene sentido mostrar un desplegable vacío
-                    # (genera confusión). Se oculta y se explica qué hacer.
-                    # Confirmado 02/11/2026.
-                    st.warning(
-                        f"⚠️ {razon} todavía no tiene ningún Coordinador registrado. "
-                        "Regístralo primero (CARGO = Coordinador) antes de continuar."
+                    # (genera confusión), y TAMPOCO se bloquea el alta — no
+                    # se le puede exigir elegir algo que no existe. Avisa y
+                    # deja continuar sin Coordinador asignado; se completa
+                    # cuando el socio registre el suyo. Confirmado 02/11/2026.
+                    st.info(
+                        f"ℹ️ {razon} todavía no tiene ningún Coordinador registrado. "
+                        "Puedes continuar sin asignarlo; se podrá completar más adelante."
                     )
 
         with col_u2:
@@ -1057,11 +1075,13 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             # campo, solo lo ve Promotor/Agente BO. Confirmado 02/11/2026.
             supervisor = ""
             dni_supervisor = ""
+            hay_supervisor_disponible = True
             if cargo not in (CARGOS_COORDINADOR_INDIRECTO | CARGOS_SUPERVISOR_INDIRECTO):
                 # Supervisor dinámico desde colaboradores (cargo "Supervisor
                 # D2D - Dealer" / "Supervisor OUT - Dealer", ACTIVO, del mismo
                 # dealer), ya no desde ubicaciones.
                 opciones_sup = opciones_supervisor_coordinador(df_colab_ref, CARGOS_SUPERVISOR_INDIRECTO, razon=razon)
+                hay_supervisor_disponible = bool(opciones_sup)
                 if opciones_sup:
                     supervisor_sel = st.selectbox("SUPERVISOR A CARGO", [""] + opciones_sup, key=k("supervisor"))
                     supervisor = nombre_de_opcion(supervisor_sel)
@@ -1069,11 +1089,12 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
                     st.text_input("DNI SUPERVISOR", value=dni_supervisor, disabled=True, key=k("dni_supervisor"))
                 elif razon:
                     # Igual que con Coordinador: si no hay ningún Supervisor
-                    # registrado para este socio, se oculta el desplegable
-                    # vacío y se explica qué hacer. Confirmado 02/11/2026.
-                    st.warning(
-                        f"⚠️ {razon} todavía no tiene ningún Supervisor registrado. "
-                        "Regístralo primero (CARGO = Supervisor) antes de continuar."
+                    # registrado para este socio, no se bloquea el alta — se
+                    # avisa y se deja continuar sin asignarlo. Confirmado
+                    # 02/11/2026.
+                    st.info(
+                        f"ℹ️ {razon} todavía no tiene ningún Supervisor registrado. "
+                        "Puedes continuar sin asignarlo; se podrá completar más adelante."
                     )
 
     else:
@@ -1207,6 +1228,16 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             "USUARIO BAJA": "",
             "URL CONTRATO": "",
             "URL DNI": "",
+            # Claves internas (no se guardan como columna real; valor_por_columna
+            # solo escribe las que coinciden con un header de la hoja). Le dicen
+            # a validar_formulario si el desplegable de Coordinador/Supervisor
+            # tenía opciones o estaba vacío porque el socio aún no registra a
+            # nadie en ese cargo — en ese caso NO se exige el campo, no se le
+            # puede pedir a alguien elegir algo que no existe. Confirmado
+            # 02/11/2026.
+            "_HAY_COORDINADOR_DISPONIBLE": hay_coordinador_disponible,
+            "_HAY_SUPERVISOR_DISPONIBLE": hay_supervisor_disponible,
+            "_HAY_SUPERVISOR_DIRECTO_DISPONIBLE": hay_supervisor_directo_disponible,
         }
 
         # ── DOCUMENTOS: validar que estén subidos antes de pasar a Sheets ──
