@@ -24,6 +24,7 @@ CARGOS_SUPERVISOR_INDIRECTO = {"Supervisor D2D - Dealer"}
 CARGOS_COORDINADOR_INDIRECTO = {"Coordinador D2D - Dealer"}
 CARGOS_SUPERVISOR_DIRECTO = {"Supervisor - D2D"}
 CARGOS_COORDINADOR_DIRECTO = {"Coordinador - D2D"}
+CARGOS_JEFE_DIRECTO = {"JEFE CEX"}
 
 # Únicos dealers que realmente operan OUTBOUND. Confirmado 31/10/2026: el
 # resto de Indirecto (Nogales, Interconexión, Multiple Force, Malutech,
@@ -385,7 +386,20 @@ def opciones_supervisor_coordinador(
     df = df_colab.copy()
     if "ESTADO" in df.columns:
         df = df[df["ESTADO"].astype(str).str.strip().str.upper().eq("ACTIVO")]
-    df = df[df["CARGO (ROL)"].astype(str).str.strip().isin(cargos)]
+
+    # Coincidencia flexible: además del texto exacto en `cargos`, se acepta
+    # cualquier CARGO (ROL) que EMPIECE con la misma palabra clave
+    # (SUPERVISOR / COORDINADOR / JEFE). Hay registros históricos con cargos
+    # distintos a los 4-5 fijos del desplegable actual (ej. variantes "OUT"
+    # en vez de "D2D" para Konecta/Grupo Creed/Salesland, o "JEFE CEX" en
+    # Directo) que de otro modo quedan fuera y el desplegable sale vacío
+    # aunque la persona sí exista. Confirmado 02/11/2026.
+    cargo_col = df["CARGO (ROL)"].astype(str).str.strip()
+    palabras_clave = {c.split()[0].upper() for c in cargos if c.split()}
+    coincide = cargo_col.isin(cargos) | cargo_col.str.upper().apply(
+        lambda c: any(c.startswith(p) for p in palabras_clave)
+    )
+    df = df[coincide]
 
     if razon and "RAZON SOCIAL" in df.columns:
         razon_norm = _normalizar_razon(razon)
@@ -432,6 +446,16 @@ def validar_formulario(campos: dict, df_colab: pd.DataFrame) -> list[str]:
 
     canal = limpiar_texto(campos.get("CANAL", "")).upper()
     tipo_doc = limpiar_texto(campos.get("TIPO DE DOC", "")).upper()
+    cargo_rol_temprano = limpiar_texto(campos.get("CARGO (ROL)", ""))
+    # Un dealer nuevo (ej. Konecta, Grupo Creed, Salesland recién habilitados)
+    # no tiene todavía ningún Supervisor/Coordinador registrado, así que el
+    # desplegable sale vacío. Si no se exime este caso, nunca se podría
+    # registrar al PRIMER Supervisor/Coordinador de ese dealer (no hay nadie
+    # arriba de ellos para elegir). Confirmado 01/11/2026.
+    es_primer_eslabon = cargo_rol_temprano in (
+        CARGOS_SUPERVISOR_INDIRECTO | CARGOS_COORDINADOR_INDIRECTO
+        | CARGOS_SUPERVISOR_DIRECTO | CARGOS_COORDINADOR_DIRECTO | CARGOS_JEFE_DIRECTO
+    )
 
     # Campos generales obligatorios
     requeridos = [
@@ -463,14 +487,20 @@ def validar_formulario(campos: dict, df_colab: pd.DataFrame) -> list[str]:
             ("DEPARTAMENTO", "Departamento"),
             ("PROVINCIA", "Provincia"),
             ("ZONA AGRUPADA", "Zona agrupada"),
-            ("SUPERVISOR A CARGO", "Supervisor a cargo"),
-            ("DNI SUPERVISOR", "DNI supervisor"),
-            ("COORDINADOR", "Coordinador"),
-            ("DNI COORDINADOR", "DNI coordinador"),
         ]
+        if not es_primer_eslabon:
+            requeridos += [
+                ("SUPERVISOR A CARGO", "Supervisor a cargo"),
+                ("DNI SUPERVISOR", "DNI supervisor"),
+                ("COORDINADOR", "Coordinador"),
+                ("DNI COORDINADOR", "DNI coordinador"),
+            ]
     else:
+        if not es_primer_eslabon:
+            requeridos += [
+                ("SUPERVISOR", "Supervisor"),
+            ]
         requeridos += [
-            ("SUPERVISOR", "Supervisor"),
             ("CAPACITADOR", "Capacitador"),
             ("ORIGEN_INGRESO", "Origen de ingreso"),
             ("FUENTE_INGRESO", "Fuente de ingreso"),
@@ -871,7 +901,7 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             # campos separados). Para CEX prioriza responsables cuyo propio
             # registro también sea SUB CANAL=CEX.
             opciones_sup_directo = opciones_supervisor_coordinador(
-                df_colab_ref, CARGOS_SUPERVISOR_DIRECTO | CARGOS_COORDINADOR_DIRECTO,
+                df_colab_ref, CARGOS_SUPERVISOR_DIRECTO | CARGOS_COORDINADOR_DIRECTO | CARGOS_JEFE_DIRECTO,
                 subcanal=subcanal, mostrar_dni=False,
             )
             supervisor_directo = st.selectbox("SUPERVISOR",       [""] + opciones_sup_directo, key=k("supervisor_directo"))
