@@ -32,6 +32,13 @@ CARGOS_JEFE_DIRECTO = {"JEFE CEX"}
 # error se saltaba la validación obligatoria de documentos/certificado.
 DEALERS_CON_OUTBOUND = {"KONECTA SAC", "SALESLAND", "GRUPO CREED SAC"}
 
+# De los dealers OUTBOUND, solo Konecta y Salesland quedan exentos de subir
+# contrato/DNI al momento del alta (lo regularizan después). Grupo Creed es
+# prioridad alta (junto con Nogales, Interconexión y Multiple Force) y SÍ
+# debe subir los documentos desde el alta, aunque su sub canal sea OUTBOUND.
+# Confirmado 02/11/2026.
+DEALERS_EXENTOS_DOCUMENTOS_OUTBOUND = {"KONECTA SAC", "SALESLAND"}
+
 # Carpeta local en el VPS donde se deja una copia del contrato/DNI subidos por
 # la web, con la MISMA estructura de carpetas que OneDrive (RAZON SOCIAL /
 # CONTRATOS NUEVOS USUARIOS | DNI NUEVOS USUARIOS). Un script en la PC de
@@ -918,10 +925,14 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
     # que ya se hace en Presencialidad (asistencia.py).
     archivo_contrato = None
     archivo_dni = None
+    es_outbound_exento = (
+        limpiar_texto(subcanal).upper() == "OUTBOUND"
+        and razon_norm in DEALERS_EXENTOS_DOCUMENTOS_OUTBOUND
+    )
     requiere_documentos = (
         canal == "VENTAS INDIRECTAS"
         and cargo in CARGOS_PROMOTOR
-        and limpiar_texto(subcanal).upper() != "OUTBOUND"
+        and not es_outbound_exento
     )
     if requiere_documentos:
         st.divider()
