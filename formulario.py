@@ -16,12 +16,12 @@ from zonas import lista_zonas_agrupadas
 # Cargos de promotor por canal: a estos cargos (y solo a estos) se les exige
 # contrato + DNI en OneDrive y certificado de evaluación aprobado. Supervisor,
 # Coordinador y Back office quedan exentos de esta validación documental.
-CARGOS_PROMOTOR = {"Promotor D2D - Dealer", "Promotor - D2D"}
+CARGOS_PROMOTOR = {"Promotor D2D - Dealer", "Promotor - D2D", "Promotor OUT - Dealer"}
 
 # Cargos de Supervisor/Coordinador por canal, usados para construir los
 # desplegables dinámicos desde colaboradores (ya no desde la hoja ubicaciones).
-CARGOS_SUPERVISOR_INDIRECTO = {"Supervisor D2D - Dealer"}
-CARGOS_COORDINADOR_INDIRECTO = {"Coordinador D2D - Dealer"}
+CARGOS_SUPERVISOR_INDIRECTO = {"Supervisor D2D - Dealer", "Supervisor OUT - Dealer"}
+CARGOS_COORDINADOR_INDIRECTO = {"Coordinador D2D - Dealer", "Coordinador OUT - Dealer"}
 CARGOS_SUPERVISOR_DIRECTO = {"Supervisor - D2D"}
 CARGOS_COORDINADOR_DIRECTO = {"Coordinador - D2D"}
 CARGOS_JEFE_DIRECTO = {"JEFE CEX"}
@@ -858,7 +858,18 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
         # Lista tomada tal cual de la hoja maestra (columna CARGO (ROL)).
         # Dealers (VENTAS INDIRECTAS) → los que llevan sufijo "- Dealer".
         # WOW TEL / Directas → el resto.
-        if canal == "VENTAS INDIRECTAS":
+        if canal == "VENTAS INDIRECTAS" and limpiar_texto(subcanal).upper() == "OUTBOUND":
+            # Konecta / Grupo Creed / Salesland en OUTBOUND: cargos con sufijo
+            # "OUT", no "D2D" (son equipos distintos aunque el canal de fondo
+            # sea el mismo). Confirmado 02/11/2026.
+            opciones_cargo = [
+                "",
+                "Promotor OUT - Dealer",
+                "Supervisor OUT - Dealer",
+                "Coordinador OUT - Dealer",
+                "Agente BO OUT - Dealer",
+            ]
+        elif canal == "VENTAS INDIRECTAS":
             opciones_cargo = [
                 "",
                 "Promotor D2D - Dealer",
