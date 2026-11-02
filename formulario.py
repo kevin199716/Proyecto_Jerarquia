@@ -944,7 +944,18 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
                 df_colab_ref, CARGOS_SUPERVISOR_DIRECTO | CARGOS_COORDINADOR_DIRECTO | CARGOS_JEFE_DIRECTO,
                 subcanal=subcanal, mostrar_dni=False,
             )
-            supervisor_directo = st.selectbox("SUPERVISOR",       [""] + opciones_sup_directo, key=k("supervisor_directo"))
+            if opciones_sup_directo:
+                supervisor_directo = st.selectbox("SUPERVISOR", [""] + opciones_sup_directo, key=k("supervisor_directo"))
+            elif cargo in (CARGOS_SUPERVISOR_DIRECTO | CARGOS_COORDINADOR_DIRECTO | CARGOS_JEFE_DIRECTO):
+                supervisor_directo = ""
+            else:
+                # Sin nadie registrado todavía en este sub canal: se oculta
+                # el desplegable vacío en vez de confundir. Confirmado 02/11/2026.
+                supervisor_directo = ""
+                st.warning(
+                    f"⚠️ Todavía no hay ningún Supervisor/Jefe registrado en {subcanal}. "
+                    "Regístralo primero antes de continuar."
+                )
             capacitador        = st.selectbox("CAPACITADOR",      [""] + capacitadores,        key=k("capacitador"))
             origen_ingreso     = st.selectbox("ORIGEN INGRESO",   [""] + origenes_ingreso,     key=k("origen_ingreso"))
             fuente_ingreso     = st.selectbox("FUENTE INGRESO",   [""] + fuentes_ingreso,      key=k("fuente_ingreso"))
@@ -1025,10 +1036,20 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
                 # D2D - Dealer" / "Coordinador OUT - Dealer", ACTIVO, del
                 # mismo dealer), ya no desde ubicaciones.
                 opciones_coord = opciones_supervisor_coordinador(df_colab_ref, CARGOS_COORDINADOR_INDIRECTO, razon=razon)
-                coordinador_sel = st.selectbox("COORDINADOR", [""] + opciones_coord, key=k("coordinador"))
-                coordinador = nombre_de_opcion(coordinador_sel)
-                dni_coordinador = dni_de_opcion(coordinador_sel)
-                st.text_input("DNI COORDINADOR", value=dni_coordinador, disabled=True, key=k("dni_coordinador"))
+                if opciones_coord:
+                    coordinador_sel = st.selectbox("COORDINADOR", [""] + opciones_coord, key=k("coordinador"))
+                    coordinador = nombre_de_opcion(coordinador_sel)
+                    dni_coordinador = dni_de_opcion(coordinador_sel)
+                    st.text_input("DNI COORDINADOR", value=dni_coordinador, disabled=True, key=k("dni_coordinador"))
+                elif razon:
+                    # No hay ningún Coordinador registrado todavía para este
+                    # socio: no tiene sentido mostrar un desplegable vacío
+                    # (genera confusión). Se oculta y se explica qué hacer.
+                    # Confirmado 02/11/2026.
+                    st.warning(
+                        f"⚠️ {razon} todavía no tiene ningún Coordinador registrado. "
+                        "Regístralo primero (CARGO = Coordinador) antes de continuar."
+                    )
 
         with col_u2:
             # Jerarquía: Supervisor reporta a un Coordinador, no a otro
@@ -1041,10 +1062,19 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
                 # D2D - Dealer" / "Supervisor OUT - Dealer", ACTIVO, del mismo
                 # dealer), ya no desde ubicaciones.
                 opciones_sup = opciones_supervisor_coordinador(df_colab_ref, CARGOS_SUPERVISOR_INDIRECTO, razon=razon)
-                supervisor_sel = st.selectbox("SUPERVISOR A CARGO", [""] + opciones_sup, key=k("supervisor"))
-                supervisor = nombre_de_opcion(supervisor_sel)
-                dni_supervisor = dni_de_opcion(supervisor_sel)
-                st.text_input("DNI SUPERVISOR", value=dni_supervisor, disabled=True, key=k("dni_supervisor"))
+                if opciones_sup:
+                    supervisor_sel = st.selectbox("SUPERVISOR A CARGO", [""] + opciones_sup, key=k("supervisor"))
+                    supervisor = nombre_de_opcion(supervisor_sel)
+                    dni_supervisor = dni_de_opcion(supervisor_sel)
+                    st.text_input("DNI SUPERVISOR", value=dni_supervisor, disabled=True, key=k("dni_supervisor"))
+                elif razon:
+                    # Igual que con Coordinador: si no hay ningún Supervisor
+                    # registrado para este socio, se oculta el desplegable
+                    # vacío y se explica qué hacer. Confirmado 02/11/2026.
+                    st.warning(
+                        f"⚠️ {razon} todavía no tiene ningún Supervisor registrado. "
+                        "Regístralo primero (CARGO = Supervisor) antes de continuar."
+                    )
 
     else:
         # ── WOW TEL / VENTAS DIRECTAS: solo ubicación ──────────────────
