@@ -131,36 +131,44 @@ elif rol == "capacitacion":
         mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_locks=hoja_locks)
         mostrar_matriz_jerarquia()
 
-# PRESENCIALIDAD BÁSICA — BAJAS + PRESENCIALIDAD
+# PRESENCIALIDAD BÁSICA — ALTA + BAJAS + PRESENCIALIDAD
 elif rol == "presencialidad_basico":
-    wow_section(f"Presencialidad Dealer: {razon}", "🗓️")
-    if pagina == "Bajas":
-        df = mostrar_matriz_jerarquia()
-        if df is not None:
-            st.divider()
-            registro.dar_de_baja(df, hoja_colaboradores, razon)
-    elif pagina == "Presencialidad Dealer":
-        mostrar_asistencia(hoja_asistencia, hoja_colaboradores, hoja_sustentos=hoja_sustentos, razon=razon)
+    if pagina == "Alta":
+        mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_locks=hoja_locks)
         mostrar_matriz_jerarquia()
+    else:
+        wow_section(f"Presencialidad Dealer: {razon}", "🗓️")
+        if pagina == "Bajas":
+            df = mostrar_matriz_jerarquia()
+            if df is not None:
+                st.divider()
+                registro.dar_de_baja(df, hoja_colaboradores, razon)
+        elif pagina == "Presencialidad Dealer":
+            mostrar_asistencia(hoja_asistencia, hoja_colaboradores, hoja_sustentos=hoja_sustentos, razon=razon)
+            mostrar_matriz_jerarquia()
 
 # PRESENCIALIDAD
 elif rol in ("presencialidad", "presencialidad_dealer"):
-    wow_section(f"Presencialidad Dealer: {razon}", "🗓️")
-    if pagina == "Bajas":
-        df = mostrar_matriz_jerarquia()
-        if df is not None:
-            st.divider()
-            registro.dar_de_baja(df, hoja_colaboradores, razon)
-    elif pagina == "Presencialidad Dealer":
-        mostrar_asistencia(hoja_asistencia, hoja_colaboradores, hoja_sustentos=hoja_sustentos, razon=razon)
+    if pagina == "Alta":
+        mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_locks=hoja_locks)
         mostrar_matriz_jerarquia()
-    elif pagina == "Cobranza_Calidad":
-        hoja_cobranza, err1 = conectar_google_sheets_opcional("Facturas - Calidad", "Consolidado")
-        hoja_listas, err2 = conectar_google_sheets_opcional("Facturas - Calidad", "Listas")
-        if err1:
-            st.error(f"❌ {err1}")
-        else:
-            mostrar_cobranza(hoja_cobranza, razon, hoja_listas=hoja_listas)
+    else:
+        wow_section(f"Presencialidad Dealer: {razon}", "🗓️")
+        if pagina == "Bajas":
+            df = mostrar_matriz_jerarquia()
+            if df is not None:
+                st.divider()
+                registro.dar_de_baja(df, hoja_colaboradores, razon)
+        elif pagina == "Presencialidad Dealer":
+            mostrar_asistencia(hoja_asistencia, hoja_colaboradores, hoja_sustentos=hoja_sustentos, razon=razon)
+            mostrar_matriz_jerarquia()
+        elif pagina == "Cobranza_Calidad":
+            hoja_cobranza, err1 = conectar_google_sheets_opcional("Facturas - Calidad", "Consolidado")
+            hoja_listas, err2 = conectar_google_sheets_opcional("Facturas - Calidad", "Listas")
+            if err1:
+                st.error(f"❌ {err1}")
+            else:
+                mostrar_cobranza(hoja_cobranza, razon, hoja_listas=hoja_listas)
 
 # EDITOR
 elif rol == "editor":

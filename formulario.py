@@ -38,6 +38,12 @@ DEALERS_CON_OUTBOUND = {"KONECTA SAC", "SALESLAND", "GRUPO CREED SAC"}
 # Confirmado 02/11/2026.
 DEALERS_EXENTOS_DOCUMENTOS_OUTBOUND = {"KONECTA SAC", "SALESLAND"}
 
+# Mismos 2 socios que arriba (Konecta y Salesland), pero es un concepto
+# aparte: son los únicos que piden Modalidad + Horario Laboral + Horario
+# Break al dar de alta a su personal OUTBOUND. Grupo Creed, aunque también
+# es OUTBOUND, NO debe mostrar estos campos. Confirmado 03/11/2026.
+DEALERS_CON_HORARIO_OUTBOUND = {"KONECTA SAC", "SALESLAND"}
+
 # Carpeta local en el VPS donde se deja una copia del contrato/DNI subidos por
 # la web, con la MISMA estructura de carpetas que OneDrive (RAZON SOCIAL /
 # CONTRATOS NUEVOS USUARIOS | DNI NUEVOS USUARIOS). Un script en la PC de
@@ -935,6 +941,29 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             ]
 
         cargo = st.selectbox("CARGO (ROL)", opciones_cargo, key=k("cargo"))
+
+        # ── MODALIDAD / HORARIO (solo OUTBOUND de Konecta y Salesland) ──
+        # Confirmado 03/11/2026: únicamente estos 2 socios piden estos 3
+        # campos al registrar personal OUTBOUND. Ningún otro dealer (ni
+        # siquiera Grupo Creed, que también es OUTBOUND) debe verlos.
+        modalidad = ""
+        horario_laboral = ""
+        horario_break = ""
+        if (
+            canal == "VENTAS INDIRECTAS"
+            and limpiar_texto(subcanal).upper() == "OUTBOUND"
+            and razon_norm in DEALERS_CON_HORARIO_OUTBOUND
+        ):
+            modalidad = st.selectbox(
+                "MODALIDAD", ["", "Presencial", "Remoto"], key=k("modalidad_out")
+            )
+            horario_laboral = st.selectbox(
+                "HORARIO LABORAL", ["", "9:00 - 18:00", "10:00 - 19:00"], key=k("horario_laboral_out")
+            )
+            horario_break = st.selectbox(
+                "HORARIO BREAK", ["", "13:30 a 14:30", "14:30 a 15:30"], key=k("horario_break_out")
+            )
+
         # Fijo en PLANILLA para toda gestión, sin excepción (confirmado
         # 31/10/2026) — ya no se ofrece MEDIA PLANILLA como opción.
         tipo_contrato = "PLANILLA"
@@ -1217,6 +1246,10 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             "COORDINADOR":        limpiar_texto(coordinador)    if es_indirecto else "",
             "COORDINADOR FINAL":  limpiar_texto(coordinador)    if es_indirecto else "",
             "DNI COORDINADOR":    dni_coordinador               if es_indirecto else "",
+            # ─── MODALIDAD / HORARIO (solo OUTBOUND Konecta/Salesland) ────
+            "MODALIDAD":       limpiar_texto(modalidad),
+            "HORARIO_LABORAL": limpiar_texto(horario_laboral),
+            "HORARIO_BREAK":   limpiar_texto(horario_break),
             # ─── DATOS PERSONALES ───────────────────────────────────────────
             "CARGO (ROL)": cargo,
             "NOMBRES": limpiar_texto(nombres).upper(),
@@ -1357,6 +1390,9 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
                     "ZONA AGRUPADA",
                     "URL CONTRATO",
                     "URL DNI",
+                    "MODALIDAD",
+                    "HORARIO_LABORAL",
+                    "HORARIO_BREAK",
                 ]
                 headers = asegurar_columnas_colaboradores(hoja_colaboradores, columnas_nuevas)
                 if not headers:
