@@ -942,10 +942,13 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
 
         cargo = st.selectbox("CARGO (ROL)", opciones_cargo, key=k("cargo"))
 
-        # ── MODALIDAD / HORARIO (solo OUTBOUND de Konecta y Salesland) ──
+        # ── MODALIDAD / HORARIO (solo OUTBOUND de Konecta y Salesland,
+        # y solo cuando el cargo es Promotor) ──
         # Confirmado 03/11/2026: únicamente estos 2 socios piden estos 3
         # campos al registrar personal OUTBOUND. Ningún otro dealer (ni
         # siquiera Grupo Creed, que también es OUTBOUND) debe verlos.
+        # Además, dentro de Konecta/Salesland, solo aplica al cargo
+        # Promotor — Supervisor/Coordinador/Agente BO quedan exentos.
         modalidad = ""
         horario_laboral = ""
         horario_break = ""
@@ -953,6 +956,7 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             canal == "VENTAS INDIRECTAS"
             and limpiar_texto(subcanal).upper() == "OUTBOUND"
             and razon_norm in DEALERS_CON_HORARIO_OUTBOUND
+            and cargo in CARGOS_PROMOTOR
         ):
             modalidad = st.selectbox(
                 "MODALIDAD", ["", "Presencial", "Remoto"], key=k("modalidad_out")
