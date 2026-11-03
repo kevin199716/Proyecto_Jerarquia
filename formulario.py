@@ -1254,6 +1254,10 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             "MODALIDAD":       limpiar_texto(modalidad),
             "HORARIO_LABORAL": limpiar_texto(horario_laboral),
             "HORARIO_BREAK":   limpiar_texto(horario_break),
+            # Fijo "48 hrs" en TODO registro, sin excepción de canal/dealer/cargo.
+            # Confirmado 03/11/2026. El nombre de columna lleva espacio (no guion
+            # bajo) para calzar con la cabecera ya existente "Hrs Trabajo".
+            "HRS TRABAJO": "48 hrs",
             # ─── DATOS PERSONALES ───────────────────────────────────────────
             "CARGO (ROL)": cargo,
             "NOMBRES": limpiar_texto(nombres).upper(),
@@ -1397,6 +1401,7 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
                     "MODALIDAD",
                     "HORARIO_LABORAL",
                     "HORARIO_BREAK",
+                    "HRS TRABAJO",
                 ]
                 headers = asegurar_columnas_colaboradores(hoja_colaboradores, columnas_nuevas)
                 if not headers:
