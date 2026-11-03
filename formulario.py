@@ -48,6 +48,24 @@ DEALERS_EXENTOS_DOCUMENTOS_OUTBOUND = {"KONECTA SAC", "SALESLAND"}
 # porque ahora el documento se sube directo en el formulario).
 RUTA_WEB_UPLOADS_ONEDRIVE = os.getenv("RUTA_WEB_UPLOADS_ONEDRIVE", "/mnt/web_uploads_to_onedrive")
 
+# El nombre de carpeta real en OneDrive (AUDITORIA DEALERS\<...>) no siempre
+# es idéntico al valor de RAZON SOCIAL que se guarda en colaboradores/
+# usuarios.json (p. ej. ahí dice "GRUPO CREED SAC" pero la carpeta real tiene
+# puntos: "GRUPO CREED S.A.C"). Si no se mapea, el script de sincronización
+# crea una carpeta nueva y duplicada en vez de usar la que ya existe.
+# Confirmado 02/11/2026 tras detectar la carpeta duplicada "GRUPO CREED SAC".
+CARPETA_ONEDRIVE_POR_RAZON = {
+    "GRUPO CREED SAC": "GRUPO CREED S.A.C",
+    "NOGALES HIGH SAC": "NOGALES HIGH S.A.C",
+    "MALUTECH S.A.C": "MALUTECH S.A.C.",
+    "MALUTECH SAC": "MALUTECH S.A.C.",
+}
+
+
+def carpeta_onedrive_dealer(razon: str) -> str:
+    razon_limpia = limpiar_texto(razon).upper()
+    return CARPETA_ONEDRIVE_POR_RAZON.get(razon_limpia, razon_limpia)
+
 # =========================
 # HORA PERÚ
 # =========================
@@ -1311,7 +1329,7 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             # tienen cuota de almacenamiento propia y la subida fallaba con
             # "storageQuotaExceeded"). Confirmado 02/11/2026.
             if requiere_documentos:
-                razon_carpeta = campos.get("RAZON SOCIAL", "") or "SIN_RAZON"
+                razon_carpeta = carpeta_onedrive_dealer(campos.get("RAZON SOCIAL", "")) or "SIN_RAZON"
                 try:
                     nombre_doc = f"{dni_limpio} - {campos.get('NOMBRES','')} {campos.get('APELLIDO PATERNO','')}".strip()
                     carpeta_contrato = os.path.join(RUTA_WEB_UPLOADS_ONEDRIVE, razon_carpeta, "CONTRATOS NUEVOS USUARIOS")
