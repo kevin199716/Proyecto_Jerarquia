@@ -55,9 +55,9 @@ elif rol == "dealer":
 elif rol == "capacitacion":
     opciones_menu = ["Alta"]
 elif rol == "presencialidad_basico":
-    opciones_menu = ["Bajas", "Presencialidad Dealer"]
+    opciones_menu = ["Alta", "Bajas", "Presencialidad Dealer"]
 elif rol in ("presencialidad", "presencialidad_dealer"):
-    opciones_menu = ["Bajas", "Presencialidad Dealer", "Cobranza_Calidad"]
+    opciones_menu = ["Alta", "Bajas", "Presencialidad Dealer", "Cobranza_Calidad"]
 elif rol == "editor":
     opciones_menu = ["Edición", "Presencialidad Dealer"]
 else:
