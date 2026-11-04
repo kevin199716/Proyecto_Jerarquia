@@ -1470,17 +1470,6 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             "_CANAL_INTERNO": limpiar_texto(canal),
         }
 
-        # ── DOCUMENTOS: validar que estén subidos antes de pasar a Sheets ──
-        if requiere_documentos and (archivo_contrato is None or archivo_dni is None):
-            faltantes_doc = []
-            if archivo_contrato is None:
-                faltantes_doc.append("contrato firmado")
-            if archivo_dni is None:
-                faltantes_doc.append("copia de DNI")
-            st.error(f"❌ Falta subir: {', '.join(faltantes_doc)}.")
-            st.session_state[guardando_key] = False
-            return
-
         # ── BLOQUEO DE DUPLICADOS (punto D) ──────────────────────────────────
         # LOCK_ALTAS serializa este bloque entre todas las sesiones del mismo
         # proceso (doble pestaña, dos usuarios atendidos por el mismo servicio).
@@ -1500,6 +1489,20 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             # Así no se congela el formulario mientras llenas campos.
             df_colab = leer_colaboradores(hoja_colaboradores, forzar=True)
             errores = validar_formulario(campos, df_colab)
+
+            # ── DOCUMENTOS: se suma a la misma lista de errores, no corta el
+            # flujo antes de validar reingreso/antecedentes. Antes, si
+            # faltaba el documento, se cortaba aquí con un return y nunca se
+            # llegaba a revisar calidad/fraude/reingreso — backoffice no se
+            # enteraba de antecedentes graves hasta no subir el PDF primero.
+            # Confirmado 04/11/2026.
+            if requiere_documentos and (archivo_contrato is None or archivo_dni is None):
+                faltantes_doc = []
+                if archivo_contrato is None:
+                    faltantes_doc.append("contrato firmado")
+                if archivo_dni is None:
+                    faltantes_doc.append("copia de DNI")
+                errores.append(f"❌ Falta subir: {', '.join(faltantes_doc)}.")
 
             # Validar reingreso (bloqueo + popup advertencia)
             dni_limpio = normalizar_dni(limpiar_texto(campos.get("DNI", "")))
