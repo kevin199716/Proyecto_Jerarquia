@@ -44,6 +44,16 @@ DEALERS_EXENTOS_DOCUMENTOS_OUTBOUND = {"KONECTA SAC", "SALESLAND"}
 # es OUTBOUND, NO debe mostrar estos campos. Confirmado 03/11/2026.
 DEALERS_CON_HORARIO_OUTBOUND = {"KONECTA SAC", "SALESLAND"}
 
+# Mismos 2 socios otra vez. Para Konecta y Salesland, la columna CANAL que se
+# ve en pantalla y se guarda en la hoja debe decir "VENTAS DIRECTAS" (no
+# "VENTAS INDIRECTAS"). Grupo Creed, aunque también es OUTBOUND, se queda
+# como "VENTAS INDIRECTAS". OJO: esto NO cambia la lógica interna del
+# formulario (cargos OUT - Dealer, Zona Agrupada, documentos, Modalidad/
+# Horario siguen funcionando igual) — solo el texto que se muestra/guarda en
+# la columna CANAL. Ver variable "canal_mostrar" en mostrar_formulario().
+# Confirmado 03/11/2026.
+DEALERS_CANAL_DIRECTAS_OUTBOUND = {"KONECTA SAC", "SALESLAND"}
+
 # Carpeta local en el VPS donde se deja una copia del contrato/DNI subidos por
 # la web, con la MISMA estructura de carpetas que OneDrive (RAZON SOCIAL /
 # CONTRATOS NUEVOS USUARIOS | DNI NUEVOS USUARIOS). Un script en la PC de
@@ -485,7 +495,12 @@ def validar_formulario(campos: dict, df_colab: pd.DataFrame) -> list[str]:
     def vacio(clave: str) -> bool:
         return limpiar_texto(campos.get(clave, "")) == ""
 
-    canal = limpiar_texto(campos.get("CANAL", "")).upper()
+    # Usa "_CANAL_INTERNO" (no la columna visible "CANAL") para decidir qué
+    # campos exigir: para Konecta/Salesland la columna CANAL ahora guarda
+    # "VENTAS DIRECTAS" como etiqueta, pero el formulario que llenaron sigue
+    # siendo el de Indirecto/Outbound (Zona Agrupada, Coordinador, Supervisor
+    # sí deben exigirse). Confirmado 03/11/2026.
+    canal = limpiar_texto(campos.get("_CANAL_INTERNO", campos.get("CANAL", ""))).upper()
     tipo_doc = limpiar_texto(campos.get("TIPO DE DOC", "")).upper()
     cargo_rol_temprano = limpiar_texto(campos.get("CARGO (ROL)", ""))
     # Jerarquía real: Coordinador es el rango más alto (no reporta a nadie),
@@ -534,7 +549,7 @@ def validar_formulario(campos: dict, df_colab: pd.DataFrame) -> list[str]:
         requeridos += [
             ("DEPARTAMENTO", "Departamento"),
             ("PROVINCIA", "Provincia"),
-            ("ZONA AGRUPADA", "Zona agrupada"),
+            ("ZONA_AGRUPADA", "Zona agrupada"),
         ]
         # Si el socio todavía no tiene a NADIE con ese cargo (desplegable
         # vacío), no se le puede exigir elegir uno — se deja continuar sin
@@ -640,11 +655,58 @@ def validar_formulario(campos: dict, df_colab: pd.DataFrame) -> list[str]:
     return errores
 
 
+# Términos (en MOTIVO de baja) que indican salida por calidad o posible
+# fraude: bloquean cualquier reingreso, sin importar la fecha de cese.
+# VN2/VN6/FPD son códigos cortos → se buscan como palabra completa para no
+# matchear por accidente dentro de otro texto. Confirmado 03/11/2026 (spec
+# "Reglas de validación para altas y reingresos"). Corregido el mismo día:
+# los códigos correctos son VN2/VN6, no B2/B3/B4/B6 como se había puesto
+# primero; se agregó además FLIPPING/FLIPEO.
+TERMINOS_ANTECEDENTE_CALIDAD_FRAUDE = ["VN2", "VN6", "FPD", "FRAUDE", "MALAPRAXIS", "FLIPPING", "FLIPEO"]
+
+
+def _motivo_es_antecedente_calidad_fraude(motivo: str) -> bool:
+    m = limpiar_texto(motivo).upper()
+    if not m:
+        return False
+    if "MALA PRAXIS" in m:  # variante con espacio del dato histórico
+        return True
+    return any(re.search(rf"\b{re.escape(t)}\b", m) for t in TERMINOS_ANTECEDENTE_CALIDAD_FRAUDE)
+
+
+def _motivo_es_cierre_operacion(motivo: str) -> bool:
+    m = limpiar_texto(motivo).upper()
+    return "CIERRE" in m and "OPERA" in m
+
+
+def _nombre_colaborador(row) -> str:
+    return " ".join([
+        limpiar_texto(row.get("NOMBRES", row.get("NOMBRE", ""))),
+        limpiar_texto(row.get("APELLIDO PATERNO", "")),
+        limpiar_texto(row.get("APELLIDO MATERNO", "")),
+    ]).strip()
+
+
 def validar_reingreso(df_colab: pd.DataFrame, dni_limpio: str, fecha_alta) -> tuple[bool, str, bool]:
     """
     Retorna (ok, mensaje_error, es_reingreso).
     - ok=False: bloquear el alta
     - es_reingreso=True: mostrar advertencia de indicadores (no bloquea)
+
+    Consulta TODO el histórico del DNI (activo e inactivo), en este orden
+    (spec "Reglas de validación para altas y reingresos", confirmado
+    03/11/2026):
+    1. Si está ACTIVO ahora mismo → bloquear siempre (sin excepción).
+    2. Si en CUALQUIER registro histórico (activo o inactivo) el MOTIVO
+       contiene un término de calidad/fraude (VN2, VN6, FPD, fraude,
+       malapraxis, flipping/flipeo) → bloquear siempre, sin importar la
+       fecha de cese.
+    3. Si no hay antecedente de calidad/fraude, validar la fecha de cese más
+       reciente: se permite el reingreso solo si es del 2025 o anterior. Si
+       es del 2026 en adelante, se bloquea — salvo que esa baja haya sido por
+       cierre de operación, que sí se permite igual.
+    4. Si hay un registro previo (se permita o no el reingreso), se informa
+       el dealer/partner donde trabajó antes.
     """
     fecha_alta = parse_fecha(fecha_alta)
     if fecha_alta is None:
@@ -659,49 +721,67 @@ def validar_reingreso(df_colab: pd.DataFrame, dni_limpio: str, fecha_alta) -> tu
     if encontrados.empty:
         return True, "", False  # DNI nuevo, sin histórico
 
-    # Si está ACTIVO → bloquear siempre
+    # 1) Si está ACTIVO → bloquear siempre
     if "ESTADO" in encontrados.columns:
         activos = encontrados[encontrados["ESTADO"].astype(str).str.strip().str.upper().eq("ACTIVO")]
         if not activos.empty:
             det = activos.iloc[0]
             razon = limpiar_texto(det.get("RAZON SOCIAL", ""))
-            nombre = " ".join([
-                limpiar_texto(det.get("NOMBRES", det.get("NOMBRE", ""))),
-                limpiar_texto(det.get("APELLIDO PATERNO", "")),
-                limpiar_texto(det.get("APELLIDO MATERNO", "")),
-            ]).strip()
+            nombre = _nombre_colaborador(det)
             return False, (
                 f"❌ DNI {dni_limpio} ya está ACTIVO en la base.\n"
                 f"Empresa: {razon} | Nombre: {nombre}\n"
                 "No se puede registrar nuevamente mientras esté activo."
             ), False
 
-    # Buscar última fecha de baja/cese
+    # 2) Antecedente de calidad/fraude en CUALQUIER registro histórico
+    # (activo o inactivo) → bloquea siempre, sin importar la fecha.
+    if "MOTIVO" in encontrados.columns:
+        for _, row in encontrados.iterrows():
+            motivo_row = row.get("MOTIVO", "")
+            if _motivo_es_antecedente_calidad_fraude(motivo_row):
+                razon = limpiar_texto(row.get("RAZON SOCIAL", ""))
+                nombre = _nombre_colaborador(row)
+                return False, (
+                    f"❌ El DNI {dni_limpio} registra un antecedente de salida por calidad "
+                    f"o posible fraude y no se permite su reingreso.\n"
+                    f"Motivo registrado: {limpiar_texto(motivo_row)}\n"
+                    f"Empresa: {razon} | Nombre: {nombre}"
+                ), False
+
+    # 3) Fecha de cese más reciente (y el MOTIVO/RAZON SOCIAL de esa misma
+    # fila, no de cualquier fila — para poder aplicar la excepción de cierre
+    # de operación sobre la baja real más reciente).
     columnas_baja = ["FECHA DE CESE", "FECHA CESE", "FECHA_BAJA_REGISTRO", "FECHA BAJA REGISTRO"]
-    fechas_baja = []
+    bajas = []  # lista de (fecha, motivo, razon_social)
     for _, row in encontrados.iterrows():
         estado_row = limpiar_texto(row.get("ESTADO", "")).upper()
+        motivo_row = row.get("MOTIVO", "")
+        razon_row = limpiar_texto(row.get("RAZON SOCIAL", ""))
         for col in columnas_baja:
             if col in encontrados.columns:
                 f = parse_fecha(row.get(col))
                 if f:
-                    fechas_baja.append(f)
+                    bajas.append((f, motivo_row, razon_row))
         if estado_row == "INACTIVO" and "FECHA MOV" in encontrados.columns:
             f_mov = parse_fecha(row.get("FECHA MOV"))
             if f_mov:
-                fechas_baja.append(f_mov)
+                bajas.append((f_mov, motivo_row, razon_row))
 
-    if fechas_baja:
-        ultima_baja = max(fechas_baja)
-        # Fecha de alta debe ser MAYOR a fecha de baja
-        if fecha_alta <= ultima_baja:
+    if bajas:
+        ultima_baja, motivo_ultima_baja, razon_ultima_baja = max(bajas, key=lambda t: t[0])
+        info_dealer = f"\nÚltima empresa: {razon_ultima_baja}" if razon_ultima_baja else ""
+
+        if ultima_baja.year >= 2026 and not _motivo_es_cierre_operacion(motivo_ultima_baja):
             return False, (
-                f"❌ La fecha de alta ({fecha_alta}) debe ser MAYOR "
-                f"a la última fecha de baja/cese del DNI {dni_limpio}: {ultima_baja}.\n"
-                "No puede ser igual ni menor."
+                f"❌ El DNI {dni_limpio} registra una baja/cese del {ultima_baja} (año {ultima_baja.year}).\n"
+                "Solo se permite el reingreso si la última fecha de cese es del 2025 o anterior "
+                "(salvo baja por cierre de operación)."
+                f"{info_dealer}"
             ), True
-        # Es reingreso válido → advertencia (no bloquea)
-        return True, "", True
+
+        # Reingreso permitido (2025 o anterior, o cierre de operación) → advertencia, no bloquea.
+        return True, f"ℹ️ Antecedente laboral encontrado.{info_dealer}", True
 
     return True, "", False
 
@@ -844,8 +924,17 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
 
         if ES_DEALER:
             # ── DEALERS INDIRECTOS ──────────────────────────────────────
+            # "canal" sigue siendo "VENTAS INDIRECTAS" para TODA la lógica
+            # interna del formulario (cargos OUT/D2D - Dealer, Zona Agrupada,
+            # documentos, Modalidad/Horario, Supervisor/Coordinador) — eso NO
+            # cambia, o se rompen esos campos para Konecta/Salesland.
+            # "canal_mostrar" es solo lo que se ve en pantalla y se GUARDA en
+            # la columna CANAL de la hoja: para Konecta y Salesland debe decir
+            # "VENTAS DIRECTAS" (Grupo Creed sigue como "VENTAS INDIRECTAS").
+            # Confirmado 03/11/2026.
             canal = "VENTAS INDIRECTAS"
-            st.text_input("CANAL", value=canal, disabled=True, key=k("canal_indirecto_fijo"))
+            canal_mostrar = "VENTAS DIRECTAS" if razon_norm in DEALERS_CANAL_DIRECTAS_OUTBOUND else canal
+            st.text_input("CANAL", value=canal_mostrar, disabled=True, key=k("canal_indirecto_fijo"))
             if subcanal_fijo:
                 # Usuario de sub canal fijo (ej. Outbound de Konecta/Salesland/
                 # Grupo Creed): no puede cambiarlo a VENTAS INDIRECTAS.
@@ -863,7 +952,12 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
                 # Malutech, 2Connect) ni siquiera se ofrece la opción, porque
                 # usarla por error saltaba la validación de documentos y
                 # certificado que para ellos sí es obligatoria.
-                subcanal = "VENTAS INDIRECTAS"
+                # SUB CANAL = "D2D" (no "VENTAS INDIRECTAS", que es el CANAL,
+                # no el sub canal). Bug confirmado 03/11/2026: Multiple Force
+                # estaba quedando con SUB CANAL duplicado = "VENTAS
+                # INDIRECTAS" en vez de "D2D", a diferencia de Nogales que sí
+                # tenía "D2D" en sus registros históricos.
+                subcanal = "D2D"
                 st.text_input("SUB CANAL", value=subcanal, disabled=True, key=k("subcanal_indirecto_sin_out"))
             tipo_gestion = "CAMPO"
 
@@ -874,6 +968,7 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             # al revés (CANAL=D2D/ATC/..., SUB CANAL="VENTAS DIRECTAS" fijo),
             # lo que no calzaba con el histórico ya guardado en la hoja.
             canal = "VENTAS DIRECTAS"
+            canal_mostrar = canal
             st.text_input("CANAL", value=canal, disabled=True, key=k("canal_wowtel_display"))
             if subcanal_fijo:
                 # Usuario de sub canal fijo (ej. equipo ATC): no puede cambiarlo
@@ -891,14 +986,18 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
         else:
             # ── BACKOFFICE SIN RAZÓN SELECCIONADA ──────────────────────
             canal = st.selectbox("CANAL", ["VENTAS INDIRECTAS", "VENTAS DIRECTAS"], key=k("canal"))
+            canal_mostrar = canal
             if canal == "VENTAS DIRECTAS":
                 subcanal = "VENTAS DIRECTAS"
                 st.text_input("SUB CANAL", value=subcanal, disabled=True, key=k("subcanal_directo_fijo"))
                 tipo_gestion = ""
             else:
+                # Mismo fix que arriba (ES_DEALER): el sub canal real es
+                # "D2D", no "VENTAS INDIRECTAS" (eso es el CANAL). Confirmado
+                # 03/11/2026.
                 subcanal = st.selectbox(
                     "SUB CANAL",
-                    ["VENTAS INDIRECTAS", "OUTBOUND"],
+                    ["D2D", "OUTBOUND"],
                     index=0,
                     key=k("subcanal_indirecto_sin_razon"),
                 )
@@ -1224,7 +1323,7 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
         campos = {
             "FECHA MOV": "",
             "RAZON SOCIAL": razon,
-            "CANAL": limpiar_texto(canal),
+            "CANAL": limpiar_texto(canal_mostrar),
             "SUB CANAL": limpiar_texto(subcanal),
             "TIPO_GESTION": limpiar_texto(tipo_gestion),
             "TIPO GESTION": limpiar_texto(tipo_gestion),
@@ -1232,7 +1331,10 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             "DEPARTAMENTO": departamento,
             "PROVINCIA": provincia,
             "DISTRITO": limpiar_texto(distrito),
-            "ZONA AGRUPADA": limpiar_texto(zona_agrupada) if es_indirecto else "",
+            # Confirmado 03/11/2026: la columna real en la hoja se llama
+            # "Zona_Agrupada" (con guion bajo), no "ZONA AGRUPADA" (con
+            # espacio) — con espacio se estaba creando una columna duplicada.
+            "ZONA_AGRUPADA": limpiar_texto(zona_agrupada) if es_indirecto else "",
             # ─── SUPERVISOR ────────────────────────────────────────────────
             # INDIRECTAS (Dealers) → SUPERVISOR A CARGO / SUPERVISOR A CARGO FINAL
             # DIRECTAS y WOW TEL   → SUPERVISOR
@@ -1296,6 +1398,13 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             "_HAY_COORDINADOR_DISPONIBLE": hay_coordinador_disponible,
             "_HAY_SUPERVISOR_DISPONIBLE": hay_supervisor_disponible,
             "_HAY_SUPERVISOR_DIRECTO_DISPONIBLE": hay_supervisor_directo_disponible,
+            # Para Konecta/Salesland, la columna "CANAL" que se guarda ahora
+            # dice "VENTAS DIRECTAS" (ver DEALERS_CANAL_DIRECTAS_OUTBOUND),
+            # pero el formulario que llenaron SÍ fue el de Indirecto/Outbound
+            # (Zona Agrupada, Coordinador, Supervisor). validar_formulario debe
+            # exigir esos campos igual, por eso usa este valor interno y no
+            # "CANAL" para decidirlo. Confirmado 03/11/2026.
+            "_CANAL_INTERNO": limpiar_texto(canal),
         }
 
         # ── DOCUMENTOS: validar que estén subidos antes de pasar a Sheets ──
@@ -1351,6 +1460,8 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
 
             # Popup de advertencia de reingreso (no bloquea, solo advierte)
             if es_reingreso and not ok_reingreso is False:
+                if msg_reingreso:
+                    st.info(msg_reingreso)
                 st.warning(
                     f"⚠️ **REINGRESO DETECTADO** — DNI: {dni_limpio}\n\n"
                     "**Por favor, revisar urgentemente el resultado de indicadores "
@@ -1395,7 +1506,7 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
                     "CAPACITADOR",
                     "ORIGEN_INGRESO",
                     "FUENTE_INGRESO",
-                    "ZONA AGRUPADA",
+                    "ZONA_AGRUPADA",
                     "URL CONTRATO",
                     "URL DNI",
                     "MODALIDAD",

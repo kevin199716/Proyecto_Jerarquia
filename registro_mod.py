@@ -107,6 +107,18 @@ MOTIVOS = [
     "Abandono Laboral / Faltas Injustificadas",
     "Baja No asistio Campo",
     "Baja por cierre de Operaciones",
+    # Motivos de calidad/fraude: bloquean cualquier reingreso futuro del
+    # mismo DNI, sin importar la fecha de cese (ver validar_reingreso en
+    # formulario.py). El texto debe contener el código/palabra tal cual
+    # (VN2, VN6, FPD, Fraude, Malapraxis, Flipping/Flipeo) para que la
+    # validación lo detecte. Confirmado 03/11/2026.
+    "Baja por Calidad - VN2",
+    "Baja por Calidad - VN6",
+    "Baja - FPD",
+    "Baja por Posible Fraude",
+    "Baja por Fraude",
+    "Baja por Malapraxis",
+    "Baja por Flipeo",
 ]
 
 
