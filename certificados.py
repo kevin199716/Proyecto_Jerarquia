@@ -13,7 +13,11 @@ NOMBRE_PESTAÑA_CERTIFICADOS = "Respuestas de formulario 1"
 COL_DNI = "DNI O CE"
 COL_RESULTADO = "Puntuación"  # formato "20 / 20"
 COL_FECHA = "Marca temporal"  # formato "D/M/AAAA HH:MM:SS"
-NOTA_MINIMA_APROBATORIA = 80  # % mínimo para aprobar.
+# 80% equivale a 16/20 (el examen se guarda como "X / 20"). Nota mínima
+# aprobatoria confirmada 04/11/2026 ("Ajustes adicionales – Website
+# Jerarquía", punto 3): 16 puntos o más aprueba. NO usar 90 (equivalente a
+# 18/20) como mínimo.
+NOTA_MINIMA_APROBATORIA = 80  # % mínimo para aprobar (= 16/20).
 VENTANA_VALIDEZ_HORAS = 120  # el examen debe estar rendido dentro de las últimas 120h (5 días). Confirmado 31/10/2026.
 
 zona_peru = pytz.timezone("America/Lima")

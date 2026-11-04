@@ -15,12 +15,14 @@ from zonas import lista_zonas_agrupadas
 # Cargos de promotor por canal: a estos cargos (y solo a estos) se les exige
 # contrato + DNI en OneDrive y certificado de evaluación aprobado. Supervisor,
 # Coordinador y Back office quedan exentos de esta validación documental.
-CARGOS_PROMOTOR = {"Promotor D2D - Dealer", "Promotor - D2D", "Promotor OUT - Dealer"}
+CARGOS_PROMOTOR = {"Promotor D2D - Dealer", "Promotor - D2D", "Promotor-Ventas Out"}
 
 # Cargos de Supervisor/Coordinador por canal, usados para construir los
 # desplegables dinámicos desde colaboradores (ya no desde la hoja ubicaciones).
-CARGOS_SUPERVISOR_INDIRECTO = {"Supervisor D2D - Dealer", "Supervisor OUT - Dealer"}
-CARGOS_COORDINADOR_INDIRECTO = {"Coordinador D2D - Dealer", "Coordinador OUT - Dealer"}
+# OUTBOUND (Konecta/Salesland/Grupo Creed) NO tiene cargo de Coordinador: el
+# Supervisor es el rango más alto. Confirmado 04/11/2026.
+CARGOS_SUPERVISOR_INDIRECTO = {"Supervisor D2D - Dealer", "Supervisor - Ventas Out"}
+CARGOS_COORDINADOR_INDIRECTO = {"Coordinador D2D - Dealer"}
 CARGOS_SUPERVISOR_DIRECTO = {"Supervisor - D2D"}
 CARGOS_COORDINADOR_DIRECTO = {"Coordinador - D2D"}
 CARGOS_JEFE_DIRECTO = {"JEFE CEX"}
@@ -48,7 +50,7 @@ DEALERS_CON_HORARIO_OUTBOUND = {"KONECTA SAC", "SALESLAND"}
 # ve en pantalla y se guarda en la hoja debe decir "VENTAS DIRECTAS" (no
 # "VENTAS INDIRECTAS"). Grupo Creed, aunque también es OUTBOUND, se queda
 # como "VENTAS INDIRECTAS". OJO: esto NO cambia la lógica interna del
-# formulario (cargos OUT - Dealer, Zona Agrupada, documentos, Modalidad/
+# formulario (cargos "- Ventas Out", Zona Agrupada, documentos, Modalidad/
 # Horario siguen funcionando igual) — solo el texto que se muestra/guarda en
 # la columna CANAL. Ver variable "canal_mostrar" en mostrar_formulario().
 # Confirmado 03/11/2026.
@@ -76,6 +78,18 @@ CARPETA_ONEDRIVE_POR_RAZON = {
     "MALUTECH S.A.C": "MALUTECH S.A.C.",
     "MALUTECH SAC": "MALUTECH S.A.C.",
 }
+
+# Excepción exclusiva de Konecta (spec "Ajustes adicionales – Website
+# Jerarquía", punto 1, confirmado 04/11/2026): estas 2 personas deben poder
+# elegirse como Supervisor al registrar colaboradores de Konecta, aunque su
+# propio registro en colaboradores esté INACTIVO o figure con otro cargo
+# (antes fueron promotoras). No se re-registran en la maestra para evitar
+# duplicidad. Esta excepción NO aplica a ningún otro dealer ni modifica la
+# regla general de supervisores/coordinadores activos.
+SUPERVISORES_EXCEPCION_KONECTA = [
+    ("Lesly Atalaya", "48058438"),    # Lesly Milagritos Atalaya Chavez — u48058438@konecta.com
+    ("Mylenka Jucharo", "74608929"),  # Mylenka Victoria Jucharo Sifuentes — u74608929@konecta.com
+]
 
 
 def carpeta_onedrive_dealer(razon: str) -> str:
@@ -687,7 +701,7 @@ def _nombre_colaborador(row) -> str:
     ]).strip()
 
 
-def validar_reingreso(df_colab: pd.DataFrame, dni_limpio: str, fecha_alta) -> tuple[bool, str, bool]:
+def validar_reingreso(df_colab: pd.DataFrame, dni_limpio: str, fecha_alta, razon_nueva: str = "") -> tuple[bool, str, bool]:
     """
     Retorna (ok, mensaje_error, es_reingreso).
     - ok=False: bloquear el alta
@@ -695,16 +709,21 @@ def validar_reingreso(df_colab: pd.DataFrame, dni_limpio: str, fecha_alta) -> tu
 
     Consulta TODO el histórico del DNI (activo e inactivo), en este orden
     (spec "Reglas de validación para altas y reingresos", confirmado
-    03/11/2026):
+    03/11/2026; ajuste por partner "Ajustes adicionales – Website
+    Jerarquía" punto 2, confirmado 04/11/2026):
     1. Si está ACTIVO ahora mismo → bloquear siempre (sin excepción).
     2. Si en CUALQUIER registro histórico (activo o inactivo) el MOTIVO
        contiene un término de calidad/fraude (VN2, VN6, FPD, fraude,
        malapraxis, flipping/flipeo) → bloquear siempre, sin importar la
-       fecha de cese.
+       fecha de cese ni el partner donde se esté reingresando.
     3. Si no hay antecedente de calidad/fraude, validar la fecha de cese más
        reciente: se permite el reingreso solo si es del 2025 o anterior. Si
        es del 2026 en adelante, se bloquea — salvo que esa baja haya sido por
        cierre de operación, que sí se permite igual.
+       EXCEPCIÓN: si el alta nueva es para WOW TEL (razon_nueva), esta
+       restricción por fecha de cese no aplica — WOW TEL permite reingresos
+       libremente aunque el cese sea del 2026. El bloqueo por antecedentes
+       de calidad/fraude (paso 2) sigue aplicando igual para WOW TEL.
     4. Si hay un registro previo (se permita o no el reingreso), se informa
        el dealer/partner donde trabajó antes.
     """
@@ -772,7 +791,8 @@ def validar_reingreso(df_colab: pd.DataFrame, dni_limpio: str, fecha_alta) -> tu
         ultima_baja, motivo_ultima_baja, razon_ultima_baja = max(bajas, key=lambda t: t[0])
         info_dealer = f"\nÚltima empresa: {razon_ultima_baja}" if razon_ultima_baja else ""
 
-        if ultima_baja.year >= 2026 and not _motivo_es_cierre_operacion(motivo_ultima_baja):
+        es_wow_tel_nuevo = _normalizar_razon(razon_nueva) == _normalizar_razon("WOW TEL")
+        if ultima_baja.year >= 2026 and not _motivo_es_cierre_operacion(motivo_ultima_baja) and not es_wow_tel_nuevo:
             return False, (
                 f"❌ El DNI {dni_limpio} registra una baja/cese del {ultima_baja} (año {ultima_baja.year}).\n"
                 "Solo se permite el reingreso si la última fecha de cese es del 2025 o anterior "
@@ -1011,15 +1031,19 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
         # Dealers (VENTAS INDIRECTAS) → los que llevan sufijo "- Dealer".
         # WOW TEL / Directas → el resto.
         if canal == "VENTAS INDIRECTAS" and limpiar_texto(subcanal).upper() == "OUTBOUND":
-            # Konecta / Grupo Creed / Salesland en OUTBOUND: cargos con sufijo
-            # "OUT", no "D2D" (son equipos distintos aunque el canal de fondo
-            # sea el mismo). Confirmado 02/11/2026.
+            # Konecta / Grupo Creed / Salesland en OUTBOUND: lista real de
+            # cargos tal cual la pasó el usuario (04/11/2026) — reemplaza a
+            # los nombres "OUT - Dealer" inventados que nunca existieron en
+            # la maestra real y dejaban los desplegables de Supervisor vacíos.
+            # No hay Coordinador en OUTBOUND: Supervisor es el rango más alto.
             opciones_cargo = [
                 "",
-                "Promotor OUT - Dealer",
-                "Supervisor OUT - Dealer",
-                "Coordinador OUT - Dealer",
-                "Agente BO OUT - Dealer",
+                "Promotor-Ventas Out",
+                "Supervisor - Ventas Out",
+                "Formador-Ventas Out",
+                "Back office - Ventas Out",
+                "Calidad - Ventas Out",
+                "GTR - Ventas Out",
             ]
         elif canal == "VENTAS INDIRECTAS":
             opciones_cargo = [
@@ -1192,13 +1216,18 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             # — no tiene sentido pedirle que se elija un Coordinador a sí
             # mismo. Para cualquier otro cargo (Supervisor, Promotor, Agente
             # BO), sí se pide. Confirmado 02/11/2026.
+            # OUTBOUND (Konecta/Salesland/Grupo Creed) NO tiene Coordinador en
+            # absoluto: el campo ni se muestra. Confirmado 04/11/2026.
+            es_outbound_jerarquia = limpiar_texto(subcanal).upper() == "OUTBOUND"
             coordinador = ""
             dni_coordinador = ""
             hay_coordinador_disponible = True
-            if cargo not in CARGOS_COORDINADOR_INDIRECTO:
+            if es_outbound_jerarquia:
+                hay_coordinador_disponible = False
+            elif cargo not in CARGOS_COORDINADOR_INDIRECTO:
                 # Coordinador dinámico desde colaboradores (cargo "Coordinador
-                # D2D - Dealer" / "Coordinador OUT - Dealer", ACTIVO, del
-                # mismo dealer), ya no desde ubicaciones.
+                # D2D - Dealer", ACTIVO, del mismo dealer), ya no desde
+                # ubicaciones.
                 opciones_coord = opciones_supervisor_coordinador(df_colab_ref, CARGOS_COORDINADOR_INDIRECTO, razon=razon)
                 hay_coordinador_disponible = bool(opciones_coord)
                 if opciones_coord:
@@ -1221,15 +1250,26 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
         with col_u2:
             # Jerarquía: Supervisor reporta a un Coordinador, no a otro
             # Supervisor — por eso Supervisor y Coordinador NO ven este
-            # campo, solo lo ve Promotor/Agente BO. Confirmado 02/11/2026.
+            # campo. En D2D solo lo ve Promotor/Agente BO; en OUTBOUND lo ven
+            # TODOS los cargos salvo Supervisor (Promotor, Formador, Back
+            # office, Calidad, GTR), porque ahí no existe Coordinador.
+            # Confirmado 02/11/2026 y 04/11/2026.
             supervisor = ""
             dni_supervisor = ""
             hay_supervisor_disponible = True
             if cargo not in (CARGOS_COORDINADOR_INDIRECTO | CARGOS_SUPERVISOR_INDIRECTO):
                 # Supervisor dinámico desde colaboradores (cargo "Supervisor
-                # D2D - Dealer" / "Supervisor OUT - Dealer", ACTIVO, del mismo
-                # dealer), ya no desde ubicaciones.
-                opciones_sup = opciones_supervisor_coordinador(df_colab_ref, CARGOS_SUPERVISOR_INDIRECTO, razon=razon)
+                # D2D - Dealer" / "Supervisor - Ventas Out", ACTIVO, del mismo
+                # dealer y del mismo sub canal si es OUTBOUND), ya no desde
+                # ubicaciones.
+                opciones_sup = opciones_supervisor_coordinador(
+                    df_colab_ref, CARGOS_SUPERVISOR_INDIRECTO, razon=razon,
+                    subcanal=("OUTBOUND" if es_outbound_jerarquia else None),
+                )
+                if _normalizar_razon(razon) == _normalizar_razon("KONECTA SAC"):
+                    opciones_sup = sorted(set(opciones_sup) | {
+                        f"{nombre} — {dni}" for nombre, dni in SUPERVISORES_EXCEPCION_KONECTA
+                    })
                 hay_supervisor_disponible = bool(opciones_sup)
                 if opciones_sup:
                     supervisor_sel = st.selectbox("SUPERVISOR A CARGO", [""] + opciones_sup, key=k("supervisor"))
@@ -1441,7 +1481,9 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             # Validar reingreso (bloqueo + popup advertencia)
             dni_limpio = normalizar_dni(limpiar_texto(campos.get("DNI", "")))
             fecha_alta = campos.get("FECHA DE CREACION USUARIO")
-            ok_reingreso, msg_reingreso, es_reingreso = validar_reingreso(df_colab, dni_limpio, fecha_alta)
+            ok_reingreso, msg_reingreso, es_reingreso = validar_reingreso(
+                df_colab, dni_limpio, fecha_alta, razon_nueva=campos.get("RAZON SOCIAL", "")
+            )
 
             if not ok_reingreso:
                 errores.append(msg_reingreso)
