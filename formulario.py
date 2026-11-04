@@ -754,19 +754,28 @@ def validar_reingreso(df_colab: pd.DataFrame, dni_limpio: str, fecha_alta, razon
             ), False
 
     # 2) Antecedente de calidad/fraude en CUALQUIER registro histórico
-    # (activo o inactivo) → bloquea siempre, sin importar la fecha.
+    # (activo o inactivo) → bloquea siempre, sin importar la fecha. Se listan
+    # TODOS los registros con antecedente (no solo el primero que se
+    # encuentre), para que backoffice tenga el detalle completo y pueda
+    # validar/descartar el alta con toda la información. Confirmado
+    # 04/11/2026 (pedido "necesito que arroje todos los errores... para
+    # validar y descartar").
     if "MOTIVO" in encontrados.columns:
+        antecedentes = []
         for _, row in encontrados.iterrows():
             motivo_row = row.get("MOTIVO", "")
             if _motivo_es_antecedente_calidad_fraude(motivo_row):
                 razon = limpiar_texto(row.get("RAZON SOCIAL", ""))
                 nombre = _nombre_colaborador(row)
-                return False, (
-                    f"❌ El DNI {dni_limpio} registra un antecedente de salida por calidad "
-                    f"o posible fraude y no se permite su reingreso.\n"
-                    f"Motivo registrado: {limpiar_texto(motivo_row)}\n"
-                    f"Empresa: {razon} | Nombre: {nombre}"
-                ), False
+                antecedentes.append(
+                    f"• Motivo: {limpiar_texto(motivo_row)} | Empresa: {razon} | Nombre: {nombre}"
+                )
+        if antecedentes:
+            return False, (
+                f"❌ El DNI {dni_limpio} registra {len(antecedentes)} antecedente(s) de salida "
+                "por calidad o posible fraude y no se permite su reingreso:\n"
+                + "\n".join(antecedentes)
+            ), False
 
     # 3) Fecha de cese más reciente (y el MOTIVO/RAZON SOCIAL de esa misma
     # fila, no de cualquier fila — para poder aplicar la excepción de cierre
@@ -791,17 +800,31 @@ def validar_reingreso(df_colab: pd.DataFrame, dni_limpio: str, fecha_alta, razon
         ultima_baja, motivo_ultima_baja, razon_ultima_baja = max(bajas, key=lambda t: t[0])
         info_dealer = f"\nÚltima empresa: {razon_ultima_baja}" if razon_ultima_baja else ""
 
+        # Historial completo (todas las bajas encontradas, más reciente
+        # primero), con motivo — no solo la última — para que backoffice vea
+        # todo el detalle y pueda validar/descartar el alta por su cuenta
+        # aunque el sistema no la bloquee. Confirmado 04/11/2026.
+        bajas_ordenadas = sorted(bajas, key=lambda t: t[0], reverse=True)
+        historial = "\n".join(
+            f"• {f} — {limpiar_texto(m) or 'sin motivo registrado'}" + (f" ({r})" if r else "")
+            for f, m, r in bajas_ordenadas
+        )
+
         es_wow_tel_nuevo = _normalizar_razon(razon_nueva) == _normalizar_razon("WOW TEL")
         if ultima_baja.year >= 2026 and not _motivo_es_cierre_operacion(motivo_ultima_baja) and not es_wow_tel_nuevo:
             return False, (
                 f"❌ El DNI {dni_limpio} registra una baja/cese del {ultima_baja} (año {ultima_baja.year}).\n"
                 "Solo se permite el reingreso si la última fecha de cese es del 2025 o anterior "
                 "(salvo baja por cierre de operación)."
-                f"{info_dealer}"
+                f"{info_dealer}\nHistorial de bajas:\n{historial}"
             ), True
 
         # Reingreso permitido (2025 o anterior, o cierre de operación) → advertencia, no bloquea.
-        return True, f"ℹ️ Antecedente laboral encontrado.{info_dealer}", True
+        return True, (
+            f"ℹ️ Antecedente laboral encontrado. Último motivo: "
+            f"{limpiar_texto(motivo_ultima_baja) or 'sin motivo registrado'}."
+            f"{info_dealer}\nHistorial de bajas:\n{historial}"
+        ), True
 
     return True, "", False
 
