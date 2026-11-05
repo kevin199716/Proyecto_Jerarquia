@@ -56,6 +56,16 @@ DEALERS_CON_HORARIO_OUTBOUND = {"KONECTA SAC", "SALESLAND"}
 # Confirmado 03/11/2026.
 DEALERS_CANAL_DIRECTAS_OUTBOUND = {"KONECTA SAC", "SALESLAND"}
 
+# Mismos 2 socios otra vez, más WOW TEL. Reingreso libre: se permite
+# reingresar aunque la última fecha de cese sea del 2026 (ver
+# validar_reingreso). Grupo Creed queda FUERA a propósito — en OUTBOUND
+# siempre fue el socio "estricto" (sí exige documentos desde el alta, a
+# diferencia de Konecta/Salesland), así que mantiene la regla estricta de
+# reingreso igual que Nogales/Interconexión/Multiple Force. El bloqueo por
+# antecedente de calidad/fraude sigue aplicando 100% a los 3, sin excepción.
+# Confirmado 04/11/2026.
+DEALERS_REINGRESO_LIBRE = {"WOW TEL", "KONECTA SAC", "SALESLAND"}
+
 # Carpeta local en el VPS donde se deja una copia del contrato/DNI subidos por
 # la web, con la MISMA estructura de carpetas que OneDrive (RAZON SOCIAL /
 # CONTRATOS NUEVOS USUARIOS | DNI NUEVOS USUARIOS). Un script en la PC de
@@ -720,10 +730,12 @@ def validar_reingreso(df_colab: pd.DataFrame, dni_limpio: str, fecha_alta, razon
        reciente: se permite el reingreso solo si es del 2025 o anterior. Si
        es del 2026 en adelante, se bloquea — salvo que esa baja haya sido por
        cierre de operación, que sí se permite igual.
-       EXCEPCIÓN: si el alta nueva es para WOW TEL (razon_nueva), esta
-       restricción por fecha de cese no aplica — WOW TEL permite reingresos
-       libremente aunque el cese sea del 2026. El bloqueo por antecedentes
-       de calidad/fraude (paso 2) sigue aplicando igual para WOW TEL.
+       EXCEPCIÓN: si el alta nueva es para un dealer de DEALERS_REINGRESO_LIBRE
+       (WOW TEL, Konecta, Salesland; razon_nueva), esta restricción por
+       fecha de cese no aplica — permiten reingresos libremente aunque el
+       cese sea del 2026. Grupo Creed NO entra en la excepción (mantiene la
+       regla estricta). El bloqueo por antecedentes de calidad/fraude
+       (paso 2) sigue aplicando 100% igual para los 3, sin excepción.
     4. Si hay un registro previo (se permita o no el reingreso), se informa
        el dealer/partner donde trabajó antes.
     """
@@ -810,8 +822,9 @@ def validar_reingreso(df_colab: pd.DataFrame, dni_limpio: str, fecha_alta, razon
             for f, m, r in bajas_ordenadas
         )
 
-        es_wow_tel_nuevo = _normalizar_razon(razon_nueva) == _normalizar_razon("WOW TEL")
-        if ultima_baja.year >= 2026 and not _motivo_es_cierre_operacion(motivo_ultima_baja) and not es_wow_tel_nuevo:
+        razon_nueva_norm = _normalizar_razon(razon_nueva)
+        es_reingreso_libre = razon_nueva_norm in {_normalizar_razon(d) for d in DEALERS_REINGRESO_LIBRE}
+        if ultima_baja.year >= 2026 and not _motivo_es_cierre_operacion(motivo_ultima_baja) and not es_reingreso_libre:
             return False, (
                 f"❌ El DNI {dni_limpio} registra una baja/cese del {ultima_baja} (año {ultima_baja.year}).\n"
                 "Solo se permite el reingreso si la última fecha de cese es del 2025 o anterior "

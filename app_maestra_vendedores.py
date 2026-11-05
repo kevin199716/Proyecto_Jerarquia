@@ -8,7 +8,7 @@ if BASE_DIR not in sys.path:
 import registro_mod as registro
 from auth import cargar_usuarios, login
 from ui_inicio import mostrar_bienvenida
-from sheets import conectar_google_sheets, conectar_google_sheets_opcional
+from sheets import conectar_google_sheets
 from concurrencia import obtener_hoja_locks
 from formulario import mostrar_formulario
 from asistencia import mostrar_asistencia
@@ -51,7 +51,7 @@ render_sidebar_user(usuario=usuario, rol=rol, razon=razon)
 if rol == "backoffice":
     opciones_menu = ["Alta", "Bajas", "Presencialidad Dealer", "Cobranza_Calidad"]
 elif rol == "dealer":
-    opciones_menu = ["Alta", "Bajas", "Presencialidad Dealer"]
+    opciones_menu = ["Alta", "Bajas", "Presencialidad Dealer", "Cobranza_Calidad"]
 elif rol == "capacitacion":
     opciones_menu = ["Alta"]
 elif rol == "presencialidad_basico":
@@ -103,12 +103,7 @@ if rol == "backoffice":
         mostrar_asistencia(hoja_asistencia, hoja_colaboradores, hoja_sustentos=hoja_sustentos)
         mostrar_matriz_jerarquia()
     elif pagina == "Cobranza_Calidad":
-        hoja_cobranza, err1 = conectar_google_sheets_opcional("Facturas - Calidad", "Consolidado")
-        hoja_listas, err2 = conectar_google_sheets_opcional("Facturas - Calidad", "Listas")
-        if err1:
-            st.error(f"❌ {err1}")
-        else:
-            mostrar_cobranza(hoja_cobranza, razon, hoja_listas=hoja_listas)
+        mostrar_cobranza(razon)
 
 # DEALER
 elif rol == "dealer":
@@ -124,6 +119,8 @@ elif rol == "dealer":
     elif pagina == "Presencialidad Dealer":
         mostrar_asistencia(hoja_asistencia, hoja_colaboradores, hoja_sustentos=hoja_sustentos, razon=razon)
         mostrar_matriz_jerarquia()
+    elif pagina == "Cobranza_Calidad":
+        mostrar_cobranza(razon)
 
 # CAPACITACIÓN — SOLO ALTAS
 elif rol == "capacitacion":
@@ -163,12 +160,7 @@ elif rol in ("presencialidad", "presencialidad_dealer"):
             mostrar_asistencia(hoja_asistencia, hoja_colaboradores, hoja_sustentos=hoja_sustentos, razon=razon)
             mostrar_matriz_jerarquia()
         elif pagina == "Cobranza_Calidad":
-            hoja_cobranza, err1 = conectar_google_sheets_opcional("Facturas - Calidad", "Consolidado")
-            hoja_listas, err2 = conectar_google_sheets_opcional("Facturas - Calidad", "Listas")
-            if err1:
-                st.error(f"❌ {err1}")
-            else:
-                mostrar_cobranza(hoja_cobranza, razon, hoja_listas=hoja_listas)
+            mostrar_cobranza(razon)
 
 # EDITOR
 elif rol == "editor":
