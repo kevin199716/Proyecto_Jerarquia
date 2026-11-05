@@ -15,7 +15,7 @@ ACCIONES = {
     EFECTIVO: [
         "Ya pagó",
         "Genera compromiso de pago",
-        "Indica no pagará",
+        "Indica que no pagará",
         "Contesta y cuelga",
         "Contesta y no da razón",
         "Otros: detallar",
@@ -23,14 +23,19 @@ ACCIONES = {
     NO_EFECTIVO: [
         "Teléfono apagado",
         "Teléfono suspendido",
-        "Teléfono no existe",
-        "Timbra y no contesta",
-        "Contesta pero desconoce a titular",
     ],
+}
+# Resultados de versiones anteriores: se reconocen en registros antiguos pero ya no se pueden registrar.
+ACCIONES_LEGADO = {
+    "Indica no pagará": EFECTIVO,
+    "Teléfono no existe": NO_EFECTIVO,
+    "Timbra y no contesta": NO_EFECTIVO,
+    "Contesta pero desconoce a titular": NO_EFECTIVO,
 }
 ACCION_PAGO = "Ya pagó"
 ACCION_COMPROMISO = "Genera compromiso de pago"
-REQUIERE_MOTIVO = {"Indica no pagará", "Otros: detallar"}
+ACCION_NO_PAGARA = "Indica que no pagará"
+REQUIERE_MOTIVO = {ACCION_NO_PAGARA}
 REQUIERE_OBSERVACION = {"Otros: detallar"}
 ACCIONES_RECONTACTO = {"Contesta y cuelga", "Contesta y no da razón"}
 
@@ -184,7 +189,9 @@ def validar_interaccion(datos: dict, n: int, fila, hoy: date, es_correccion: boo
     estado = estado_caso(fila, hoy)
 
     if not es_correccion:
-        if estado in ESTADOS_FINALIZADOS:
+        if estado == E_PAGADO:
+            errores.append("El cliente ya pagó: la gestión terminó y no admite más contactos.")
+        elif estado in ESTADOS_FINALIZADOS:
             errores.append("El caso ya está finalizado; no admite nuevas interacciones.")
         if n != registradas + 1:
             errores.append(f"Corresponde registrar la interacción {registradas + 1}, no la {n}.")
@@ -217,9 +224,12 @@ def validar_interaccion(datos: dict, n: int, fila, hoy: date, es_correccion: boo
     if not datos.get("MEDIO"):
         errores.append("Falta el medio de contacto.")
     if tipo not in ACCIONES:
-        errores.append("Falta el tipo de contacto (Efectivo / No efectivo).")
+        errores.append("Primero selecciona el tipo de contacto (Efectivo / No efectivo).")
+    elif not accion:
+        errores.append("Falta el resultado del contacto.")
     elif accion not in ACCIONES[tipo]:
-        errores.append(f"La acción no corresponde a un contacto {tipo.lower()}.")
+        errores.append(f"'{accion}' no corresponde a un contacto {tipo.lower()}. "
+                       f"Opciones válidas: {', '.join(ACCIONES[tipo])}.")
 
     if accion == ACCION_COMPROMISO:
         f_comp = datos.get("FECHA COMPROMISO")
@@ -285,7 +295,18 @@ def tipo_de_accion(accion: str) -> str:
     for tipo, lista in ACCIONES.items():
         if accion in lista:
             return tipo
-    return ""
+    return ACCIONES_LEGADO.get(accion, "")
+
+
+def limpiezas_aplicadas(datos: dict) -> list[str]:
+    """Campos condicionales que se descartarán porque no corresponden al resultado elegido."""
+    accion = datos.get("ACCIÓN", "")
+    notas = []
+    if normalizar(datos.get("FECHA COMPROMISO")) and accion != ACCION_COMPROMISO:
+        notas.append("se descarta la fecha de compromiso (solo aplica a 'Genera compromiso de pago')")
+    if normalizar(datos.get("MOTIVO DE NO PAGO")) and accion not in REQUIERE_MOTIVO:
+        notas.append(f"se descarta el motivo de no pago (solo aplica a '{ACCION_NO_PAGARA}')")
+    return notas
 
 
 def procesar_edicion(original: dict, editado: dict, actual: dict, es_backoffice: bool,
@@ -303,6 +324,8 @@ def procesar_edicion(original: dict, editado: dict, actual: dict, es_backoffice:
     if not cambiadas and not cambia_resp:
         return {}, [], []
     if cambiadas and not es_backoffice and estado_caso(actual, hoy) in ESTADOS_FINALIZADOS:
+        if estado_caso(actual, hoy) == E_PAGADO:
+            return {}, [], ["El cliente ya pagó: la gestión terminó y no admite más contactos."]
         return {}, [], ["El caso está finalizado; no admite cambios."]
 
     trabajo, cambios, operaciones, errores = dict(actual), {}, [], []
@@ -317,9 +340,7 @@ def procesar_edicion(original: dict, editado: dict, actual: dict, es_backoffice:
                 trabajo.update(limpieza)
                 cambios.update(limpieza)
             continue
-        if crudo["ACCIÓN"] and not crudo["TIPO CONTACTO"]:
-            crudo["TIPO CONTACTO"] = tipo_de_accion(crudo["ACCIÓN"])
-        datos = dict(crudo, **{"FECHA": parse_fecha(crudo["FECHA"]),
+        datos =dict(crudo, **{"FECHA": parse_fecha(crudo["FECHA"]),
                                "FECHA COMPROMISO": parse_fecha(crudo["FECHA COMPROMISO"])})
         if n <= registradas:
             if not es_backoffice:
@@ -396,6 +417,9 @@ def kpis(df: pd.DataFrame) -> dict:
         "en_proceso": estados.get(E_EN_PROCESO, 0) + estados.get(E_COMPROMISO, 0),
         "recontactar": sum(estados.get(e, 0) for e in ESTADOS_RECONTACTO),
         "compromisos": estados.get(E_COMPROMISO, 0),
+        "compromisos_vencidos": estados.get(E_COMPROMISO_VENCIDO, 0),
+        "contactados": contactados,
+        "interacciones": int(df["_N"].sum()) if total else 0,
         "pend_cierre": estados.get(E_PEND_CIERRE, 0),
         "pagados": estados.get(E_PAGADO, 0),
         "sin_exito": estados.get(E_SIN_EXITO, 0),

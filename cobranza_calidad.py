@@ -382,20 +382,40 @@ def _guardar_lote(ediciones: list[tuple[dict, dict]], ctx: dict) -> tuple[int, l
 
 # ──────────────────────────────── Presentación ────────────────────────────────
 
-HEADER = """<div style="background:linear-gradient(135deg,#4B0067,#7B1FA2 55%,#EC6608);
-border-radius:14px;padding:18px 22px;margin-bottom:14px;">
-<div style="display:flex;align-items:center;gap:14px;">
-<div style="font-size:28px;">💰</div>
-<div><h1 style="color:#fff;margin:0;font-size:22px;font-weight:800;">Cobranza — Gestión y Seguimiento</h1>
-<p style="color:rgba(255,255,255,.85);margin:2px 0 0;font-size:12px;">
-Registro secuencial de contactabilidad · trazabilidad completa · indicadores</p></div></div></div>"""
+# Todo el HTML va en una sola línea: un salto de línea dentro de una etiqueta hace que Streamlit
+# muestre el código como texto.
+HEADER = (
+    '<div class="cob-header"><div class="cob-header-ico">💰</div><div>'
+    '<div class="cob-header-t">Cobranza — Gestión y Seguimiento</div>'
+    '<div class="cob-header-s">Registro secuencial de contactabilidad · trazabilidad completa · indicadores</div>'
+    '</div></div>'
+)
 
 CSS = """<style>
-.cob-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin:6px 0 14px;}
-.cob-kpi{background:#fff;border:1px solid #E5E0EA;border-left:5px solid var(--c);border-radius:10px;padding:10px 12px;}
-.cob-kpi .v{font-size:22px;font-weight:800;color:#1A1521;line-height:1.1;}
-.cob-kpi .l{font-size:11.5px;color:#6B6175;margin-top:2px;}
-.cob-kpi .s{font-size:11px;color:#8F8898;}
+.cob-header{background:linear-gradient(135deg,#4B0067,#7B1FA2 55%,#EC6608);border-radius:14px;padding:16px 22px;margin-bottom:14px;display:flex;align-items:center;gap:14px;}
+.cob-header-ico{font-size:28px;}
+.cob-header-t{color:#fff;font-size:21px;font-weight:800;line-height:1.2;}
+.cob-header-s{color:rgba(255,255,255,.85);font-size:12px;margin-top:2px;}
+.cob-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:6px 0 12px;}
+.cob-kpi{background:#fff;border:1px solid #E5E0EA;border-top:4px solid var(--c);border-radius:12px;padding:12px 14px;box-shadow:0 1px 3px rgba(75,0,103,.06);}
+.cob-kpi .v{font-size:26px;font-weight:800;color:#1A1521;line-height:1.1;}
+.cob-kpi .l{font-size:12px;color:#4A4153;margin-top:3px;font-weight:600;}
+.cob-kpi .s{font-size:11px;color:#8F8898;margin-top:2px;}
+.cob-kpi .bar{height:6px;background:#EFEBF2;border-radius:99px;margin-top:8px;overflow:hidden;}
+.cob-kpi .bar i{display:block;height:100%;background:var(--c);border-radius:99px;}
+.cob-dash{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;margin:0 0 14px;}
+.cob-panel{background:#fff;border:1px solid #E5E0EA;border-radius:12px;padding:12px 16px;}
+.cob-panel h4{margin:0 0 10px;font-size:13px;color:#4B0067;font-weight:800;}
+.cob-stack{display:flex;height:14px;border-radius:99px;overflow:hidden;gap:2px;background:#EFEBF2;}
+.cob-stack i{display:block;height:100%;}
+.cob-leg{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:9px;font-size:11.5px;color:#4A4153;}
+.cob-leg span{display:inline-flex;align-items:center;gap:5px;}
+.cob-leg b{color:#1A1521;}
+.cob-dot{width:9px;height:9px;border-radius:3px;display:inline-block;}
+.cob-row{display:grid;grid-template-columns:34px 1fr 70px;align-items:center;gap:8px;font-size:12px;color:#4A4153;margin:5px 0;}
+.cob-row .t{height:10px;background:#EFEBF2;border-radius:99px;overflow:hidden;display:flex;gap:2px;}
+.cob-row .t i{display:block;height:100%;}
+.cob-row .n{text-align:right;color:#1A1521;font-weight:700;}
 .cob-pill{display:inline-block;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:700;}
 .cob-card{background:#fff;border:1px solid #E5E0EA;border-radius:12px;padding:14px 16px;margin:8px 0;}
 .cob-grid{display:flex;gap:28px;flex-wrap:wrap;}
@@ -422,27 +442,79 @@ def _etiqueta_estado(estado: str) -> str:
     return f"{R.ESTILO_ESTADO.get(estado, ('',))[0]} {estado}"
 
 
-def _kpi(valor, etiqueta, color, sub=""):
+def _kpi(valor, etiqueta, color, sub="", pct=None):
     sub_html = f'<div class="s">{_e(sub)}</div>' if sub else ""
+    barra = (f'<div class="bar"><i style="width:{max(0.0, min(100.0, pct)):.1f}%"></i></div>'
+             if pct is not None else "")
     return (f'<div class="cob-kpi" style="--c:{color};"><div class="v">{_e(valor)}</div>'
-            f'<div class="l">{_e(etiqueta)}</div>{sub_html}</div>')
+            f'<div class="l">{_e(etiqueta)}</div>{sub_html}{barra}</div>')
+
+
+def _pct(a, b) -> float:
+    return a / b * 100 if b else 0.0
 
 
 def _render_kpis(k: dict):
+    t = k["total"]
+    est = R.ESTILO_ESTADO
     tarjetas = [
-        _kpi(k["total"], "Casos del periodo", "#4B0067"),
-        _kpi(k["pendientes"], "⚪ Pendientes de gestión", R.ESTILO_ESTADO[R.E_PENDIENTE][1]),
-        _kpi(k["en_proceso"], "🔵 En proceso", R.ESTILO_ESTADO[R.E_EN_PROCESO][1],
-             f"{k['compromisos']} con compromiso vigente"),
-        _kpi(k["recontactar"], "🟠 Requieren nuevo contacto", R.ESTILO_ESTADO[R.E_RECONTACTAR][1]),
-        _kpi(k["pend_cierre"], "🟡 Pendientes de cierre", R.ESTILO_ESTADO[R.E_PEND_CIERRE][1]),
-        _kpi(k["finalizados"], "🟢 Finalizados", R.ESTILO_ESTADO[R.E_PAGADO][1],
-             f"{k['pagados']} pagaron · {k['sin_exito']} sin éxito"),
-        _kpi(f"{k['pct_avance']:.1f}%", "Avance (gestionados)", "#EC6608", f"{k['gestionados']} de {k['total']}"),
+        _kpi(t, "Casos del periodo", "#4B0067", f"{k['interacciones']} contactos registrados"),
+        _kpi(f"{k['pct_avance']:.1f}%", "Avance de la gestión", "#EC6608",
+             f"{k['gestionados']} gestionados de {t}", k["pct_avance"]),
+        _kpi(k["pendientes"], "⚪ Pendientes", est[R.E_PENDIENTE][1], "sin ningún contacto",
+             _pct(k["pendientes"], t)),
+        _kpi(k["en_proceso"] + k["recontactar"] + k["pend_cierre"], "🔵 En proceso", est[R.E_EN_PROCESO][1],
+             f"{k['recontactar']} por recontactar · {k['pend_cierre']} por cerrar",
+             _pct(k["en_proceso"] + k["recontactar"] + k["pend_cierre"], t)),
+        _kpi(k["compromisos"] + k["compromisos_vencidos"], "🟣 Compromisos de pago", est[R.E_COMPROMISO][1],
+             f"{k['compromisos']} vigentes · {k['compromisos_vencidos']} vencidos"),
+        _kpi(k["pagados"], "🟢 Ya pagaron", est[R.E_PAGADO][1], f"{k['pct_recupero']:.1f}% de recupero",
+             k["pct_recupero"]),
+        _kpi(k["finalizados"], "🏁 Finalizados", est[R.E_SIN_EXITO][1],
+             f"{k['pagados']} pagaron · {k['sin_exito']} sin éxito", _pct(k["finalizados"], t)),
         _kpi(f"{k['pct_contactabilidad']:.1f}%", "Contactabilidad", COLOR_EFECTIVO,
-             "casos con contacto efectivo / gestionados"),
+             f"{k['contactados']} con contacto efectivo", k["pct_contactabilidad"]),
     ]
     st.markdown(f'<div class="cob-kpis">{"".join(tarjetas)}</div>', unsafe_allow_html=True)
+
+
+def _render_dashboard(dfp: pd.DataFrame, k: dict):
+    """Paneles visuales: distribución por estado, efectivo vs no efectivo y avance por contacto."""
+    t = k["total"] or 1
+    segmentos = "".join(
+        f'<i style="width:{_pct(k["estados"].get(e, 0), t):.2f}%;background:{R.ESTILO_ESTADO[e][1]}" '
+        f'title="{_e(e)}: {k["estados"].get(e, 0)}"></i>'
+        for e in R.ORDEN_ESTADOS if k["estados"].get(e, 0))
+    leyenda = "".join(
+        f'<span><span class="cob-dot" style="background:{R.ESTILO_ESTADO[e][1]}"></span>'
+        f'{R.ESTILO_ESTADO[e][0]} {_e(e.title())} <b>{k["estados"].get(e, 0)}</b></span>'
+        for e in R.ORDEN_ESTADOS if k["estados"].get(e, 0))
+    panel_estados = (f'<div class="cob-panel"><h4>Estado de la cartera</h4>'
+                     f'<div class="cob-stack">{segmentos}</div><div class="cob-leg">{leyenda}</div></div>')
+
+    avance = R.avance_por_interaccion(dfp)
+    efect, no_efect = int(avance["Efectivo"].sum()), int(avance["No efectivo"].sum())
+    total_c = efect + no_efect
+    panel_contacto = (
+        f'<div class="cob-panel"><h4>Contactos efectivos vs no efectivos</h4>'
+        f'<div class="cob-stack"><i style="width:{_pct(efect, total_c):.2f}%;background:{COLOR_EFECTIVO}"></i>'
+        f'<i style="width:{_pct(no_efect, total_c):.2f}%;background:{COLOR_NO_EFECTIVO}"></i></div>'
+        f'<div class="cob-leg"><span><span class="cob-dot" style="background:{COLOR_EFECTIVO}"></span>'
+        f'Efectivo <b>{efect}</b> ({_pct(efect, total_c):.0f}%)</span>'
+        f'<span><span class="cob-dot" style="background:{COLOR_NO_EFECTIVO}"></span>'
+        f'No efectivo <b>{no_efect}</b> ({_pct(no_efect, total_c):.0f}%)</span>'
+        f'<span>Total contactos <b>{total_c}</b></span></div></div>')
+
+    filas = "".join(
+        f'<div class="cob-row"><span>C{int(r["n"])}</span><div class="t">'
+        f'<i style="width:{_pct(r["Efectivo"], t):.2f}%;background:{COLOR_EFECTIVO}"></i>'
+        f'<i style="width:{_pct(r["No efectivo"], t):.2f}%;background:{COLOR_NO_EFECTIVO}"></i></div>'
+        f'<span class="n">{int(r["Total"])} · {_pct(r["Total"], t):.0f}%</span></div>'
+        for r in avance.to_dict("records"))
+    panel_avance = (f'<div class="cob-panel"><h4>Avance por contacto (casos que llegaron a cada contacto)</h4>'
+                    f'{filas}</div>')
+    st.markdown(f'<div class="cob-dash">{panel_estados}{panel_contacto}{panel_avance}</div>',
+                unsafe_allow_html=True)
 
 
 def _flash():
@@ -502,14 +574,14 @@ def _form_interaccion(prefijo: str, n: int, base: dict, fila: dict, listas: dict
     f_comp, motivo = None, ""
     if accion == R.ACCION_COMPROMISO:
         fc_ini = R.parse_fecha(base.get("FECHA COMPROMISO", "")) or fecha
-        f_comp = st.date_input("📆 Fecha de compromiso de pago", value=max(fc_ini, fecha), min_value=fecha,
+        f_comp = st.date_input("📆 Fecha de compromiso de pago (obligatoria)", value=max(fc_ini, fecha), min_value=fecha,
                                format="DD/MM/YYYY", key=f"{prefijo}_fcomp")
         st.caption("🟣 El caso queda en **Compromiso de pago**. Si vence sin pago, pasa a requerir nuevo contacto.")
     if accion in R.REQUIERE_MOTIVO:
         op, i = _opciones(listas["motivo"], base.get("MOTIVO DE NO PAGO", ""))
-        motivo = st.selectbox("❓ Motivo de no pago", op, index=i, key=f"{prefijo}_motivo")
+        motivo = st.selectbox("❓ Motivo de no pago (obligatorio)", op, index=i, key=f"{prefijo}_motivo")
     if accion == R.ACCION_PAGO:
-        st.caption("🟢 **Ya pagó** finaliza el caso automáticamente.")
+        st.caption("🟢 **Ya pagó** finaliza el caso automáticamente: no se habilitan más contactos.")
     obs_label = "🗒️ Detalle (obligatorio)" if accion in R.REQUIERE_OBSERVACION else "🗒️ Observación (opcional)"
     observacion = st.text_area(obs_label, value=base.get("OBSERVACIÓN", ""), max_chars=500, height=70,
                                key=f"{prefijo}_obs")
@@ -728,11 +800,29 @@ def _herramientas_bo(caso: dict, n_reg: int, ctx: dict, listas: dict, pref: str)
             _ejecutar_guardado(caso, preparar, ctx, f"Interacción {k} corregida.")
 
 
-COLUMNAS_FIJAS_TABLA = ["Estado", "Avance", "Código", "Cliente", "Celular", "Estado pago", "Partner"]
+COLUMNAS_FIJAS_TABLA = ["Estado", "Avance", "Siguiente", "Código", "Cliente", "Celular", "Estado pago", "Partner"]
+
+
+def _siguiente(estado: str, n: int) -> str:
+    if estado == R.E_PAGADO:
+        return "🏁 Pagó · cerrado"
+    if estado in R.ESTADOS_FINALIZADOS:
+        return "🏁 Cerrado"
+    if n >= R.N_INT:
+        return "🟡 Finalizar caso"
+    return f"➜ Completar C{n + 1}"
 COLUMNAS_EDITABLES_TABLA = [R.COL_RESP_BO] + [R.col(c, n) for n in range(1, R.N_INT + 1) for c in R.CAMPOS]
 ETIQUETAS_CAMPO = {"FECHA": "Fecha", "HORARIO": "Horario", "MEDIO": "Medio", "TIPO CONTACTO": "Tipo",
                    "ACCIÓN": "Resultado", "FECHA COMPROMISO": "F. compromiso",
                    "MOTIVO DE NO PAGO": "Motivo no pago", "OBSERVACIÓN": "Observación"}
+AYUDA_CAMPO = {
+    "TIPO CONTACTO": "Elige primero el tipo: define qué resultados son válidos.",
+    "ACCIÓN": (f"EFECTIVO: {', '.join(R.ACCIONES[R.EFECTIVO])}. "
+               f"NO EFECTIVO: {', '.join(R.ACCIONES[R.NO_EFECTIVO])}. 'Ya pagó' cierra el caso."),
+    "FECHA COMPROMISO": f"Solo para '{R.ACCION_COMPROMISO}' (obligatoria). En otro resultado se descarta.",
+    "MOTIVO DE NO PAGO": f"Solo para '{R.ACCION_NO_PAGARA}' (obligatorio). En otro resultado se descarta.",
+    "OBSERVACIÓN": "Obligatoria para 'Otros: detallar'.",
+}
 
 
 def _tabla_contactos(base: pd.DataFrame) -> pd.DataFrame:
@@ -740,6 +830,7 @@ def _tabla_contactos(base: pd.DataFrame) -> pd.DataFrame:
     g = pd.DataFrame({
         "Estado": base["_ESTADO"].map(_etiqueta_estado).values,
         "Avance": base["_N"].astype(int).values,
+        "Siguiente": [_siguiente(e, int(n)) for e, n in zip(base["_ESTADO"], base["_N"])],
         "Código": base["cod_cliente"].values,
         "Cliente": base["nombre_cliente"].values,
         "Celular": base["celular_cliente"].values,
@@ -761,6 +852,7 @@ def _config_tabla(base: pd.DataFrame, listas: dict, responsables: list[str]) -> 
         existentes = {v for n in range(1, R.N_INT + 1) for v in base[R.col(campo, n)].unique() if v}
         return list(dict.fromkeys(list(lista) + sorted(existentes - set(lista))))
 
+    # Los resultados de versiones anteriores solo aparecen si ya existen en el Drive (por opciones()).
     acciones = R.ACCIONES[R.EFECTIVO] + R.ACCIONES[R.NO_EFECTIVO]
     opciones_campo = {"HORARIO": opciones(listas["horario"], "HORARIO"),
                       "MEDIO": opciones(listas["medio"], "MEDIO"),
@@ -769,6 +861,7 @@ def _config_tabla(base: pd.DataFrame, listas: dict, responsables: list[str]) -> 
                       "MOTIVO DE NO PAGO": opciones(listas["motivo"], "MOTIVO DE NO PAGO")}
     cfg = {
         "Estado": st.column_config.TextColumn("Estado", width="medium"),
+        "Siguiente": st.column_config.TextColumn("Siguiente paso", width="small"),
         "Avance": st.column_config.ProgressColumn("Avance", min_value=0, max_value=R.N_INT, format=f"%d/{R.N_INT}"),
         "Cliente": st.column_config.TextColumn("Cliente", width="medium"),
         R.COL_RESP_BO: st.column_config.SelectboxColumn("Responsable BO", options=responsables),
@@ -776,18 +869,39 @@ def _config_tabla(base: pd.DataFrame, listas: dict, responsables: list[str]) -> 
     for n in range(1, R.N_INT + 1):
         for c in R.CAMPOS:
             etiqueta = f"C{n} · {ETIQUETAS_CAMPO[c]}"
+            ayuda = AYUDA_CAMPO.get(c)
             if c in R.CAMPOS_FECHA:
-                cfg[R.col(c, n)] = st.column_config.DateColumn(etiqueta, format="DD/MM/YYYY")
+                cfg[R.col(c, n)] = st.column_config.DateColumn(etiqueta, format="DD/MM/YYYY", help=ayuda)
             elif c == "OBSERVACIÓN":
-                cfg[R.col(c, n)] = st.column_config.TextColumn(etiqueta, max_chars=500)
+                cfg[R.col(c, n)] = st.column_config.TextColumn(etiqueta, max_chars=500, help=ayuda)
             else:
                 cfg[R.col(c, n)] = st.column_config.SelectboxColumn(
-                    etiqueta, options=opciones_campo[c], width="medium" if c == "ACCIÓN" else "small")
+                    etiqueta, options=opciones_campo[c], width="medium" if c == "ACCIÓN" else "small", help=ayuda)
     return cfg
 
 
+def _revisar_ediciones(base: pd.DataFrame, editado: pd.DataFrame, pendientes: dict, ctx: dict) -> dict:
+    """Revisión en vivo (sin tocar el Drive): {pos: (etiqueta, errores, avisos)} por fila editada."""
+    hoy, revision = _hoy(), {}
+    for pos in sorted(int(p) for p in pendientes):
+        original = base.iloc[pos].to_dict()
+        fila = editado.iloc[pos]
+        nuevo = {c: fila[c] for c in COLUMNAS_EDITABLES_TABLA}
+        _, _, errores = R.procesar_edicion(original, nuevo, original, ctx["es_bo"], ctx["usuario"], "", hoy)
+        avisos = []
+        for n in range(1, R.N_INT + 1):
+            datos = {c: R.valor_campo(c, nuevo.get(R.col(c, n))) for c in R.CAMPOS}
+            if any(datos[c] != R.valor_campo(c, original.get(R.col(c, n))) for c in R.CAMPOS):
+                avisos += [f"Contacto {n}: {a}" for a in R.limpiezas_aplicadas(datos)]
+        etiqueta = f"{original.get('cod_cliente', '')} · {original.get('nombre_cliente', '')}"
+        revision[pos] = (etiqueta, errores, avisos)
+    return revision
+
+
 def _tab_gestion(dfp: pd.DataFrame, ctx: dict, periodo: str, editable: bool):
-    _render_kpis(R.kpis(dfp))
+    k = R.kpis(dfp)
+    _render_kpis(k)
+    _render_dashboard(dfp, k)
 
     f1, f2, f3 = st.columns([2, 2, 1.4])
     with f1:
@@ -853,6 +967,20 @@ def _tab_gestion(dfp: pd.DataFrame, ctx: dict, periodo: str, editable: bool):
 
     if editable:
         pendientes = st.session_state.get(clave_editor, {}).get("edited_rows", {})
+        revision = _revisar_ediciones(base, editado, pendientes, ctx) if pendientes else {}
+        con_error = {p: r for p, r in revision.items() if r[1]}
+        if revision:
+            listos = len(revision) - len(con_error)
+            with st.container(border=True):
+                st.markdown(f"**Revisión antes de guardar** · ✅ {listos} listo(s) · "
+                            f"{'❌ ' + str(len(con_error)) + ' por corregir' if con_error else 'sin observaciones'}")
+                for etiqueta, errores, avisos in revision.values():
+                    for err in errores:
+                        st.error(f"❌ {etiqueta} — {err}")
+                    for av in avisos:
+                        st.info(f"🧹 {etiqueta} — {av}")
+                if con_error:
+                    st.caption("Las filas con ❌ no se guardan hasta corregirlas; las demás sí.")
         b1, b2 = st.columns([3, 1])
         guardar = b1.button(f"💾 Guardar cambios ({len(pendientes)} caso(s) editado(s))", type="primary",
                             disabled=not pendientes, use_container_width=True, key=f"cob_guardar_{firma}")
@@ -911,6 +1039,39 @@ def _tab_indicadores(dfp: pd.DataFrame, dfa: pd.DataFrame, ctx: dict):
         return
     k = R.kpis(dfp)
     _render_kpis(k)
+    _render_dashboard(dfp, k)
+
+    cols_cliente = {"cod_cliente": "Código", "nombre_cliente": "Cliente", "celular_cliente": "Celular",
+                    "razon_social": "Partner", R.COL_RESP_BO: "Responsable BO"}
+    s1, s2 = st.columns(2)
+    with s1:
+        st.markdown('<div class="cob-sec">🟣 Seguimiento de compromisos de pago</div>', unsafe_allow_html=True)
+        comp = dfp[dfp["_ESTADO"].isin([R.E_COMPROMISO, R.E_COMPROMISO_VENCIDO])]
+        if comp.empty:
+            st.caption("Sin compromisos de pago abiertos.")
+        else:
+            hoy = _hoy()
+            tabla = comp[list(cols_cliente)].rename(columns=cols_cliente)
+            fechas = comp["_COMPROMISO"].map(R.parse_fecha)
+            tabla.insert(0, "Situación", comp["_ESTADO"].map(_etiqueta_estado).values)
+            tabla.insert(1, "Fecha compromiso", pd.to_datetime(fechas, errors="coerce").values)
+            tabla.insert(2, "Días", [(f - hoy).days if f else None for f in fechas])
+            st.dataframe(tabla.sort_values("Fecha compromiso"), hide_index=True, use_container_width=True,
+                         height=min(320, 38 + 35 * len(tabla)),
+                         column_config={"Fecha compromiso": st.column_config.DateColumn(format="DD/MM/YYYY"),
+                                        "Días": st.column_config.NumberColumn(
+                                            help="Días para el compromiso (negativo = vencido)")})
+    with s2:
+        st.markdown('<div class="cob-sec">🟢 Clientes que ya pagaron</div>', unsafe_allow_html=True)
+        pag = dfp[dfp["_ESTADO"] == R.E_PAGADO]
+        if pag.empty:
+            st.caption("Aún no hay clientes con pago registrado.")
+        else:
+            tabla = pag[list(cols_cliente)].rename(columns=cols_cliente)
+            tabla.insert(0, "Pagó en", [f"Contacto {int(n)}" if n else "—" for n in pag["_N"]])
+            tabla.insert(1, "Fecha", pag["_ULT_FECHA"].values)
+            st.dataframe(tabla, hide_index=True, use_container_width=True,
+                         height=min(320, 38 + 35 * len(tabla)))
 
     c1, c2 = st.columns(2)
     with c1:
@@ -1041,7 +1202,8 @@ def _tab_descargas(dfp: pd.DataFrame, dfa: pd.DataFrame, ctx: dict, periodo: str
 
 
 def mostrar_cobranza(razon=None):
-    st.markdown(CSS + HEADER, unsafe_allow_html=True)
+    st.markdown(CSS, unsafe_allow_html=True)
+    st.markdown(HEADER, unsafe_allow_html=True)
     rol = st.session_state.get("rol", "")
     usuario = st.session_state.get("usuario", "") or "sin_usuario"
     es_bo = rol == "backoffice"
