@@ -10,7 +10,7 @@ import streamlit as st
 from auth import cargar_usuarios
 from certificados import validar_certificado_aprobado
 from concurrencia import LOCK_ALTAS, intentar_lock_sheet
-from zonas import lista_zonas_agrupadas
+from zonas import lista_zonas_agrupadas, zonas_disponibles, zona_excepcion
 
 # Cargos de promotor por canal: a estos cargos (y solo a estos) se les exige
 # contrato + DNI en OneDrive y certificado de evaluación aprobado. Supervisor,
@@ -1243,10 +1243,21 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
                 st.session_state[k("distrito")] = ""
             distrito = st.selectbox("DISTRITO", [""] + distritos, key=k("distrito"))
 
-            # Zona Agrupada: selector dinámico desde el Excel de ubigeos (data/).
-            # st.selectbox ya filtra al escribir (ej. "Lima" muestra LIMA NORTE,
-            # LIMA SUR, etc.), no requiere un componente aparte.
-            zona_agrupada = st.selectbox("ZONA AGRUPADA", [""] + lista_zonas_agrupadas(), key=k("zona_agrupada"))
+            # Zona Agrupada: filtrada por Departamento → Provincia → Distrito
+            # (zonas.py cruza esa ubicación contra el Excel de ubigeos). La
+            # Libertad y Amazonas tienen zona fija por regla de negocio, que no
+            # coincide con el mapeo geográfico del Excel. Confirmado 06/11/2026.
+            opciones_zona = zonas_disponibles(departamento, provincia, distrito)
+            zona_fija = zona_excepcion(departamento)
+            if zona_fija:
+                st.session_state[k("zona_agrupada")] = zona_fija
+                zona_agrupada = st.selectbox(
+                    "ZONA AGRUPADA", [zona_fija], key=k("zona_agrupada"), disabled=True,
+                    help=f"{departamento} usa siempre la zona {zona_fija} (regla de negocio).")
+            else:
+                if st.session_state.get(k("zona_agrupada"), "") not in [""] + opciones_zona:
+                    st.session_state[k("zona_agrupada")] = ""
+                zona_agrupada = st.selectbox("ZONA AGRUPADA", [""] + opciones_zona, key=k("zona_agrupada"))
 
             # Jerarquía: Coordinador es el rango más alto, no reporta a nadie
             # — no tiene sentido pedirle que se elija un Coordinador a sí

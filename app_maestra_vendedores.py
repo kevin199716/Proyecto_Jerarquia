@@ -13,6 +13,7 @@ from concurrencia import obtener_hoja_locks
 from formulario import mostrar_formulario
 from asistencia import mostrar_asistencia
 from cobranza_calidad import mostrar_cobranza
+from actualizacion_zonas import mostrar_actualizacion_zonas
 from wow_theme import inject_global_theme, render_app_header, render_sidebar_user, render_sidebar_help, wow_section
 
 st.set_page_config(page_title="WOW", page_icon="🟣", layout="wide", initial_sidebar_state="expanded")
@@ -49,15 +50,15 @@ hoja_locks = obtener_hoja_locks("maestra_vendedores", "LOCKS_ALTA")
 render_sidebar_user(usuario=usuario, rol=rol, razon=razon)
 
 if rol == "backoffice":
-    opciones_menu = ["Alta", "Bajas", "Presencialidad Dealer", "Cobranza_Calidad"]
+    opciones_menu = ["Alta", "Bajas", "Presencialidad Dealer", "Cobranza_Calidad", "Actualización de Zonas"]
 elif rol == "dealer":
-    opciones_menu = ["Alta", "Bajas", "Presencialidad Dealer", "Cobranza_Calidad"]
+    opciones_menu = ["Alta", "Bajas", "Presencialidad Dealer", "Cobranza_Calidad", "Actualización de Zonas"]
 elif rol == "capacitacion":
     opciones_menu = ["Alta"]
 elif rol == "presencialidad_basico":
     opciones_menu = ["Alta", "Bajas", "Presencialidad Dealer"]
 elif rol in ("presencialidad", "presencialidad_dealer"):
-    opciones_menu = ["Alta", "Bajas", "Presencialidad Dealer", "Cobranza_Calidad"]
+    opciones_menu = ["Alta", "Bajas", "Presencialidad Dealer", "Cobranza_Calidad", "Actualización de Zonas"]
 elif rol == "editor":
     opciones_menu = ["Edición", "Presencialidad Dealer"]
 else:
@@ -104,6 +105,8 @@ if rol == "backoffice":
         mostrar_matriz_jerarquia()
     elif pagina == "Cobranza_Calidad":
         mostrar_cobranza(razon)
+    elif pagina == "Actualización de Zonas":
+        mostrar_actualizacion_zonas(hoja_colaboradores, hoja_ubicaciones, razon)
 
 # DEALER
 elif rol == "dealer":
@@ -121,6 +124,8 @@ elif rol == "dealer":
         mostrar_matriz_jerarquia()
     elif pagina == "Cobranza_Calidad":
         mostrar_cobranza(razon)
+    elif pagina == "Actualización de Zonas":
+        mostrar_actualizacion_zonas(hoja_colaboradores, hoja_ubicaciones, razon)
 
 # CAPACITACIÓN — SOLO ALTAS
 elif rol == "capacitacion":
@@ -161,6 +166,8 @@ elif rol in ("presencialidad", "presencialidad_dealer"):
             mostrar_matriz_jerarquia()
         elif pagina == "Cobranza_Calidad":
             mostrar_cobranza(razon)
+        elif pagina == "Actualización de Zonas":
+            mostrar_actualizacion_zonas(hoja_colaboradores, hoja_ubicaciones, razon)
 
 # EDITOR
 elif rol == "editor":

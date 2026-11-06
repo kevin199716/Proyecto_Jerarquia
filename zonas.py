@@ -31,3 +31,59 @@ def lista_zonas_agrupadas() -> list[str]:
     if df.empty or "ZONA_AGRUPADA" not in df.columns:
         return []
     return sorted(z for z in df["ZONA_AGRUPADA"].dropna().unique().tolist() if z and z.upper() != "NAN")
+
+
+# Excepciones de negocio: fuerzan una única zona agrupada para TODO el
+# departamento, aunque no coincida con el mapeo geográfico del Excel (p. ej.
+# Amazonas mapea geográficamente a la zona "AMAZONAS", pero el negocio pide
+# que use "CAJAMARCA"). Confirmado 06/11/2026.
+EXCEPCIONES_DEPARTAMENTO = {
+    "LA LIBERTAD": "CHICLAYO",
+    "AMAZONAS": "CAJAMARCA",
+}
+
+_TILDES = (("Á", "A"), ("É", "E"), ("Í", "I"), ("Ó", "O"), ("Ú", "U"), ("Ñ", "N"))
+
+
+def _normalizar(s) -> str:
+    s = str(s or "").strip().upper()
+    for a, b in _TILDES:
+        s = s.replace(a, b)
+    return " ".join(s.split())
+
+
+def zona_excepcion(departamento: str) -> str:
+    """Zona agrupada fija para un departamento con regla de negocio especial, o '' si no aplica."""
+    return EXCEPCIONES_DEPARTAMENTO.get(_normalizar(departamento), "")
+
+
+def _zonas_unicas(df: pd.DataFrame) -> list[str]:
+    return sorted(z for z in df["ZONA_AGRUPADA"].dropna().unique().tolist() if z and z.upper() != "NAN")
+
+
+def zonas_disponibles(departamento: str, provincia: str = "", distrito: str = "") -> list[str]:
+    """
+    Zonas agrupadas válidas para una ubicación, de más a menos específico:
+    excepción de departamento > distrito > provincia > departamento > (sin filtrar).
+    El departamento manda; provincia y distrito solo afinan dentro de él.
+    """
+    excepcion = zona_excepcion(departamento)
+    if excepcion:
+        return [excepcion]
+    df = leer_ubigeos()
+    if df.empty or "ZONA_AGRUPADA" not in df.columns or "DEPARTAMENTO" not in df.columns or not departamento:
+        return lista_zonas_agrupadas()
+    df_dep = df[df["DEPARTAMENTO"].map(_normalizar) == _normalizar(departamento)]
+    if df_dep.empty:
+        # El departamento no está en el Excel de ubigeos habilitados: no se puede
+        # restringir con certeza, se deja la lista completa en vez de bloquear.
+        return lista_zonas_agrupadas()
+    if distrito and "DISTRITO" in df_dep.columns:
+        df_dist = df_dep[df_dep["DISTRITO"].map(_normalizar) == _normalizar(distrito)]
+        if not df_dist.empty:
+            return _zonas_unicas(df_dist)
+    if provincia and "PROVINCIA" in df_dep.columns:
+        df_prov = df_dep[df_dep["PROVINCIA"].map(_normalizar) == _normalizar(provincia)]
+        if not df_prov.empty:
+            return _zonas_unicas(df_prov)
+    return _zonas_unicas(df_dep)
