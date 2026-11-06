@@ -1,9 +1,10 @@
 """Reglas puras del módulo de Actualización de Zonas (sin dependencias de Streamlit)."""
 from datetime import date
 
-# Ventana mensual de actualización: día 3 00:00 al día 8 23:59. Confirmado 06/11/2026.
+# Ventana mensual de actualización: día 3 00:00 al día 6 23:59. Confirmado 06/11/2026
+# (ajustado de día 8 a día 6 el mismo día).
 DIA_INICIO = 3
-DIA_FIN = 8
+DIA_FIN = 6
 
 CAMPOS = ["DEPARTAMENTO", "PROVINCIA", "DISTRITO", "ZONA_AGRUPADA"]
 
