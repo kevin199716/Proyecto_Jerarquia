@@ -167,7 +167,8 @@ def _panel_edicion(fila: dict, df_ubi: pd.DataFrame, hoja_colaboradores, ctx: di
     if zona_fija:
         st.session_state[f"{pref}_zona"] = zona_fija
         zona = st.selectbox("ZONA AGRUPADA", [zona_fija], key=f"{pref}_zona", disabled=True,
-                            help=f"{departamento} usa siempre la zona {zona_fija} (regla de negocio).")
+                            help=f"{departamento} usa siempre la zona {zona_fija} (regla de negocio, "
+                                 "no depende del distrito).")
     else:
         opciones_zona = zonas_disponibles(departamento, provincia, distrito)
         zona = _select_cascada("ZONA AGRUPADA", opciones_zona, f"{pref}_zona", zona_ini)

@@ -34,12 +34,12 @@ def lista_zonas_agrupadas() -> list[str]:
 
 
 # Excepciones de negocio: fuerzan una única zona agrupada para TODO el
-# departamento, aunque no coincida con el mapeo geográfico del Excel (p. ej.
-# Amazonas mapea geográficamente a la zona "AMAZONAS", pero el negocio pide
-# que use "CAJAMARCA"). Confirmado 06/11/2026.
+# departamento, aunque no coincida con el mapeo geográfico del Excel.
+# Amazonas NO es excepción: usa su zona real ("AMAZONAS", ya resuelta por el
+# filtro normal contra el Excel) — corregido 06/11/2026, se había forzado
+# "CAJAMARCA" por error.
 EXCEPCIONES_DEPARTAMENTO = {
     "LA LIBERTAD": "CHICLAYO",
-    "AMAZONAS": "CAJAMARCA",
 }
 
 _TILDES = (("Á", "A"), ("É", "E"), ("Í", "I"), ("Ó", "O"), ("Ú", "U"), ("Ñ", "N"))

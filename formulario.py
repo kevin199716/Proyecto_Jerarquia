@@ -1245,8 +1245,8 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
 
             # Zona Agrupada: filtrada por Departamento → Provincia → Distrito
             # (zonas.py cruza esa ubicación contra el Excel de ubigeos). La
-            # Libertad y Amazonas tienen zona fija por regla de negocio, que no
-            # coincide con el mapeo geográfico del Excel. Confirmado 06/11/2026.
+            # Libertad tiene zona fija por regla de negocio (Chiclayo), que no
+            # coincide con su mapeo geográfico en el Excel. Confirmado 06/11/2026.
             opciones_zona = zonas_disponibles(departamento, provincia, distrito)
             zona_fija = zona_excepcion(departamento)
             if zona_fija:
