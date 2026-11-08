@@ -34,8 +34,8 @@ TTL_LISTAS = 600
 TTL_HISTORIAL = 120
 
 HORARIOS_DEFECTO = ["8AM - 12PM", "12PM - 3PM", "3PM - 6PM", "6PM - Cierre"]
-MEDIOS_DEFECTO = ["Llamada de voz", "Whatsapp", "Campo"]
-MOTIVOS_DEFECTO = ["Problema técnico", "Error en facturación", "Económicos"]
+MEDIOS_DEFECTO = ["Llamada de voz", "WhatsApp", "Medio presencial"]
+MOTIVOS_DEFECTO = ["Problemas técnicos", "Error de facturación", "Problemas económicos", R.MOTIVO_RECLAMO]
 
 COLOR_EFECTIVO = "#2a78d6"
 COLOR_NO_EFECTIVO = "#eb6834"
@@ -203,7 +203,7 @@ def _cargar_listas() -> dict:
     except Exception:
         valores = []
     if len(valores) < 2:
-        return {"bo": {}, "medio": MEDIOS_DEFECTO, "horario": HORARIOS_DEFECTO, "motivo": MOTIVOS_DEFECTO}
+        return {"medio": MEDIOS_DEFECTO, "horario": HORARIOS_DEFECTO, "motivo": MOTIVOS_DEFECTO}
     df = pd.DataFrame(valores[1:], columns=_columnas_unicas(valores[0]))
 
     def unicos(c, defecto):
@@ -211,13 +211,7 @@ def _cargar_listas() -> dict:
             return defecto
         return sorted({x for x in df[c].astype(str).str.strip() if x}) or defecto
 
-    bo: dict[str, list[str]] = defaultdict(list)
-    if "RESPONSABLE_BO" in df.columns:
-        for razon, resp in zip(df.get("Listas", pd.Series([""] * len(df))), df["RESPONSABLE_BO"]):
-            resp = str(resp).strip()
-            if resp and resp not in bo[_nr(razon)]:
-                bo[_nr(razon)].append(resp)
-    return {"bo": {k: sorted(v) for k, v in bo.items()}, "medio": unicos("MEDIO", MEDIOS_DEFECTO),
+    return {"medio": unicos("MEDIO", MEDIOS_DEFECTO),
             "horario": unicos("HORARIO", HORARIOS_DEFECTO), "motivo": unicos("MOTIVO_NO_PAGO", MOTIVOS_DEFECTO)}
 
 
@@ -655,23 +649,15 @@ def _form_interaccion(prefijo: str, n: int, base: dict, fila: dict, listas: dict
         op, i = _opciones(listas["medio"], base.get("MEDIO", ""))
         medio = st.selectbox("📞 Medio", op, index=i, key=f"{prefijo}_medio")
 
-    c4, c5 = st.columns(2)
-    with c4:
-        op_tipo = ["", R.EFECTIVO, R.NO_EFECTIVO]
-        t_ini = base.get("TIPO CONTACTO", "")
-        tipo = st.selectbox("🎯 Tipo de contacto", op_tipo,
-                            index=op_tipo.index(t_ini) if t_ini in op_tipo else 0,
-                            format_func=lambda x: {"": "— Selecciona —", R.EFECTIVO: "🟦 EFECTIVO",
-                                                   R.NO_EFECTIVO: "🟧 NO EFECTIVO"}[x],
-                            key=f"{prefijo}_tipo")
-    accion = ""
-    with c5:
-        if tipo:
-            op, i = _opciones(R.ACCIONES[tipo], base.get("ACCIÓN", "") if base.get("TIPO CONTACTO") == tipo else "")
-            accion = st.selectbox("📝 Resultado / acción", op, index=i, key=f"{prefijo}_accion_{tipo}")
-        else:
-            st.selectbox("📝 Resultado / acción", ["Primero elige el tipo de contacto"], disabled=True,
-                         key=f"{prefijo}_accion_vacio")
+    todas_las_acciones = R.ACCIONES[R.EFECTIVO] + R.ACCIONES[R.NO_EFECTIVO]
+    op, i = _opciones(todas_las_acciones, base.get("ACCIÓN", ""))
+    accion = st.selectbox("📝 Resultado", op, key=f"{prefijo}_accion", index=i)
+    if accion:
+        tipo = R.tipo_de_accion(accion)
+        st.caption(f"🎯 Tipo: {'🟦 EFECTIVO' if tipo == R.EFECTIVO else '🟧 NO EFECTIVO'} "
+                   "(se clasifica solo según el resultado elegido).")
+    else:
+        tipo = ""
 
     f_comp, motivo = None, ""
     if accion == R.ACCION_COMPROMISO:
@@ -679,29 +665,24 @@ def _form_interaccion(prefijo: str, n: int, base: dict, fila: dict, listas: dict
         f_comp = st.date_input("📆 Fecha de compromiso de pago (obligatoria)", value=max(fc_ini, fecha), min_value=fecha,
                                format="DD/MM/YYYY", key=f"{prefijo}_fcomp")
         st.caption("🟣 El caso queda en **Compromiso de pago**. Si vence sin pago, pasa a requerir nuevo contacto.")
+    codigo_reclamo = ""
     if accion in R.REQUIERE_MOTIVO:
         op, i = _opciones(listas["motivo"], base.get("MOTIVO DE NO PAGO", ""))
         motivo = st.selectbox("❓ Motivo de no pago (obligatorio)", op, index=i, key=f"{prefijo}_motivo")
-    if accion == R.ACCION_PAGO:
-        st.caption("🟢 **Ya pagó** finaliza el caso automáticamente: no se habilitan más contactos.")
-    c6, c7 = st.columns([1, 2])
-    with c6:
-        hay_reclamo = st.checkbox("📌 ¿Hubo reclamo?", value=R._es_si(base.get("HAY RECLAMO")),
-                                   key=f"{prefijo}_reclamo")
-    codigo_reclamo = ""
-    with c7:
-        if hay_reclamo:
+        if motivo == R.MOTIVO_RECLAMO:
             codigo_reclamo = st.text_input("Código de reclamo (opcional, si lo tienes)",
                                            value=base.get("CÓDIGO RECLAMO", ""), max_chars=60,
                                            key=f"{prefijo}_reclamo_cod")
+    if accion == R.ACCION_PAGO:
+        st.caption("🟢 **Ya pagó** se registra como contacto; el caso se bloquea solo cuando el "
+                   "servidor confirme el pago.")
 
     obs_label = "🗒️ Detalle (obligatorio)" if accion in R.REQUIERE_OBSERVACION else "🗒️ Observación (opcional)"
     observacion = st.text_area(obs_label, value=base.get("OBSERVACIÓN", ""), max_chars=500, height=70,
                                key=f"{prefijo}_obs")
     return {"FECHA": fecha, "HORARIO": horario, "MEDIO": medio, "TIPO CONTACTO": tipo, "ACCIÓN": accion,
             "FECHA COMPROMISO": f_comp, "MOTIVO DE NO PAGO": motivo,
-            "HAY RECLAMO": "SI" if hay_reclamo else "", "CÓDIGO RECLAMO": codigo_reclamo,
-            "OBSERVACIÓN": observacion}
+            "CÓDIGO RECLAMO": codigo_reclamo, "OBSERVACIÓN": observacion}
 
 
 def _datos_interaccion(fila: dict, n: int) -> dict:
@@ -735,7 +716,7 @@ def _render_interacciones(fila: dict, n_reg: int):
             extras.append(f"Compromiso: <b>{_e(d['FECHA COMPROMISO'])}</b>")
         if d["MOTIVO DE NO PAGO"]:
             extras.append(f"Motivo: <b>{_e(d['MOTIVO DE NO PAGO'])}</b>")
-        if R._es_si(d.get("HAY RECLAMO")):
+        if d.get("MOTIVO DE NO PAGO") == R.MOTIVO_RECLAMO:
             cod = d.get("CÓDIGO RECLAMO") or "sin código"
             extras.append(f'<span class="cob-reclamo">📌 Reclamo: {_e(cod)}</span>')
         if d["OBSERVACIÓN"]:
@@ -833,10 +814,6 @@ def _panel_caso(id_caso: str, ctx: dict):
                     if errs:
                         raise ValidacionError(errs)
                     cambios = R.valores_interaccion(datos, n, ctx["usuario"], _ts())
-                    if datos["ACCIÓN"] == R.ACCION_PAGO:
-                        cambios.update({R.COL_MOTIVO_CIERRE: f"{R.ACCION_PAGO} (interacción {n})",
-                                        R.COL_DETALLE_CIERRE: "", R.COL_USUARIO_CIERRE: ctx["usuario"],
-                                        R.COL_FECHA_CIERRE: _ts()})
                     return cambios, "REGISTRO_INTERACCION", n
                 _ejecutar_guardado(caso, preparar, ctx, f"Interacción {n} registrada.")
     elif not finalizado:
@@ -902,13 +879,6 @@ def _herramientas_bo(caso: dict, n_reg: int, ctx: dict, listas: dict, pref: str)
                 cambios = R.valores_interaccion(datos, k, "", "")
                 cambios.pop(R.col_usuario(k))
                 cambios.pop(R.col_timestamp(k))
-                motivo_cierre = actual.get(R.COL_MOTIVO_CIERRE, "")
-                if datos["ACCIÓN"] == R.ACCION_PAGO and not motivo_cierre:
-                    cambios.update({R.COL_MOTIVO_CIERRE: f"{R.ACCION_PAGO} (interacción {k})",
-                                    R.COL_USUARIO_CIERRE: ctx["usuario"], R.COL_FECHA_CIERRE: _ts()})
-                elif datos["ACCIÓN"] != R.ACCION_PAGO and motivo_cierre.startswith(R.ACCION_PAGO):
-                    cambios.update({c: "" for c in [R.COL_MOTIVO_CIERRE, R.COL_DETALLE_CIERRE,
-                                                     R.COL_USUARIO_CIERRE, R.COL_FECHA_CIERRE]})
                 return cambios, "CORRECCION_INTERACCION", k
             _ejecutar_guardado(caso, preparar, ctx, f"Interacción {k} corregida.")
 
@@ -916,31 +886,35 @@ def _herramientas_bo(caso: dict, n_reg: int, ctx: dict, listas: dict, pref: str)
 COLUMNAS_FIJAS_TABLA = ["Estado", "Avance", "Siguiente", "Código", "Cliente", "Celular", "Estado pago", "Partner"]
 
 
-def _siguiente(estado: str, n: int, motivo_cierre: str = "") -> str:
+def _siguiente(estado: str, n: int, estado_pago: str = "") -> str:
     if estado == R.E_PAGADO:
-        if "validado en servidor" in motivo_cierre:
-            return "🔒 Pagado (servidor)"
-        return "🏁 Pagó · cerrado"
+        return "🔒 Pagado (fuente)" if estado_pago == "Pagado" else "🏁 Pagó · cerrado"
     if estado in R.ESTADOS_FINALIZADOS:
         return "🏁 Cerrado"
     if n >= R.N_INT:
         return "🟡 Finalizar caso"
     return f"➜ Completar C{n + 1}"
-COLUMNAS_EDITABLES_TABLA = [R.COL_RESP_BO] + [R.col(c, n) for n in range(1, R.N_INT + 1) for c in R.CAMPOS]
 ETIQUETAS_CAMPO = {"FECHA": "📅 Fecha", "HORARIO": "🕐 Horario", "MEDIO": "📞 Medio", "TIPO CONTACTO": "🎯 Tipo",
-                   "ACCIÓN": "📝 Resultado", "FECHA COMPROMISO": "📆 F. compromiso",
-                   "MOTIVO DE NO PAGO": "❓ Motivo no pago", "HAY RECLAMO": "📌 ¿Reclamo?",
+                   "ACCIÓN": "📝 Resultado", "FECHA COMPROMISO": "📆 Compromiso",
+                   "MOTIVO DE NO PAGO": "❓ Motivo no pago",
                    "CÓDIGO RECLAMO": "🔖 Cód. reclamo", "OBSERVACIÓN": "🗒️ Observación"}
 AYUDA_CAMPO = {
-    "TIPO CONTACTO": "Elige primero el tipo: define qué resultados son válidos.",
+    "TIPO CONTACTO": "Se clasifica solo según el resultado elegido: no se elige a mano.",
     "ACCIÓN": (f"EFECTIVO: {', '.join(R.ACCIONES[R.EFECTIVO])}. "
-               f"NO EFECTIVO: {', '.join(R.ACCIONES[R.NO_EFECTIVO])}. 'Ya pagó' cierra el caso."),
+               f"NO EFECTIVO: {', '.join(R.ACCIONES[R.NO_EFECTIVO])}. "
+               "'Ya pagó' se registra como contacto; el caso se bloquea solo cuando el "
+               "servidor confirme el pago."),
     "FECHA COMPROMISO": f"Solo para '{R.ACCION_COMPROMISO}' (obligatoria). En otro resultado se descarta.",
     "MOTIVO DE NO PAGO": f"Solo para '{R.ACCION_NO_PAGARA}' (obligatorio). En otro resultado se descarta.",
-    "HAY RECLAMO": "Nunca es obligatorio. Marca si el cliente puso un reclamo en este contacto.",
-    "CÓDIGO RECLAMO": "Opcional, solo si hubo reclamo y ya tienes el código. Si no hay reclamo, se descarta.",
+    "CÓDIGO RECLAMO": f"Solo si el motivo es '{R.MOTIVO_RECLAMO}' (opcional). En otro motivo se descarta.",
     "OBSERVACIÓN": "Obligatoria para 'Otros: detallar'.",
 }
+
+
+def _etiqueta_estado_pago(estado_pago: str, inconsistente: bool) -> str:
+    if inconsistente:
+        return f"⚠️ {estado_pago or 'Pendiente'} (promotor marcó pagado)"
+    return estado_pago
 
 
 def _tabla_contactos(base: pd.DataFrame) -> pd.DataFrame:
@@ -948,14 +922,14 @@ def _tabla_contactos(base: pd.DataFrame) -> pd.DataFrame:
     g = pd.DataFrame({
         "Estado": base["_ESTADO"].map(_etiqueta_estado).values,
         "Avance": base["_N"].astype(int).values,
-        "Siguiente": [_siguiente(e, int(n), m) for e, n, m in
-                      zip(base["_ESTADO"], base["_N"], base[R.COL_MOTIVO_CIERRE])],
+        "Siguiente": [_siguiente(e, int(n), ep) for e, n, ep in
+                      zip(base["_ESTADO"], base["_N"], base["Estado_Pago"])],
         "Código": base["cod_cliente"].values,
         "Cliente": base["nombre_cliente"].values,
         "Celular": base["celular_cliente"].values,
-        "Estado pago": base["Estado_Pago"].values,
+        "Estado pago": [_etiqueta_estado_pago(ep, inc) for ep, inc in
+                        zip(base["Estado_Pago"], base["_INCONSISTENCIA_PAGO"])],
         "Partner": base["razon_social"].values,
-        R.COL_RESP_BO: base[R.COL_RESP_BO].values,
     })
     for n in range(1, R.N_INT + 1):
         for c in R.CAMPOS:
@@ -966,7 +940,7 @@ def _tabla_contactos(base: pd.DataFrame) -> pd.DataFrame:
     return g
 
 
-def _config_tabla(base: pd.DataFrame, listas: dict, responsables: list[str]) -> dict:
+def _config_tabla(base: pd.DataFrame, listas: dict) -> dict:
     def opciones(lista, campo):
         existentes = {v for n in range(1, R.N_INT + 1) for v in base[R.col(campo, n)].unique() if v}
         return list(dict.fromkeys(list(lista) + sorted(existentes - set(lista))))
@@ -975,48 +949,42 @@ def _config_tabla(base: pd.DataFrame, listas: dict, responsables: list[str]) -> 
     acciones = R.ACCIONES[R.EFECTIVO] + R.ACCIONES[R.NO_EFECTIVO]
     opciones_campo = {"HORARIO": opciones(listas["horario"], "HORARIO"),
                       "MEDIO": opciones(listas["medio"], "MEDIO"),
-                      "TIPO CONTACTO": opciones([R.EFECTIVO, R.NO_EFECTIVO], "TIPO CONTACTO"),
                       "ACCIÓN": opciones(acciones, "ACCIÓN"),
                       "MOTIVO DE NO PAGO": opciones(listas["motivo"], "MOTIVO DE NO PAGO")}
     cfg = {
-        "Estado": st.column_config.TextColumn("📋 Estado", width="medium"),
+        "Estado": st.column_config.TextColumn("📋 Estado", width="small"),
         "Siguiente": st.column_config.TextColumn("➜ Siguiente paso", width="small"),
-        "Avance": st.column_config.ProgressColumn("📊 Avance", min_value=0, max_value=R.N_INT, format=f"%d/{R.N_INT}"),
+        "Avance": st.column_config.ProgressColumn("📊 Avance", min_value=0, max_value=R.N_INT,
+                                                   format=f"%d/{R.N_INT}", width="small"),
         "Código": st.column_config.TextColumn("🔢 Código", width="small"),
         "Cliente": st.column_config.TextColumn("👤 Cliente", width="medium"),
         "Celular": st.column_config.TextColumn("📱 Celular", width="small"),
         "Estado pago": st.column_config.TextColumn("💳 Estado pago", width="small"),
         "Partner": st.column_config.TextColumn("🏢 Partner", width="small"),
-        R.COL_RESP_BO: st.column_config.SelectboxColumn("👔 Responsable BO", options=responsables),
     }
     for n in range(1, R.N_INT + 1):
         for c in R.CAMPOS:
             etiqueta = f"C{n} · {ETIQUETAS_CAMPO[c]}"
             ayuda = AYUDA_CAMPO.get(c)
-            if c in R.CAMPOS_FECHA:
+            if c == "TIPO CONTACTO":
+                cfg[R.col(c, n)] = st.column_config.TextColumn(etiqueta, width="small", help=ayuda)
+            elif c in R.CAMPOS_FECHA:
                 cfg[R.col(c, n)] = st.column_config.DateColumn(etiqueta, format="DD/MM/YYYY", help=ayuda)
             elif c in ("OBSERVACIÓN", "CÓDIGO RECLAMO"):
                 limite = 500 if c == "OBSERVACIÓN" else 60
                 cfg[R.col(c, n)] = st.column_config.TextColumn(etiqueta, max_chars=limite, help=ayuda)
-            elif c == "HAY RECLAMO":
-                cfg[R.col(c, n)] = st.column_config.SelectboxColumn(etiqueta, options=["", "SI"],
-                                                                    width="small", help=ayuda)
             else:
                 cfg[R.col(c, n)] = st.column_config.SelectboxColumn(
                     etiqueta, options=opciones_campo[c], width="medium" if c == "ACCIÓN" else "small", help=ayuda)
     return cfg
 
 
-def _revisar_ediciones(base: pd.DataFrame, editado: pd.DataFrame, pendientes: dict, ctx: dict,
-                       cols_visibles: list[str]) -> dict:
-    """Revisión en vivo (sin tocar el Drive): {pos: (etiqueta, errores, avisos)} por fila editada.
-    `cols_visibles` son las columnas editables que están en pantalla (según el selector de
-    columnas); las que no están visibles se toman del dato original, nunca como vacías."""
+def _revisar_ediciones(base: pd.DataFrame, editado: pd.DataFrame, pendientes: dict, ctx: dict) -> dict:
+    """Revisión en vivo (sin tocar el Drive): {pos: (etiqueta, errores, avisos)} por fila editada."""
     hoy, revision = _hoy(), {}
     for pos in sorted(int(p) for p in pendientes):
         original = base.iloc[pos].to_dict()
-        fila = editado.iloc[pos]
-        nuevo = {**original, **{c: fila[c] for c in cols_visibles}}
+        nuevo = editado.iloc[pos].to_dict()
         _, _, errores = R.procesar_edicion(original, nuevo, original, ctx["es_bo"], ctx["usuario"], "", hoy)
         avisos = []
         for n in range(1, R.N_INT + 1):
@@ -1028,31 +996,36 @@ def _revisar_ediciones(base: pd.DataFrame, editado: pd.DataFrame, pendientes: di
     return revision
 
 
-def _tab_gestion(dfp: pd.DataFrame, ctx: dict, periodo: str, editable: bool):
+def _tab_gestion(dfp: pd.DataFrame, dfa: pd.DataFrame, ctx: dict, periodo: str, editable: bool):
     k = R.kpis(dfp)
     _render_kpis(k)
     _render_dashboard(dfp, k)
 
-    f1, f2, f3 = st.columns([2, 2, 1.4])
+    f1, f2, f3, f4 = st.columns([1.6, 1.6, 2, 1.4])
     with f1:
-        buscar = st.text_input("🔎 Buscar cliente", placeholder="Nombre, celular o código",
-                               key="cob_buscar").strip().lower()
+        cod_venta = st.text_input("🔎 Código de venta", key="cob_cod_venta").strip().lower()
     with f2:
+        dni_vendedor = st.text_input("🔎 DNI del vendedor", key="cob_dni_vendedor").strip()
+    with f3:
         estados = st.multiselect("Estado del caso", R.ORDEN_ESTADOS, format_func=_etiqueta_estado,
                                  placeholder="Todos los estados", key="cob_estados")
-    with f3:
-        responsables = sorted(x for x in dfp[R.COL_RESP_BO].unique() if x)
-        resp = st.selectbox("Responsable BO", ["TODOS"] + responsables, key="cob_resp")
+    with f4:
+        pagos_disponibles = sorted(x for x in dfp["Estado_Pago"].unique() if x)
+        estados_pago = st.multiselect("💳 Estado de pago", pagos_disponibles,
+                                      placeholder="Todos", key="cob_estados_pago")
 
     dfv = dfp
-    if buscar:
-        texto = (dfv["nombre_cliente"].str.lower() + " " + dfv["celular_cliente"] + " "
-                 + dfv["cod_cliente"].str.lower())
-        dfv = dfv[texto.str.contains(buscar, regex=False, na=False)]
+    if cod_venta:
+        dfv = dfv[dfv["cod_cliente"].str.lower().str.contains(cod_venta, regex=False, na=False)]
+    if dni_vendedor:
+        if "dni_creador_lead" in dfv.columns:
+            dfv = dfv[dfv["dni_creador_lead"].str.contains(dni_vendedor, regex=False, na=False)]
+        else:
+            dfv = dfv.iloc[0:0]
     if estados:
         dfv = dfv[dfv["_ESTADO"].isin(estados)]
-    if resp != "TODOS":
-        dfv = dfv[dfv[R.COL_RESP_BO] == resp]
+    if estados_pago:
+        dfv = dfv[dfv["Estado_Pago"].isin(estados_pago)]
     orden = {e: i for i, e in enumerate([R.E_COMPROMISO_VENCIDO, R.E_RECONTACTAR, R.E_PENDIENTE,
                                          R.E_PEND_CIERRE, R.E_EN_PROCESO, R.E_COMPROMISO,
                                          R.E_PAGADO, R.E_SIN_EXITO])}
@@ -1070,7 +1043,8 @@ def _tab_gestion(dfp: pd.DataFrame, ctx: dict, periodo: str, editable: bool):
     # La tabla trabaja sobre una foto fija hasta guardar/actualizar: así las ediciones nunca se
     # corren de fila aunque otro usuario cambie el orden de los casos mientras tanto.
     nonce = st.session_state.get("cob_nonce", 0)
-    firma = abs(hash((periodo, ctx.get("partner"), buscar, tuple(estados), resp, nonce)))
+    firma = abs(hash((periodo, ctx.get("partner"), cod_venta, dni_vendedor, tuple(estados),
+                      tuple(estados_pago), nonce)))
     clave_foto = f"cob_foto_{firma}"
     if clave_foto not in st.session_state:
         for k in [k for k in st.session_state if str(k).startswith("cob_foto_")]:
@@ -1081,44 +1055,26 @@ def _tab_gestion(dfp: pd.DataFrame, ctx: dict, periodo: str, editable: bool):
     if editable:
         st.caption(f"**{len(base)}** de {len(dfp)} casos, ordenados por prioridad. Completa los contactos "
                    "hacia la derecha (C1 → C6) con las listas desplegables y pulsa **Guardar cambios**. "
-                   f"Vista tomada a las {hora_foto}.")
+                   f"Vista tomada a las {hora_foto}. Usa el ícono ⛶ de la tabla para pantalla completa, "
+                   "y el ícono de columnas de la barra superior para mostrar u ocultar contactos/campos.")
     else:
         st.caption(f"**{len(base)}** de {len(dfp)} casos · 🔒 solo lectura.")
 
-    cc1, cc2 = st.columns([1, 2])
-    with cc1:
-        contactos_mostrar = st.multiselect(
-            "🔢 Contactos a mostrar", list(range(1, R.N_INT + 1)), default=list(range(1, R.N_INT + 1)),
-            format_func=lambda n: f"C{n}", key=f"cob_cols_n_{firma}")
-    with cc2:
-        campos_mostrar = st.multiselect(
-            "📋 Campos a mostrar", R.CAMPOS,
-            default=["FECHA", "TIPO CONTACTO", "ACCIÓN", "FECHA COMPROMISO", "HAY RECLAMO"],
-            format_func=lambda c: ETIQUETAS_CAMPO.get(c, c), key=f"cob_cols_c_{firma}")
-    st.caption("Esto solo cambia qué se ve en la tabla — los contactos y campos que no eliges "
-               "seguir viendo no se tocan ni se pierden al guardar.")
-
-    razones = {_nr(r) for r in base["razon_social"].unique()}
-    responsables = sorted({b for r in razones for b in ctx["listas"]["bo"].get(r, [])}
-                          | {x for x in base[R.COL_RESP_BO].unique() if x})
-    columnas_grid = [R.col(c, n) for n in contactos_mostrar for c in campos_mostrar]
-    columnas_tabla = COLUMNAS_FIJAS_TABLA + [R.COL_RESP_BO] + columnas_grid
+    columnas_grid = [R.col(c, n) for n in range(1, R.N_INT + 1) for c in R.CAMPOS]
+    columnas_tabla = COLUMNAS_FIJAS_TABLA + columnas_grid
     tabla_completa = _tabla_contactos(base)
-    cfg_completo = _config_tabla(base, ctx["listas"], responsables)
+    cfg_completo = _config_tabla(base, ctx["listas"])
+    deshabilitadas = COLUMNAS_FIJAS_TABLA + [R.col("TIPO CONTACTO", n) for n in range(1, R.N_INT + 1)]
     clave_editor = f"cob_tabla_{firma}"
     editado = st.data_editor(
         tabla_completa[columnas_tabla], key=clave_editor, hide_index=True, use_container_width=True, height=460,
-        num_rows="fixed", disabled=True if not editable else COLUMNAS_FIJAS_TABLA,
+        num_rows="fixed", disabled=True if not editable else deshabilitadas,
         column_config={k: v for k, v in cfg_completo.items() if k in columnas_tabla},
     )
-    # editado solo trae las columnas visibles: para no perder ni pisar los contactos/campos
-    # ocultos, cada fila a guardar se construye sobre el dato original y solo se superponen
-    # las columnas que de verdad están en pantalla.
-    cols_visibles_editables = [c for c in COLUMNAS_EDITABLES_TABLA if c in editado.columns]
 
     if editable:
         pendientes = st.session_state.get(clave_editor, {}).get("edited_rows", {})
-        revision = _revisar_ediciones(base, editado, pendientes, ctx, cols_visibles_editables) if pendientes else {}
+        revision = _revisar_ediciones(base, editado, pendientes, ctx) if pendientes else {}
         con_error = {p: r for p, r in revision.items() if r[1]}
         if revision:
             listos = len(revision) - len(con_error)
@@ -1143,8 +1099,7 @@ def _tab_gestion(dfp: pd.DataFrame, ctx: dict, periodo: str, editable: bool):
             ediciones = []
             for pos in sorted(int(p) for p in pendientes):
                 original = base.iloc[pos].to_dict()
-                fila_editada = editado.iloc[pos]
-                editado_fila = {**original, **{c: fila_editada[c] for c in cols_visibles_editables}}
+                editado_fila = editado.iloc[pos].to_dict()
                 ediciones.append((original, editado_fila))
             try:
                 with st.spinner("Validando y guardando en el Drive…"):
@@ -1162,6 +1117,9 @@ def _tab_gestion(dfp: pd.DataFrame, ctx: dict, periodo: str, editable: bool):
                 st.rerun()
             for err in errores:
                 st.error(f"❌ No se guardó — {err}")
+
+    if ctx["es_bo"]:
+        _render_vintage(dfa, ctx)
 
     st.markdown('<div class="cob-sec">🔍 Detalle del caso</div>', unsafe_allow_html=True)
     etiquetas = {i: f"{c} · {nm} · {_etiqueta_estado(e)}"
@@ -1195,7 +1153,7 @@ def _tab_indicadores(dfp: pd.DataFrame, dfa: pd.DataFrame, ctx: dict):
     _render_dashboard(dfp, k)
 
     cols_cliente = {"cod_cliente": "Código", "nombre_cliente": "Cliente", "celular_cliente": "Celular",
-                    "razon_social": "Partner", R.COL_RESP_BO: "Responsable BO"}
+                    "razon_social": "Partner"}
     s1, s2 = st.columns(2)
     with s1:
         st.markdown('<div class="cob-sec">🟣 Seguimiento de compromisos de pago</div>', unsafe_allow_html=True)
@@ -1270,43 +1228,43 @@ def _tab_indicadores(dfp: pd.DataFrame, dfa: pd.DataFrame, ctx: dict):
         st.dataframe(evo, hide_index=True, use_container_width=True)
 
     por_partner = ctx["es_bo"] and not ctx.get("partner")
-    agrupador, etiqueta = ("razon_social", "Partner") if por_partner else (R.COL_RESP_BO, "Responsable BO")
-    titulo = f"Resultados por {etiqueta.lower() if por_partner else etiqueta}"
-    filas = []
-    for clave, sub in dfp.groupby(agrupador):
-        kk = R.kpis(sub)
-        filas.append({etiqueta: clave or "(sin asignar)", "Casos": kk["total"],
-                      "Gestionados": kk["gestionados"], "% Avance": round(kk["pct_avance"], 1),
-                      "% Contactabilidad": round(kk["pct_contactabilidad"], 1),
-                      "Recontactar": kk["recontactar"], "Pendientes de cierre": kk["pend_cierre"],
-                      "Pagaron": kk["pagados"], "Finalizados": kk["finalizados"]})
-    if filas:
-        st.markdown(f"**{titulo}**")
-        st.dataframe(pd.DataFrame(filas).sort_values("Casos", ascending=False), hide_index=True,
-                     use_container_width=True)
-
-    if ctx["es_bo"]:
-        _render_vintage(dfp)
+    if por_partner:
+        filas = []
+        for clave, sub in dfp.groupby("razon_social"):
+            kk = R.kpis(sub)
+            filas.append({"Partner": clave or "(sin asignar)", "Casos": kk["total"],
+                          "Gestionados": kk["gestionados"], "% Avance": round(kk["pct_avance"], 1),
+                          "% Contactabilidad": round(kk["pct_contactabilidad"], 1),
+                          "Recontactar": kk["recontactar"], "Pendientes de cierre": kk["pend_cierre"],
+                          "Pagaron": kk["pagados"], "Finalizados": kk["finalizados"]})
+        if filas:
+            st.markdown("**Resultados por partner**")
+            st.dataframe(pd.DataFrame(filas).sort_values("Casos", ascending=False), hide_index=True,
+                         use_container_width=True)
 
 
-def _render_vintage(dfp: pd.DataFrame):
-    st.markdown('<div class="cob-sec">📊 Por vintage (VN1–VN6), por dealer y vendedor</div>',
+def _render_vintage(dfa: pd.DataFrame, ctx: dict):
+    st.markdown('<div class="cob-sec">📊 % pagados por promotor y ciclo de facturación (BN1–BN6)</div>',
                unsafe_allow_html=True)
-    st.caption("VN1 es el periodo más reciente ya cerrado según el corte real de facturación "
-               "(tb_cierre_facturacion, no un día fijo del mes), VN2 el anterior, y así hasta VN6. "
-               "\"Vendedor\" es quien activó la venta (Reporting), no quien gestiona el caso en Cobranza.")
-    df_rep, aviso_rep = PR.leer_base_vintage()
-    cierres, aviso_cierres = PR.leer_cierres_facturacion()
+    st.caption("BN1 (FPD) es el periodo más reciente ya cerrado según el corte real de facturación "
+               "(tb_cierre_facturacion, no un día fijo del mes), anclado al periodo que tienes "
+               "seleccionado arriba — BN2 el anterior, y así hasta BN6. El mismo código de venta puede "
+               "aparecer como BN1 en un periodo y BN2 al mes siguiente: es cosecha acumulada, no un "
+               "corte único. \"Vendedor\" es quien activó la venta (Reporting), no quien gestiona el "
+               "caso en Cobranza.")
+    df_rep, aviso_rep = ctx["df_rep"], ctx["aviso_rep"]
+    cierres, aviso_cierres = ctx["cierres"], ctx["aviso_cierres"]
     if aviso_rep or aviso_cierres:
-        st.info(f"🛰️ Vintage no disponible: {aviso_rep or aviso_cierres}")
+        st.info(f"🛰️ BN1–BN6 no disponible: {aviso_rep or aviso_cierres}")
         return
-    metricas = V.calcular_metricas_vintage(df_rep, dfp, cierres, _hoy())
+    metricas = V.calcular_metricas_vintage(df_rep, dfa, cierres, ctx["ancla_vintage"])
     if metricas.empty:
-        st.caption("Sin activaciones que caigan dentro de VN1–VN6 todavía.")
+        st.caption("Sin activaciones que caigan dentro de BN1–BN6 todavía.")
         return
     metrica = st.selectbox("📊 Métrica", list(V.METRICAS), format_func=lambda k: V.METRICAS[k],
-                           key="cob_vn_metrica")
+                           index=list(V.METRICAS).index("pagado"), key="cob_vn_metrica")
     piv = V.tabla_pivote(metricas, metrica)
+    piv.columns = ["BN1 (FPD)" if c == "VN1" else c.replace("VN", "BN") for c in piv.columns]
     fmt = "{:.1f}" if metrica == "prom_contactos" else "{:.1f}%"
     estilo = piv.style.format(fmt, na_rep="—")
     try:
@@ -1315,15 +1273,15 @@ def _render_vintage(dfp: pd.DataFrame):
     except ImportError:
         pass  # sin matplotlib instalado: se ve la tabla igual, solo sin el degradado de color.
     st.dataframe(estilo, use_container_width=True)
-    st.caption("VN5/VN6 salen vacíos (—) hasta que haya suficiente historia en Reporting para esos periodos.")
+    st.caption("BN5/BN6 salen vacíos (—) hasta que haya suficiente historia en Reporting para esos periodos.")
 
     st.markdown("**🏆 Ranking de vendedores por % pagado**")
-    st.caption("Mismo origen que la tabla de arriba: suma todos los VN de este vendedor (respeta el "
+    st.caption("Mismo origen que la tabla de arriba: suma todos los BN de este vendedor (respeta el "
                "ciclo real de facturación) — no es un cálculo aparte ni otra fuente de datos.")
     ranking = V.ranking_vendedores(metricas)
     st.dataframe(
         ranking.rename(columns={"razon_social": "Dealer", "vendedor": "Vendedor",
-                                "n_casos": "Casos (VN1–VN4)", "pagado": "% Pagado"}),
+                                "n_casos": "Casos (BN1–BN6)", "pagado": "% Pagado"}),
         hide_index=True, use_container_width=True,
         column_config={"% Pagado": st.column_config.ProgressColumn("% Pagado", min_value=0, max_value=100,
                                                                     format="%.1f%%")},
@@ -1424,10 +1382,22 @@ def mostrar_cobranza(razon=None):
         return
 
     if not es_bo:
-        df = df[df["razon_social"].map(_nr) == _nr(razon)]
+        df = df[df["razon_social"].map(_nr) == _nr(razon)].copy()
         if df.empty:
             st.warning(f"No hay casos asignados a {razon}.")
             return
+
+    # Se lee Reporting una sola vez acá: sirve tanto para la búsqueda por DNI de vendedor
+    # (abajo) como para la tabla BN1–BN6 al pie de la matriz — nunca se duplica la llamada.
+    df_rep, aviso_rep = PR.leer_base_vintage()
+    cierres, aviso_cierres = PR.leer_cierres_facturacion()
+    if not df_rep.empty:
+        df = df.merge(
+            df_rep[["cod_cliente", "dni_creador_lead", "nombre_creador_lead"]].drop_duplicates("cod_cliente"),
+            on="cod_cliente", how="left")
+    else:
+        df["dni_creador_lead"] = ""
+    df["dni_creador_lead"] = df["dni_creador_lead"].fillna("")
 
     _flash()
     periodos = sorted({p for p in df["PERIODO"].unique() if p}, reverse=True)
@@ -1481,15 +1451,26 @@ def mostrar_cobranza(razon=None):
     (st.success if editable and "abierto" in mensaje else st.warning if editable else st.info)(
         ("✏️ " if editable else "🔒 ") + mensaje)
 
+    # BN1 se ancla al periodo seleccionado (no a la fecha real de "hoy"): así el mismo código
+    # de venta aparece siempre con el mismo BN mientras se mira ese periodo, sin importar
+    # cuándo se abra la pantalla. Si el periodo elegido todavía no tiene corte (el vigente,
+    # p. ej.), se cae a la fecha real de hoy.
+    # El PERIODO de Cobranza usa "YYYYMM" (sin guion); tb_cierre_facturacion usa "YYYY-MM".
+    periodo_guion = f"{periodo[:4]}-{periodo[4:6]}" if len(periodo) == 6 else periodo
+    corte_periodo = next((corte for p, corte in cierres if p == periodo_guion), None)
+    ancla_vintage = corte_periodo or _hoy()
+
     ctx = {"usuario": usuario, "rol": rol, "razon": razon, "es_bo": es_bo, "partner": partner,
-           "listas": _cargar_listas(), "idx_id": headers.index(R.COL_ID) if R.COL_ID in headers else 0}
+           "listas": _cargar_listas(), "idx_id": headers.index(R.COL_ID) if R.COL_ID in headers else 0,
+           "df_rep": df_rep, "aviso_rep": aviso_rep, "cierres": cierres, "aviso_cierres": aviso_cierres,
+           "ancla_vintage": ancla_vintage}
 
     t1, t2, t3 = st.tabs(["📋 Gestión de casos", "📊 Indicadores", "⬇️ Descargas e historial"])
     with t1:
         if dfp.empty:
             st.info("Sin casos en este periodo.")
         else:
-            _tab_gestion(dfp, ctx, periodo, editable)
+            _tab_gestion(dfp, dfa, ctx, periodo, editable)
     with t2:
         _tab_indicadores(dfp, dfa, ctx)
     with t3:

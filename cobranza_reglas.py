@@ -8,9 +8,9 @@ DIA_INICIO_EDICION = 4
 DIA_FIN_EDICION = 20
 
 CAMPOS = ["FECHA", "HORARIO", "MEDIO", "TIPO CONTACTO", "ACCIÓN",
-          "FECHA COMPROMISO", "MOTIVO DE NO PAGO", "HAY RECLAMO", "CÓDIGO RECLAMO", "OBSERVACIÓN"]
-# "HAY RECLAMO" es independiente del resultado elegido (puede haber reclamo con
-# cualquier ACCIÓN): "SI" o "" (vacío = no hubo). Nunca es obligatorio.
+          "FECHA COMPROMISO", "MOTIVO DE NO PAGO", "CÓDIGO RECLAMO", "OBSERVACIÓN"]
+# El reclamo ya no es un campo independiente: es el motivo de no pago "Reclamo" (ver
+# MOTIVO_RECLAMO). CÓDIGO RECLAMO/OBSERVACIÓN se habilitan solo con ese motivo.
 
 EFECTIVO, NO_EFECTIVO = "EFECTIVO", "NO EFECTIVO"
 ACCIONES = {
@@ -40,6 +40,7 @@ ACCION_NO_PAGARA = "Indica que no pagará"
 REQUIERE_MOTIVO = {ACCION_NO_PAGARA}
 REQUIERE_OBSERVACION = {"Otros: detallar"}
 ACCIONES_RECONTACTO = {"Contesta y cuelga", "Contesta y no da razón"}
+MOTIVO_RECLAMO = "Reclamo"
 
 MOTIVOS_CIERRE = [
     "Pagó (confirmado)",
@@ -59,7 +60,6 @@ COL_USUARIO_CIERRE = "USUARIO_CIERRE"
 COL_FECHA_CIERRE = "FECHA_CIERRE"
 COL_ULT_MOD = "ULTIMA_MODIFICACION"
 COL_USR_ULT_MOD = "USUARIO_ULTIMA_MODIFICACION"
-COL_RESP_BO = "Responsable BO"
 
 E_PENDIENTE = "PENDIENTE"
 E_EN_PROCESO = "EN PROCESO"
@@ -105,8 +105,7 @@ def columnas_interaccion(n: int) -> list[str]:
 COLUMNAS_CIERRE = [COL_ESTADO, COL_MOTIVO_CIERRE, COL_DETALLE_CIERRE,
                    COL_USUARIO_CIERRE, COL_FECHA_CIERRE]
 COLUMNAS_GESTIONADAS = (
-    [COL_RESP_BO]
-    + [c for n in range(1, N_INT + 1) for c in columnas_interaccion(n)]
+    [c for n in range(1, N_INT + 1) for c in columnas_interaccion(n)]
     + COLUMNAS_CIERRE
 )
 COLUMNAS_REQUERIDAS = [COL_ID] + COLUMNAS_GESTIONADAS + [COL_ULT_MOD, COL_USR_ULT_MOD]
@@ -145,6 +144,12 @@ def interacciones_registradas(fila) -> int:
 
 
 def estado_caso(fila, hoy: date) -> str:
+    """El pago real SIEMPRE sale de Estado_Pago (la vista de Reporting, actualizada por el
+    job del servidor) — es la única vía hacia FINALIZADO - PAGÓ. Que el promotor registre
+    'Ya pagó' no cierra el caso por sí solo (ver hay_inconsistencia_pago): mientras el
+    servidor no lo confirme, el caso sigue siendo gestionable."""
+    if _v(fila, "Estado_Pago") == "Pagado":
+        return E_PAGADO
     motivo_cierre = _v(fila, COL_MOTIVO_CIERRE)
     if motivo_cierre:
         return E_PAGADO if motivo_cierre.startswith(MOTIVO_CIERRE_PAGO) or motivo_cierre.startswith(ACCION_PAGO) else E_SIN_EXITO
@@ -153,8 +158,6 @@ def estado_caso(fila, hoy: date) -> str:
         return E_PENDIENTE
     accion = _v(fila, col("ACCIÓN", n))
     tipo = _v(fila, col("TIPO CONTACTO", n))
-    if accion == ACCION_PAGO:
-        return E_PAGADO
     if accion == ACCION_COMPROMISO:
         f_comp = parse_fecha(_v(fila, col("FECHA COMPROMISO", n)))
         if f_comp is not None and f_comp < hoy:
@@ -165,6 +168,16 @@ def estado_caso(fila, hoy: date) -> str:
     if tipo == NO_EFECTIVO or accion in ACCIONES_RECONTACTO:
         return E_RECONTACTAR
     return E_EN_PROCESO
+
+
+def hay_inconsistencia_pago(fila) -> bool:
+    """True cuando el promotor registró 'Ya pagó' en la última interacción pero la fuente
+    (Estado_Pago, Reporting) todavía no lo confirma. No es un error ni cierra el caso: es
+    una alerta a vigilar (control de calidad), separada del estado real del caso."""
+    n = interacciones_registradas(fila)
+    if n == 0:
+        return False
+    return _v(fila, col("ACCIÓN", n)) == ACCION_PAGO and _v(fila, "Estado_Pago") != "Pagado"
 
 
 def ventana_edicion(periodo: str, hoy: date, es_backoffice: bool) -> tuple[bool, str]:
@@ -203,7 +216,6 @@ def validar_interaccion(datos: dict, n: int, fila, hoy: date, es_correccion: boo
         errores.append(f"La interacción {n} todavía no existe; no se puede corregir.")
 
     fecha = datos.get("FECHA")
-    tipo = datos.get("TIPO CONTACTO", "")
     accion = datos.get("ACCIÓN", "")
 
     if not isinstance(fecha, date):
@@ -225,13 +237,12 @@ def validar_interaccion(datos: dict, n: int, fila, hoy: date, es_correccion: boo
         errores.append("Falta el horario.")
     if not datos.get("MEDIO"):
         errores.append("Falta el medio de contacto.")
-    if tipo not in ACCIONES:
-        errores.append("Primero selecciona el tipo de contacto (Efectivo / No efectivo).")
-    elif not accion:
+    todas_las_acciones = ACCIONES[EFECTIVO] + ACCIONES[NO_EFECTIVO]
+    if not accion:
         errores.append("Falta el resultado del contacto.")
-    elif accion not in ACCIONES[tipo]:
-        errores.append(f"'{accion}' no corresponde a un contacto {tipo.lower()}. "
-                       f"Opciones válidas: {', '.join(ACCIONES[tipo])}.")
+    elif accion not in todas_las_acciones:
+        errores.append(f"'{accion}' no es un resultado válido. "
+                       f"Opciones válidas: {', '.join(todas_las_acciones)}.")
 
     if accion == ACCION_COMPROMISO:
         f_comp = datos.get("FECHA COMPROMISO")
@@ -248,25 +259,22 @@ def validar_interaccion(datos: dict, n: int, fila, hoy: date, es_correccion: boo
     return errores
 
 
-def _es_si(v) -> bool:
-    return str(v or "").strip().upper() == "SI"
-
-
 def valores_interaccion(datos: dict, n: int, usuario: str, timestamp: str) -> dict:
-    """Celdas a escribir para la interacción n (limpia los campos que no aplican)."""
+    """Celdas a escribir para la interacción n (limpia los campos que no aplican).
+    TIPO CONTACTO ya no es un valor que se recibe: se clasifica siempre a partir de ACCIÓN."""
     accion = datos.get("ACCIÓN", "")
+    motivo = datos.get("MOTIVO DE NO PAGO", "") if accion in REQUIERE_MOTIVO else ""
     f_comp = datos.get("FECHA COMPROMISO") if accion == ACCION_COMPROMISO else None
-    hay_reclamo = _es_si(datos.get("HAY RECLAMO"))
+    es_reclamo = motivo == MOTIVO_RECLAMO
     return {
         col("FECHA", n): datos["FECHA"].isoformat(),
         col("HORARIO", n): datos.get("HORARIO", ""),
         col("MEDIO", n): datos.get("MEDIO", ""),
-        col("TIPO CONTACTO", n): datos.get("TIPO CONTACTO", ""),
+        col("TIPO CONTACTO", n): tipo_de_accion(accion),
         col("ACCIÓN", n): accion,
         col("FECHA COMPROMISO", n): f_comp.isoformat() if isinstance(f_comp, date) else "",
-        col("MOTIVO DE NO PAGO", n): datos.get("MOTIVO DE NO PAGO", "") if accion in REQUIERE_MOTIVO else "",
-        col("HAY RECLAMO", n): "SI" if hay_reclamo else "",
-        col("CÓDIGO RECLAMO", n): str(datos.get("CÓDIGO RECLAMO", "")).strip() if hay_reclamo else "",
+        col("MOTIVO DE NO PAGO", n): motivo,
+        col("CÓDIGO RECLAMO", n): str(datos.get("CÓDIGO RECLAMO", "")).strip() if es_reclamo else "",
         col("OBSERVACIÓN", n): str(datos.get("OBSERVACIÓN", "")).strip(),
         col_usuario(n): usuario,
         col_timestamp(n): timestamp,
@@ -315,8 +323,8 @@ def limpiezas_aplicadas(datos: dict) -> list[str]:
         notas.append("se descarta la fecha de compromiso (solo aplica a 'Genera compromiso de pago')")
     if normalizar(datos.get("MOTIVO DE NO PAGO")) and accion not in REQUIERE_MOTIVO:
         notas.append(f"se descarta el motivo de no pago (solo aplica a '{ACCION_NO_PAGARA}')")
-    if normalizar(datos.get("CÓDIGO RECLAMO")) and not _es_si(datos.get("HAY RECLAMO")):
-        notas.append("se descarta el código de reclamo (solo aplica si marcaste que hubo reclamo)")
+    if normalizar(datos.get("CÓDIGO RECLAMO")) and datos.get("MOTIVO DE NO PAGO") != MOTIVO_RECLAMO:
+        notas.append(f"se descarta el código de reclamo (solo aplica cuando el motivo es '{MOTIVO_RECLAMO}')")
     return notas
 
 
@@ -330,11 +338,9 @@ def procesar_edicion(original: dict, editado: dict, actual: dict, es_backoffice:
     cambiadas = [n for n in range(1, N_INT + 1)
                  if any(valor_campo(c, editado.get(col(c, n))) != valor_campo(c, original.get(col(c, n)))
                         for c in CAMPOS)]
-    resp_nuevo = normalizar(editado.get(COL_RESP_BO, original.get(COL_RESP_BO)))
-    cambia_resp = resp_nuevo != normalizar(original.get(COL_RESP_BO))
-    if not cambiadas and not cambia_resp:
+    if not cambiadas:
         return {}, [], []
-    if cambiadas and not es_backoffice and estado_caso(actual, hoy) in ESTADOS_FINALIZADOS:
+    if not es_backoffice and estado_caso(actual, hoy) in ESTADOS_FINALIZADOS:
         if estado_caso(actual, hoy) == E_PAGADO:
             return {}, [], ["El cliente ya pagó: la gestión terminó y no admite más contactos."]
         return {}, [], ["El caso está finalizado; no admite cambios."]
@@ -376,24 +382,8 @@ def procesar_edicion(original: dict, editado: dict, actual: dict, es_backoffice:
         cambios.update(valores)
         operaciones.append((operacion, n))
 
-        motivo = _v(trabajo, COL_MOTIVO_CIERRE)
-        ultima = interacciones_registradas(trabajo)
-        if datos["ACCIÓN"] == ACCION_PAGO and not motivo:
-            cierre = {COL_MOTIVO_CIERRE: f"{ACCION_PAGO} (interacción {n})", COL_DETALLE_CIERRE: "",
-                      COL_USUARIO_CIERRE: usuario, COL_FECHA_CIERRE: timestamp}
-            trabajo.update(cierre)
-            cambios.update(cierre)
-        elif motivo.startswith(ACCION_PAGO) and _v(trabajo, col("ACCIÓN", ultima)) != ACCION_PAGO:
-            limpio = dict.fromkeys(CAMPOS_CIERRE_MOTIVO, "")
-            trabajo.update(limpio)
-            cambios.update(limpio)
-
     if errores:
         return {}, [], errores
-    if cambia_resp:
-        cambios[COL_RESP_BO] = resp_nuevo
-        if not operaciones:
-            operaciones.append(("CAMBIO_RESPONSABLE", None))
     return cambios, operaciones, []
 
 
@@ -414,10 +404,11 @@ def enriquecer(df: pd.DataFrame, hoy: date) -> pd.DataFrame:
     ]
     df["_RECLAMOS"] = [
         [_v(r, col("CÓDIGO RECLAMO", k)) or "(sin código)" for k in range(1, n + 1)
-         if _es_si(_v(r, col("HAY RECLAMO", k)))]
+         if _v(r, col("MOTIVO DE NO PAGO", k)) == MOTIVO_RECLAMO]
         for r, n in zip(registros, n_reg)
     ]
     df["_TIENE_RECLAMO"] = df["_RECLAMOS"].map(bool)
+    df["_INCONSISTENCIA_PAGO"] = [hay_inconsistencia_pago(r) for r in registros]
     return df
 
 
