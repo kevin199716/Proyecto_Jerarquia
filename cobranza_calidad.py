@@ -18,6 +18,8 @@ from gspread.cell import Cell
 from gspread.utils import rowcol_to_a1
 
 import cobranza_reglas as R
+import pagos_reporting as PR
+import vintage_cobranza as V
 from sheets import _abrir_spreadsheet
 
 LIBRO = "Facturas - Calidad"
@@ -227,6 +229,82 @@ def _cargar_historial() -> pd.DataFrame:
     return pd.DataFrame(valores[1:], columns=_columnas_unicas(valores[0]))
 
 
+OPERACION_CIERRE_SERVIDOR = "CIERRE_AUTOMATICO_SERVIDOR"
+USUARIO_SISTEMA = "sistema-reporting"
+
+
+def ejecutar_validacion_pagos_servidor() -> dict:
+    """
+    Cierra automáticamente los casos cuyo pago ya está confirmado en el servidor
+    (Reporting), aunque nadie lo haya marcado a mano en el Drive. Nunca rompe
+    Cobranza si el servidor no responde o no está configurado.
+    Devuelve {"cerrados": int, "aviso": str}.
+
+    No se dispara sola dentro de la app (eso dependería de que alguien tenga
+    Cobranza abierta, y la vista del servidor solo se refresca 1 vez al día):
+    la llama la tarea programada (tarea_validar_pagos_servidor.py, por cron,
+    a las horas en que corren los procesos que actualizan esa vista) o el
+    botón manual de Backoffice en Cobranza.
+    """
+    mapa_pagos, aviso_conexion = PR.leer_estado_pagos()
+    if not mapa_pagos:
+        return {"cerrados": 0, "aviso": aviso_conexion}
+
+    ws = _ws(PESTANA_CASOS)
+    requeridas = ["cod_cliente", "Estado_Pago", R.COL_ID, R.COL_ESTADO, R.COL_MOTIVO_CIERRE,
+                  R.COL_DETALLE_CIERRE, R.COL_USUARIO_CIERRE, R.COL_FECHA_CIERRE,
+                  R.COL_ULT_MOD, R.COL_USR_ULT_MOD]
+    with _LOCK_LOTE:
+        valores = _reintentar(ws.get_all_values)
+        if not valores:
+            return {"cerrados": 0, "aviso": ""}
+        headers = valores[0]
+        if any(c not in headers for c in requeridas):
+            return {"cerrados": 0, "aviso": "Faltan columnas en el Drive para validar pagos del servidor."}
+        idx = {c: headers.index(c) for c in requeridas}
+        ts = _ts()
+        celdas, historial_filas, cerrados = [], [], []
+
+        for r, fila in enumerate(valores[1:], start=2):
+            fila = (fila + [""] * len(headers))[:len(headers)]
+            cod = fila[idx["cod_cliente"]].strip()
+            pago = mapa_pagos.get(cod)
+            if not pago or pago["estado_pago"] != PR.PAGADO:
+                continue
+            if fila[idx[R.COL_MOTIVO_CIERRE]].strip():
+                continue  # ya cerrado (a mano o por un ciclo anterior): no se toca.
+            fecha_pago = pago["boleta_fecha_pago"] or ts[:10]
+            monto = pago["boleta_monto"]
+            detalle = (f"Pago confirmado en servidor (Reporting) el {fecha_pago}"
+                       + (f", monto S/ {monto}" if monto else "") + ".")
+            cambios = {
+                R.COL_MOTIVO_CIERRE: f"{R.MOTIVO_CIERRE_PAGO} (validado en servidor)",
+                R.COL_DETALLE_CIERRE: detalle,
+                R.COL_USUARIO_CIERRE: USUARIO_SISTEMA,
+                R.COL_FECHA_CIERRE: ts,
+                R.COL_ESTADO: R.E_PAGADO,
+                R.COL_ULT_MOD: ts,
+                R.COL_USR_ULT_MOD: USUARIO_SISTEMA,
+                "Estado_Pago": PR.PAGADO,
+            }
+            for campo, valor in cambios.items():
+                celdas.append(Cell(r, headers.index(campo) + 1, valor))
+            historial_filas.append([ts, USUARIO_SISTEMA, "sistema", "", fila[idx[R.COL_ID]],
+                                     "", cod, OPERACION_CIERRE_SERVIDOR, "", R.E_PAGADO, detalle])
+            cerrados.append(cod)
+
+        if not celdas:
+            return {"cerrados": 0, "aviso": ""}
+        _reintentar(lambda: ws.update_cells(celdas, value_input_option="RAW"))
+        try:
+            _reintentar(lambda: _ws_historial().append_rows(historial_filas, value_input_option="RAW"))
+        except Exception:
+            pass
+    _cargar_casos.clear()
+    _cargar_historial.clear()
+    return {"cerrados": len(cerrados), "aviso": ""}
+
+
 def _guardar_caso(caso: dict, preparar, ctx: dict) -> tuple[str, str]:
     """
     Guarda cambios de un caso de forma segura:
@@ -392,22 +470,25 @@ HEADER = (
 )
 
 CSS = """<style>
-.cob-header{background:linear-gradient(135deg,#4B0067,#7B1FA2 55%,#EC6608);border-radius:14px;padding:16px 22px;margin-bottom:14px;display:flex;align-items:center;gap:14px;}
-.cob-header-ico{font-size:28px;}
-.cob-header-t{color:#fff;font-size:21px;font-weight:800;line-height:1.2;}
-.cob-header-s{color:rgba(255,255,255,.85);font-size:12px;margin-top:2px;}
+.cob-header{background:linear-gradient(135deg,#4B0067,#7B1FA2 55%,#EC6608);border-radius:14px;padding:16px 22px;margin-bottom:14px;display:flex;align-items:center;gap:14px;position:relative;overflow:hidden;}
+.cob-header::before{content:"";position:absolute;right:-40px;top:-40px;width:180px;height:180px;border-radius:50%;background:radial-gradient(circle,rgba(255,255,255,.18),transparent 65%);pointer-events:none;}
+.cob-header-ico{font-size:28px;position:relative;}
+.cob-header-t{color:#fff;font-size:21px;font-weight:800;line-height:1.2;position:relative;}
+.cob-header-s{color:rgba(255,255,255,.85);font-size:12px;margin-top:2px;position:relative;}
 .cob-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:6px 0 12px;}
-.cob-kpi{background:#fff;border:1px solid #E5E0EA;border-top:4px solid var(--c);border-radius:12px;padding:12px 14px;box-shadow:0 1px 3px rgba(75,0,103,.06);}
+.cob-kpi{background:linear-gradient(165deg,#fff 70%,#FAF8FC);border:1px solid #E5E0EA;border-top:4px solid var(--c);border-radius:12px;padding:12px 14px;box-shadow:0 1px 3px rgba(75,0,103,.06);transition:transform .15s ease,box-shadow .15s ease;}
+.cob-kpi:hover{transform:translateY(-2px);box-shadow:0 8px 18px rgba(75,0,103,.14);}
 .cob-kpi .v{font-size:26px;font-weight:800;color:#1A1521;line-height:1.1;}
 .cob-kpi .l{font-size:12px;color:#4A4153;margin-top:3px;font-weight:600;}
 .cob-kpi .s{font-size:11px;color:#8F8898;margin-top:2px;}
 .cob-kpi .bar{height:6px;background:#EFEBF2;border-radius:99px;margin-top:8px;overflow:hidden;}
-.cob-kpi .bar i{display:block;height:100%;background:var(--c);border-radius:99px;}
+.cob-kpi .bar i{display:block;height:100%;background:var(--c);border-radius:99px;transition:width .3s ease;}
 .cob-dash{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;margin:0 0 14px;}
-.cob-panel{background:#fff;border:1px solid #E5E0EA;border-radius:12px;padding:12px 16px;}
+.cob-panel{background:#fff;border:1px solid #E5E0EA;border-radius:12px;padding:12px 16px;transition:box-shadow .15s ease;}
+.cob-panel:hover{box-shadow:0 6px 16px rgba(75,0,103,.1);}
 .cob-panel h4{margin:0 0 10px;font-size:13px;color:#4B0067;font-weight:800;}
 .cob-stack{display:flex;height:14px;border-radius:99px;overflow:hidden;gap:2px;background:#EFEBF2;}
-.cob-stack i{display:block;height:100%;}
+.cob-stack i{display:block;height:100%;transition:width .3s ease;}
 .cob-leg{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:9px;font-size:11.5px;color:#4A4153;}
 .cob-leg span{display:inline-flex;align-items:center;gap:5px;}
 .cob-leg b{color:#1A1521;}
@@ -417,19 +498,33 @@ CSS = """<style>
 .cob-row .t i{display:block;height:100%;}
 .cob-row .n{text-align:right;color:#1A1521;font-weight:700;}
 .cob-pill{display:inline-block;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:700;}
-.cob-card{background:#fff;border:1px solid #E5E0EA;border-radius:12px;padding:14px 16px;margin:8px 0;}
+.cob-card{background:#fff;border:1px solid #E5E0EA;border-radius:12px;padding:14px 16px;margin:8px 0;transition:box-shadow .15s ease;}
+.cob-card:hover{box-shadow:0 6px 16px rgba(75,0,103,.08);}
 .cob-grid{display:flex;gap:28px;flex-wrap:wrap;}
 .cob-grid .k{color:#6B6175;font-size:11px;text-transform:uppercase;letter-spacing:.03em;}
 .cob-grid .x{font-weight:700;font-size:14px;color:#1A1521;}
 .cob-steps{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0 4px;}
 .cob-step{flex:1 1 90px;min-width:90px;border-radius:9px;padding:7px 8px;font-size:11.5px;text-align:center;
-  border:2px solid var(--c);background:var(--bg);color:var(--t);font-weight:700;}
+  border:2px solid var(--c);background:var(--bg);color:var(--t);font-weight:700;transition:transform .15s ease;}
+.cob-step:hover{transform:translateY(-1px);}
 .cob-int{border:1px solid #E5E0EA;border-left:5px solid var(--c);border-radius:10px;padding:9px 12px;margin:6px 0;
-  background:#FCFBFD;font-size:13px;color:#3D3548;}
+  background:#FCFBFD;font-size:13px;color:#3D3548;transition:box-shadow .15s ease;}
+.cob-int:hover{box-shadow:0 4px 12px rgba(75,0,103,.08);}
 .cob-int b{color:#1A1521;}
 .cob-int .meta{font-size:11px;color:#8F8898;margin-top:3px;}
+.cob-reclamo{display:inline-block;background:#FFF4EA;color:#D45605;border:1px solid #FDE6D2;border-radius:999px;padding:2px 10px;font-size:11px;font-weight:700;}
 .cob-sec{background:linear-gradient(90deg,#4B0067,#7B1FA2);padding:8px 14px;border-radius:8px;margin:14px 0 8px;
   color:#fff;font-weight:700;font-size:14px;}
+@media (max-width:640px){
+  .cob-header{padding:14px 16px;gap:10px;}
+  .cob-header-ico{font-size:22px;}
+  .cob-header-t{font-size:16px;}
+  .cob-header-s{font-size:11px;}
+  .cob-kpis{grid-template-columns:repeat(auto-fit,minmax(130px,1fr));}
+  .cob-kpi .v{font-size:21px;}
+  .cob-grid{gap:16px;}
+  .cob-step{flex:1 1 70px;min-width:70px;font-size:10.5px;padding:6px;}
+}
 </style>"""
 
 
@@ -474,6 +569,9 @@ def _render_kpis(k: dict):
              f"{k['pagados']} pagaron · {k['sin_exito']} sin éxito", _pct(k["finalizados"], t)),
         _kpi(f"{k['pct_contactabilidad']:.1f}%", "Contactabilidad", COLOR_EFECTIVO,
              f"{k['contactados']} con contacto efectivo", k["pct_contactabilidad"]),
+        _kpi(k["con_reclamo"], "📌 Con reclamo",
+             "#D45605" if k["con_reclamo"] else "#C8C2CE",
+             f"{_pct(k['con_reclamo'], t):.1f}% de los casos" if k["con_reclamo"] else "ningún caso con reclamo"),
     ]
     st.markdown(f'<div class="cob-kpis">{"".join(tarjetas)}</div>', unsafe_allow_html=True)
 
@@ -582,11 +680,24 @@ def _form_interaccion(prefijo: str, n: int, base: dict, fila: dict, listas: dict
         motivo = st.selectbox("❓ Motivo de no pago (obligatorio)", op, index=i, key=f"{prefijo}_motivo")
     if accion == R.ACCION_PAGO:
         st.caption("🟢 **Ya pagó** finaliza el caso automáticamente: no se habilitan más contactos.")
+    c6, c7 = st.columns([1, 2])
+    with c6:
+        hay_reclamo = st.checkbox("📌 ¿Hubo reclamo?", value=R._es_si(base.get("HAY RECLAMO")),
+                                   key=f"{prefijo}_reclamo")
+    codigo_reclamo = ""
+    with c7:
+        if hay_reclamo:
+            codigo_reclamo = st.text_input("Código de reclamo (opcional, si lo tienes)",
+                                           value=base.get("CÓDIGO RECLAMO", ""), max_chars=60,
+                                           key=f"{prefijo}_reclamo_cod")
+
     obs_label = "🗒️ Detalle (obligatorio)" if accion in R.REQUIERE_OBSERVACION else "🗒️ Observación (opcional)"
     observacion = st.text_area(obs_label, value=base.get("OBSERVACIÓN", ""), max_chars=500, height=70,
                                key=f"{prefijo}_obs")
     return {"FECHA": fecha, "HORARIO": horario, "MEDIO": medio, "TIPO CONTACTO": tipo, "ACCIÓN": accion,
-            "FECHA COMPROMISO": f_comp, "MOTIVO DE NO PAGO": motivo, "OBSERVACIÓN": observacion}
+            "FECHA COMPROMISO": f_comp, "MOTIVO DE NO PAGO": motivo,
+            "HAY RECLAMO": "SI" if hay_reclamo else "", "CÓDIGO RECLAMO": codigo_reclamo,
+            "OBSERVACIÓN": observacion}
 
 
 def _datos_interaccion(fila: dict, n: int) -> dict:
@@ -620,6 +731,9 @@ def _render_interacciones(fila: dict, n_reg: int):
             extras.append(f"Compromiso: <b>{_e(d['FECHA COMPROMISO'])}</b>")
         if d["MOTIVO DE NO PAGO"]:
             extras.append(f"Motivo: <b>{_e(d['MOTIVO DE NO PAGO'])}</b>")
+        if R._es_si(d.get("HAY RECLAMO")):
+            cod = d.get("CÓDIGO RECLAMO") or "sin código"
+            extras.append(f'<span class="cob-reclamo">📌 Reclamo: {_e(cod)}</span>')
         if d["OBSERVACIÓN"]:
             extras.append(f"Obs.: {_e(d['OBSERVACIÓN'])}")
         usuario = _txt(fila, R.col_usuario(n)) or "—"
@@ -681,7 +795,10 @@ def _panel_caso(id_caso: str, ctx: dict):
         f'<div><div class="k">Partner</div><div class="x">{_e(caso.get("razon_social"))}</div></div>'
         f'<div><div class="k">Estado del caso</div><div class="x">{_pill(estado)}</div></div>'
         f'<div><div class="k">Interacciones</div><div class="x">{n_reg} de {R.N_INT}</div></div>'
-        f'</div></div>', unsafe_allow_html=True)
+        + (f'<div><div class="k">Reclamos</div><div class="x">'
+           + " ".join(f'<span class="cob-reclamo">📌 {_e(c)}</span>' for c in caso.get("_RECLAMOS", []))
+           + '</div></div>' if caso.get("_RECLAMOS") else "")
+        + '</div></div>', unsafe_allow_html=True)
     if finalizado and _txt(caso, R.COL_MOTIVO_CIERRE):
         st.caption(f"🏁 Cerrado por {_txt(caso, R.COL_USUARIO_CIERRE) or '—'} el "
                    f"{_txt(caso, R.COL_FECHA_CIERRE) or '—'} · Motivo: {_txt(caso, R.COL_MOTIVO_CIERRE)}"
@@ -694,32 +811,24 @@ def _panel_caso(id_caso: str, ctx: dict):
         st.info("🔒 Este caso está en solo lectura fuera de la ventana de registro.")
         return
 
-    resp_actual = _txt(caso, R.COL_RESP_BO)
-    op_bo, i_bo = _opciones(listas["bo"].get(_nr(caso.get("razon_social", "")), []), resp_actual)
-
     if not finalizado and n_reg < R.N_INT:
         n = n_reg + 1
         st.markdown(f"#### ➜ Registrar interacción {n} de {R.N_INT}")
-        resp = st.selectbox("👤 Responsable BO", op_bo, index=i_bo, key=f"{pref}_resp")
         min_f = R.parse_fecha(_txt(caso, R.col("FECHA", n - 1))) if n > 1 else None
         min_f = min_f or R.inicio_periodo(_txt(caso, "PERIODO")) or date(2024, 1, 1)
         datos = _form_interaccion(f"{pref}_n{n}", n, {}, caso, listas, min_f, hoy)
         if st.button(f"💾 Registrar interacción {n}", type="primary", use_container_width=True,
                      key=f"{pref}_guardar"):
             errores = R.validar_interaccion(datos, n, caso, hoy)
-            if not resp and len(op_bo) > 1:
-                errores.append("Selecciona el Responsable BO.")
             if errores:
                 for err in errores:
                     st.error(f"❌ {err}")
             else:
-                def preparar(actual, datos=datos, n=n, resp=resp):
+                def preparar(actual, datos=datos, n=n):
                     errs = R.validar_interaccion(datos, n, actual, _hoy())
                     if errs:
                         raise ValidacionError(errs)
                     cambios = R.valores_interaccion(datos, n, ctx["usuario"], _ts())
-                    if resp != actual.get(R.COL_RESP_BO, ""):
-                        cambios[R.COL_RESP_BO] = resp
                     if datos["ACCIÓN"] == R.ACCION_PAGO:
                         cambios.update({R.COL_MOTIVO_CIERRE: f"{R.ACCION_PAGO} (interacción {n})",
                                         R.COL_DETALLE_CIERRE: "", R.COL_USUARIO_CIERRE: ctx["usuario"],
@@ -803,8 +912,10 @@ def _herramientas_bo(caso: dict, n_reg: int, ctx: dict, listas: dict, pref: str)
 COLUMNAS_FIJAS_TABLA = ["Estado", "Avance", "Siguiente", "Código", "Cliente", "Celular", "Estado pago", "Partner"]
 
 
-def _siguiente(estado: str, n: int) -> str:
+def _siguiente(estado: str, n: int, motivo_cierre: str = "") -> str:
     if estado == R.E_PAGADO:
+        if "validado en servidor" in motivo_cierre:
+            return "🔒 Pagado (servidor)"
         return "🏁 Pagó · cerrado"
     if estado in R.ESTADOS_FINALIZADOS:
         return "🏁 Cerrado"
@@ -814,13 +925,16 @@ def _siguiente(estado: str, n: int) -> str:
 COLUMNAS_EDITABLES_TABLA = [R.COL_RESP_BO] + [R.col(c, n) for n in range(1, R.N_INT + 1) for c in R.CAMPOS]
 ETIQUETAS_CAMPO = {"FECHA": "Fecha", "HORARIO": "Horario", "MEDIO": "Medio", "TIPO CONTACTO": "Tipo",
                    "ACCIÓN": "Resultado", "FECHA COMPROMISO": "F. compromiso",
-                   "MOTIVO DE NO PAGO": "Motivo no pago", "OBSERVACIÓN": "Observación"}
+                   "MOTIVO DE NO PAGO": "Motivo no pago", "HAY RECLAMO": "¿Reclamo?",
+                   "CÓDIGO RECLAMO": "Cód. reclamo", "OBSERVACIÓN": "Observación"}
 AYUDA_CAMPO = {
     "TIPO CONTACTO": "Elige primero el tipo: define qué resultados son válidos.",
     "ACCIÓN": (f"EFECTIVO: {', '.join(R.ACCIONES[R.EFECTIVO])}. "
                f"NO EFECTIVO: {', '.join(R.ACCIONES[R.NO_EFECTIVO])}. 'Ya pagó' cierra el caso."),
     "FECHA COMPROMISO": f"Solo para '{R.ACCION_COMPROMISO}' (obligatoria). En otro resultado se descarta.",
     "MOTIVO DE NO PAGO": f"Solo para '{R.ACCION_NO_PAGARA}' (obligatorio). En otro resultado se descarta.",
+    "HAY RECLAMO": "Nunca es obligatorio. Marca si el cliente puso un reclamo en este contacto.",
+    "CÓDIGO RECLAMO": "Opcional, solo si hubo reclamo y ya tienes el código. Si no hay reclamo, se descarta.",
     "OBSERVACIÓN": "Obligatoria para 'Otros: detallar'.",
 }
 
@@ -830,7 +944,8 @@ def _tabla_contactos(base: pd.DataFrame) -> pd.DataFrame:
     g = pd.DataFrame({
         "Estado": base["_ESTADO"].map(_etiqueta_estado).values,
         "Avance": base["_N"].astype(int).values,
-        "Siguiente": [_siguiente(e, int(n)) for e, n in zip(base["_ESTADO"], base["_N"])],
+        "Siguiente": [_siguiente(e, int(n), m) for e, n, m in
+                      zip(base["_ESTADO"], base["_N"], base[R.COL_MOTIVO_CIERRE])],
         "Código": base["cod_cliente"].values,
         "Cliente": base["nombre_cliente"].values,
         "Celular": base["celular_cliente"].values,
@@ -872,21 +987,28 @@ def _config_tabla(base: pd.DataFrame, listas: dict, responsables: list[str]) -> 
             ayuda = AYUDA_CAMPO.get(c)
             if c in R.CAMPOS_FECHA:
                 cfg[R.col(c, n)] = st.column_config.DateColumn(etiqueta, format="DD/MM/YYYY", help=ayuda)
-            elif c == "OBSERVACIÓN":
-                cfg[R.col(c, n)] = st.column_config.TextColumn(etiqueta, max_chars=500, help=ayuda)
+            elif c in ("OBSERVACIÓN", "CÓDIGO RECLAMO"):
+                limite = 500 if c == "OBSERVACIÓN" else 60
+                cfg[R.col(c, n)] = st.column_config.TextColumn(etiqueta, max_chars=limite, help=ayuda)
+            elif c == "HAY RECLAMO":
+                cfg[R.col(c, n)] = st.column_config.SelectboxColumn(etiqueta, options=["", "SI"],
+                                                                    width="small", help=ayuda)
             else:
                 cfg[R.col(c, n)] = st.column_config.SelectboxColumn(
                     etiqueta, options=opciones_campo[c], width="medium" if c == "ACCIÓN" else "small", help=ayuda)
     return cfg
 
 
-def _revisar_ediciones(base: pd.DataFrame, editado: pd.DataFrame, pendientes: dict, ctx: dict) -> dict:
-    """Revisión en vivo (sin tocar el Drive): {pos: (etiqueta, errores, avisos)} por fila editada."""
+def _revisar_ediciones(base: pd.DataFrame, editado: pd.DataFrame, pendientes: dict, ctx: dict,
+                       cols_visibles: list[str]) -> dict:
+    """Revisión en vivo (sin tocar el Drive): {pos: (etiqueta, errores, avisos)} por fila editada.
+    `cols_visibles` son las columnas editables que están en pantalla (según el selector de
+    columnas); las que no están visibles se toman del dato original, nunca como vacías."""
     hoy, revision = _hoy(), {}
     for pos in sorted(int(p) for p in pendientes):
         original = base.iloc[pos].to_dict()
         fila = editado.iloc[pos]
-        nuevo = {c: fila[c] for c in COLUMNAS_EDITABLES_TABLA}
+        nuevo = {**original, **{c: fila[c] for c in cols_visibles}}
         _, _, errores = R.procesar_edicion(original, nuevo, original, ctx["es_bo"], ctx["usuario"], "", hoy)
         avisos = []
         for n in range(1, R.N_INT + 1):
@@ -955,19 +1077,40 @@ def _tab_gestion(dfp: pd.DataFrame, ctx: dict, periodo: str, editable: bool):
     else:
         st.caption(f"**{len(base)}** de {len(dfp)} casos · 🔒 solo lectura.")
 
+    cc1, cc2 = st.columns([1, 2])
+    with cc1:
+        contactos_mostrar = st.multiselect(
+            "🔢 Contactos a mostrar", list(range(1, R.N_INT + 1)), default=list(range(1, R.N_INT + 1)),
+            format_func=lambda n: f"C{n}", key=f"cob_cols_n_{firma}")
+    with cc2:
+        campos_mostrar = st.multiselect(
+            "📋 Campos a mostrar", R.CAMPOS,
+            default=["FECHA", "TIPO CONTACTO", "ACCIÓN", "FECHA COMPROMISO", "HAY RECLAMO"],
+            format_func=lambda c: ETIQUETAS_CAMPO.get(c, c), key=f"cob_cols_c_{firma}")
+    st.caption("Esto solo cambia qué se ve en la tabla — los contactos y campos que no eliges "
+               "seguir viendo no se tocan ni se pierden al guardar.")
+
     razones = {_nr(r) for r in base["razon_social"].unique()}
     responsables = sorted({b for r in razones for b in ctx["listas"]["bo"].get(r, [])}
                           | {x for x in base[R.COL_RESP_BO].unique() if x})
+    columnas_grid = [R.col(c, n) for n in contactos_mostrar for c in campos_mostrar]
+    columnas_tabla = COLUMNAS_FIJAS_TABLA + [R.COL_RESP_BO] + columnas_grid
+    tabla_completa = _tabla_contactos(base)
+    cfg_completo = _config_tabla(base, ctx["listas"], responsables)
     clave_editor = f"cob_tabla_{firma}"
     editado = st.data_editor(
-        _tabla_contactos(base), key=clave_editor, hide_index=True, use_container_width=True, height=460,
+        tabla_completa[columnas_tabla], key=clave_editor, hide_index=True, use_container_width=True, height=460,
         num_rows="fixed", disabled=True if not editable else COLUMNAS_FIJAS_TABLA,
-        column_config=_config_tabla(base, ctx["listas"], responsables),
+        column_config={k: v for k, v in cfg_completo.items() if k in columnas_tabla},
     )
+    # editado solo trae las columnas visibles: para no perder ni pisar los contactos/campos
+    # ocultos, cada fila a guardar se construye sobre el dato original y solo se superponen
+    # las columnas que de verdad están en pantalla.
+    cols_visibles_editables = [c for c in COLUMNAS_EDITABLES_TABLA if c in editado.columns]
 
     if editable:
         pendientes = st.session_state.get(clave_editor, {}).get("edited_rows", {})
-        revision = _revisar_ediciones(base, editado, pendientes, ctx) if pendientes else {}
+        revision = _revisar_ediciones(base, editado, pendientes, ctx, cols_visibles_editables) if pendientes else {}
         con_error = {p: r for p, r in revision.items() if r[1]}
         if revision:
             listos = len(revision) - len(con_error)
@@ -991,8 +1134,10 @@ def _tab_gestion(dfp: pd.DataFrame, ctx: dict, periodo: str, editable: bool):
         if guardar:
             ediciones = []
             for pos in sorted(int(p) for p in pendientes):
+                original = base.iloc[pos].to_dict()
                 fila_editada = editado.iloc[pos]
-                ediciones.append((base.iloc[pos].to_dict(), {c: fila_editada[c] for c in COLUMNAS_EDITABLES_TABLA}))
+                editado_fila = {**original, **{c: fila_editada[c] for c in cols_visibles_editables}}
+                ediciones.append((original, editado_fila))
             try:
                 with st.spinner("Validando y guardando en el Drive…"):
                     guardadas, errores, aviso = _guardar_lote(ediciones, ctx)
@@ -1132,6 +1277,50 @@ def _tab_indicadores(dfp: pd.DataFrame, dfa: pd.DataFrame, ctx: dict):
         st.dataframe(pd.DataFrame(filas).sort_values("Casos", ascending=False), hide_index=True,
                      use_container_width=True)
 
+    if ctx["es_bo"]:
+        _render_vintage(dfp)
+
+
+def _render_vintage(dfp: pd.DataFrame):
+    st.markdown('<div class="cob-sec">📊 Por vintage (VN1–VN6), por dealer y vendedor</div>',
+               unsafe_allow_html=True)
+    st.caption("VN1 es el periodo más reciente ya cerrado según el corte real de facturación "
+               "(tb_cierre_facturacion, no un día fijo del mes), VN2 el anterior, y así hasta VN6. "
+               "\"Vendedor\" es quien activó la venta (Reporting), no quien gestiona el caso en Cobranza.")
+    df_rep, aviso_rep = PR.leer_base_vintage()
+    cierres, aviso_cierres = PR.leer_cierres_facturacion()
+    if aviso_rep or aviso_cierres:
+        st.info(f"🛰️ Vintage no disponible: {aviso_rep or aviso_cierres}")
+        return
+    metricas = V.calcular_metricas_vintage(df_rep, dfp, cierres, _hoy())
+    if metricas.empty:
+        st.caption("Sin activaciones que caigan dentro de VN1–VN6 todavía.")
+        return
+    metrica = st.selectbox("📊 Métrica", list(V.METRICAS), format_func=lambda k: V.METRICAS[k],
+                           key="cob_vn_metrica")
+    piv = V.tabla_pivote(metricas, metrica)
+    fmt = "{:.1f}" if metrica == "prom_contactos" else "{:.1f}%"
+    estilo = piv.style.format(fmt, na_rep="—")
+    try:
+        estilo = estilo.background_gradient(
+            cmap="Purples", axis=None, vmin=0, vmax=piv.max().max() if piv.notna().any().any() else 1)
+    except ImportError:
+        pass  # sin matplotlib instalado: se ve la tabla igual, solo sin el degradado de color.
+    st.dataframe(estilo, use_container_width=True)
+    st.caption("VN5/VN6 salen vacíos (—) hasta que haya suficiente historia en Reporting para esos periodos.")
+
+    st.markdown("**🏆 Ranking de vendedores por % pagado**")
+    st.caption("Mismo origen que la tabla de arriba: suma todos los VN de este vendedor (respeta el "
+               "ciclo real de facturación) — no es un cálculo aparte ni otra fuente de datos.")
+    ranking = V.ranking_vendedores(metricas)
+    st.dataframe(
+        ranking.rename(columns={"razon_social": "Dealer", "vendedor": "Vendedor",
+                                "n_casos": "Casos (VN1–VN4)", "pagado": "% Pagado"}),
+        hide_index=True, use_container_width=True,
+        column_config={"% Pagado": st.column_config.ProgressColumn("% Pagado", min_value=0, max_value=100,
+                                                                    format="%.1f%%")},
+    )
+
 
 def _df_exportable(df: pd.DataFrame) -> pd.DataFrame:
     base = df.drop(columns=[c for c in df.columns if c.startswith("_")], errors="ignore").copy()
@@ -1259,6 +1448,23 @@ def mostrar_cobranza(razon=None):
             st.session_state["cob_nonce"] = st.session_state.get("cob_nonce", 0) + 1
             st.rerun()
         st.caption(f"Datos al {stamp} · se refrescan cada {TTL_CASOS}s")
+
+    if es_bo:
+        with st.expander("🛰️ Validación de pagos contra el servidor (Reporting)"):
+            st.caption("Corre sola por tarea programada a las horas en que se actualiza la vista del "
+                       "servidor (8am, 5pm, 7pm, 10pm, 12am). Este botón es solo para forzarla ahora.")
+            if st.button("🔄 Validar pagos contra servidor ahora", key="cob_validar_servidor_manual"):
+                PR.leer_estado_pagos.clear()
+                resultado_servidor = ejecutar_validacion_pagos_servidor()
+                if resultado_servidor["cerrados"]:
+                    st.success(f"🟢 {resultado_servidor['cerrados']} caso(s) cerrados: pago confirmado "
+                               "directo en el servidor.")
+                    st.rerun()
+                elif resultado_servidor["aviso"]:
+                    st.warning(resultado_servidor["aviso"])
+                else:
+                    st.info("Sin casos nuevos para cerrar: nada pagado en el servidor que no estuviera "
+                            "ya reflejado en el Drive.")
 
     dfa = df if not partner else df[df["razon_social"] == partner]
     dfp = dfa[dfa["PERIODO"] == periodo]

@@ -8,7 +8,9 @@ DIA_INICIO_EDICION = 4
 DIA_FIN_EDICION = 20
 
 CAMPOS = ["FECHA", "HORARIO", "MEDIO", "TIPO CONTACTO", "ACCIÓN",
-          "FECHA COMPROMISO", "MOTIVO DE NO PAGO", "OBSERVACIÓN"]
+          "FECHA COMPROMISO", "MOTIVO DE NO PAGO", "HAY RECLAMO", "CÓDIGO RECLAMO", "OBSERVACIÓN"]
+# "HAY RECLAMO" es independiente del resultado elegido (puede haber reclamo con
+# cualquier ACCIÓN): "SI" o "" (vacío = no hubo). Nunca es obligatorio.
 
 EFECTIVO, NO_EFECTIVO = "EFECTIVO", "NO EFECTIVO"
 ACCIONES = {
@@ -246,10 +248,15 @@ def validar_interaccion(datos: dict, n: int, fila, hoy: date, es_correccion: boo
     return errores
 
 
+def _es_si(v) -> bool:
+    return str(v or "").strip().upper() == "SI"
+
+
 def valores_interaccion(datos: dict, n: int, usuario: str, timestamp: str) -> dict:
     """Celdas a escribir para la interacción n (limpia los campos que no aplican)."""
     accion = datos.get("ACCIÓN", "")
     f_comp = datos.get("FECHA COMPROMISO") if accion == ACCION_COMPROMISO else None
+    hay_reclamo = _es_si(datos.get("HAY RECLAMO"))
     return {
         col("FECHA", n): datos["FECHA"].isoformat(),
         col("HORARIO", n): datos.get("HORARIO", ""),
@@ -258,6 +265,8 @@ def valores_interaccion(datos: dict, n: int, usuario: str, timestamp: str) -> di
         col("ACCIÓN", n): accion,
         col("FECHA COMPROMISO", n): f_comp.isoformat() if isinstance(f_comp, date) else "",
         col("MOTIVO DE NO PAGO", n): datos.get("MOTIVO DE NO PAGO", "") if accion in REQUIERE_MOTIVO else "",
+        col("HAY RECLAMO", n): "SI" if hay_reclamo else "",
+        col("CÓDIGO RECLAMO", n): str(datos.get("CÓDIGO RECLAMO", "")).strip() if hay_reclamo else "",
         col("OBSERVACIÓN", n): str(datos.get("OBSERVACIÓN", "")).strip(),
         col_usuario(n): usuario,
         col_timestamp(n): timestamp,
@@ -306,6 +315,8 @@ def limpiezas_aplicadas(datos: dict) -> list[str]:
         notas.append("se descarta la fecha de compromiso (solo aplica a 'Genera compromiso de pago')")
     if normalizar(datos.get("MOTIVO DE NO PAGO")) and accion not in REQUIERE_MOTIVO:
         notas.append(f"se descarta el motivo de no pago (solo aplica a '{ACCION_NO_PAGARA}')")
+    if normalizar(datos.get("CÓDIGO RECLAMO")) and not _es_si(datos.get("HAY RECLAMO")):
+        notas.append("se descarta el código de reclamo (solo aplica si marcaste que hubo reclamo)")
     return notas
 
 
@@ -401,6 +412,12 @@ def enriquecer(df: pd.DataFrame, hoy: date) -> pd.DataFrame:
         any(_v(r, col("TIPO CONTACTO", k)) == EFECTIVO for k in range(1, n + 1))
         for r, n in zip(registros, n_reg)
     ]
+    df["_RECLAMOS"] = [
+        [_v(r, col("CÓDIGO RECLAMO", k)) or "(sin código)" for k in range(1, n + 1)
+         if _es_si(_v(r, col("HAY RECLAMO", k)))]
+        for r, n in zip(registros, n_reg)
+    ]
+    df["_TIENE_RECLAMO"] = df["_RECLAMOS"].map(bool)
     return df
 
 
@@ -420,6 +437,7 @@ def kpis(df: pd.DataFrame) -> dict:
         "compromisos_vencidos": estados.get(E_COMPROMISO_VENCIDO, 0),
         "contactados": contactados,
         "interacciones": int(df["_N"].sum()) if total else 0,
+        "con_reclamo": int(df["_TIENE_RECLAMO"].sum()) if total else 0,
         "pend_cierre": estados.get(E_PEND_CIERRE, 0),
         "pagados": estados.get(E_PAGADO, 0),
         "sin_exito": estados.get(E_SIN_EXITO, 0),
@@ -456,6 +474,36 @@ def distribucion_acciones(df: pd.DataFrame) -> pd.DataFrame:
         return pd.DataFrame(columns=["Tipo", "Acción", "Casos"])
     return (pd.DataFrame(filas).value_counts(["Tipo", "Acción"]).rename("Casos")
             .reset_index().sort_values("Casos", ascending=False))
+
+
+def periodo_de_fecha(fecha: date, cierres: list[tuple[str, date]]) -> str | None:
+    """Ubica `fecha` en su periodo de facturación real: el primer corte (de
+    tb_cierre_facturacion) que no haya pasado todavía para esa fecha. `cierres` debe venir
+    ordenado por fecha de corte ascendente. None si `fecha` es posterior a todos los cortes
+    conocidos (periodo futuro, aún sin corte definido)."""
+    for periodo, corte in cierres:
+        if fecha <= corte:
+            return periodo
+    return None
+
+
+def vintage_n(periodo_caso: str | None, cierres: list[tuple[str, date]], hoy: date) -> int | None:
+    """VN del periodo_caso respecto al periodo más reciente YA CERRADO a `hoy`. VN1 = ese
+    periodo más reciente, VN2 el anterior, etc. None si periodo_caso no está en `cierres`,
+    si es posterior al último periodo cerrado (todavía no cerró su propio ciclo), o si cae
+    fuera de VN1..VN6."""
+    if not periodo_caso:
+        return None
+    periodos = [p for p, _ in cierres]
+    if periodo_caso not in periodos:
+        return None
+    cerrados = [i for i, (_, corte) in enumerate(cierres) if corte <= hoy]
+    if not cerrados:
+        return None
+    idx_vn1 = max(cerrados)
+    idx_caso = periodos.index(periodo_caso)
+    vn = idx_vn1 - idx_caso + 1
+    return vn if 1 <= vn <= 6 else None
 
 
 def evolucion_mensual(df: pd.DataFrame) -> pd.DataFrame:

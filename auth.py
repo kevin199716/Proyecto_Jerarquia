@@ -53,6 +53,7 @@ def login(usuarios):
     # FORM (derecha)
     with col_form:
         _md("""
+<div class="wow-login-mobile-brand">✦ WOW</div>
 <div style="padding:24px 8px 0;">
 <div class="wow-login-form-eyebrow">🔒 Acceso seguro</div>
 <h2 style="margin:0 0 6px; font-size:26px; font-weight:800; color:var(--ink-900); letter-spacing:-0.4px;">Bienvenido de vuelta</h2>

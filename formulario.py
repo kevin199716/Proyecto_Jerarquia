@@ -106,6 +106,25 @@ def carpeta_onedrive_dealer(razon: str) -> str:
     razon_limpia = limpiar_texto(razon).upper()
     return CARPETA_ONEDRIVE_POR_RAZON.get(razon_limpia, razon_limpia)
 
+
+# Igual que CARPETA_ONEDRIVE_POR_RAZON, pero para lo que se GRABA en la columna
+# RAZON SOCIAL de colaboradores: usuarios.json usa "NOGALES HIGH SAC" / "GRUPO
+# CREED SAC" (sin puntos) como valor interno — y DEALERS_CON_OUTBOUND compara
+# contra esa forma exacta, así que usuarios.json NO se toca — pero el histórico
+# de colaboradores ya tenía esos dos dealers con puntos ("...S.A.C."). Sin este
+# mapeo, un alta nueva queda con una RAZON SOCIAL que no calza con el histórico
+# y el dealer aparece duplicado en los reportes (confirmado 08/11/2026 con
+# Nogales: "NOGALES HIGH SAC" con 5 colaboradores nuevos vs "NOGALES HIGH
+# S.A.C." con 79 históricos, en vez de una sola fila de 84).
+RAZON_SOCIAL_HISTORICA = {
+    "NOGALES HIGH SAC": "NOGALES HIGH S.A.C.",
+    "GRUPO CREED SAC": "GRUPO CREED S.A.C.",
+}
+
+
+def razon_social_historica(razon: str) -> str:
+    return RAZON_SOCIAL_HISTORICA.get(limpiar_texto(razon).upper(), razon)
+
 # =========================
 # HORA PERÚ
 # =========================
@@ -569,6 +588,12 @@ def validar_formulario(campos: dict, df_colab: pd.DataFrame) -> list[str]:
     # mismo archivo- y no al revés, o WOW TEL siempre caía en el bloque de
     # Dealers (Supervisor a cargo / DNI supervisor / Coordinador) sin poder
     # completarlos nunca, porque esos campos no existen en su formulario.
+    # Igual que Supervisor/Coordinador: si la Provincia elegida todavía no tiene
+    # distritos cargados en la hoja, no se exige (no se puede pedir elegir algo
+    # que el desplegable ni siquiera ofrece).
+    if campos.get("_HAY_DISTRITO_DISPONIBLE", True):
+        requeridos.append(("DISTRITO", "Distrito"))
+
     if canal == "VENTAS INDIRECTAS":
         requeridos += [
             ("DEPARTAMENTO", "Departamento"),
@@ -1218,6 +1243,7 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
     hay_coordinador_disponible = True
     hay_supervisor_disponible = True
     hay_supervisor_directo_disponible = True
+    hay_distrito_disponible = True
 
     if canal == "VENTAS INDIRECTAS":
         # ── DEALERS: jerarquía completa ────────────────────────────────
@@ -1242,6 +1268,10 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             if st.session_state.get(k("distrito"), "") not in [""] + distritos:
                 st.session_state[k("distrito")] = ""
             distrito = st.selectbox("DISTRITO", [""] + distritos, key=k("distrito"))
+            # Obligatorio solo cuando hay distritos para elegir (misma regla que
+            # Supervisor/Coordinador): si la Provincia todavía no tiene distritos
+            # cargados en la hoja, no se puede exigir elegir uno que no existe.
+            hay_distrito_disponible = bool(distritos)
 
             # Zona Agrupada: filtrada por Departamento → Provincia → Distrito
             # (zonas.py cruza esa ubicación contra el Excel de ubigeos). La
@@ -1360,6 +1390,7 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             if st.session_state.get(k("distrito_directo"), "") not in [""] + distritos_d:
                 st.session_state[k("distrito_directo")] = ""
             distrito = st.selectbox("DISTRITO", [""] + distritos_d, key=k("distrito_directo"))
+            hay_distrito_disponible = bool(distritos_d)
         with col_u2d:
             st.text_input("SUPERVISOR", value=supervisor_directo, disabled=True, key=k("sup_directo_display"))
 
@@ -1409,7 +1440,7 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
 
         campos = {
             "FECHA MOV": "",
-            "RAZON SOCIAL": razon,
+            "RAZON SOCIAL": razon_social_historica(razon),
             "CANAL": limpiar_texto(canal_mostrar),
             "SUB CANAL": limpiar_texto(subcanal),
             "TIPO_GESTION": limpiar_texto(tipo_gestion),
@@ -1485,6 +1516,7 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             "_HAY_COORDINADOR_DISPONIBLE": hay_coordinador_disponible,
             "_HAY_SUPERVISOR_DISPONIBLE": hay_supervisor_disponible,
             "_HAY_SUPERVISOR_DIRECTO_DISPONIBLE": hay_supervisor_directo_disponible,
+            "_HAY_DISTRITO_DISPONIBLE": hay_distrito_disponible,
             # Para Konecta/Salesland, la columna "CANAL" que se guarda ahora
             # dice "VENTAS DIRECTAS" (ver DEALERS_CANAL_DIRECTAS_OUTBOUND),
             # pero el formulario que llenaron SÍ fue el de Indirecto/Outbound
@@ -1573,7 +1605,11 @@ def mostrar_formulario(hoja_colaboradores, hoja_ubicaciones, hoja_asistencia=Non
             # tienen cuota de almacenamiento propia y la subida fallaba con
             # "storageQuotaExceeded"). Confirmado 02/11/2026.
             if requiere_documentos:
-                razon_carpeta = carpeta_onedrive_dealer(campos.get("RAZON SOCIAL", "")) or "SIN_RAZON"
+                # OJO: usa `razon` (valor interno, p. ej. "NOGALES HIGH SAC"), NO
+                # campos["RAZON SOCIAL"] — esa ya viene traducida a la forma
+                # histórica ("NOGALES HIGH S.A.C.") por razon_social_historica(),
+                # que no es la misma forma que usa CARPETA_ONEDRIVE_POR_RAZON.
+                razon_carpeta = carpeta_onedrive_dealer(razon) or "SIN_RAZON"
                 try:
                     nombre_doc = f"{dni_limpio} - {campos.get('NOMBRES','')} {campos.get('APELLIDO PATERNO','')}".strip()
                     carpeta_contrato = os.path.join(RUTA_WEB_UPLOADS_ONEDRIVE, razon_carpeta, "CONTRATOS NUEVOS USUARIOS")

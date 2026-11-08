@@ -300,6 +300,9 @@ hr { border-color: var(--ink-100) !important; margin: 1.5rem 0 !important; }
     display: grid; place-items: center; font-size: 14px;
 }
 .wow-login-hero .footer { font-size: 11px; color: rgba(255,255,255,0.5); letter-spacing: 0.5px; }
+.wow-login-mobile-brand {
+    display: none;
+}
 .wow-login-form-eyebrow {
     display: inline-flex; align-items: center; gap: 6px;
     background: var(--wow-orange-50);
@@ -418,6 +421,30 @@ footer { visibility: hidden; }
     .wow-app-header { padding: 16px 18px; }
     .wow-app-header h1 { font-size: 17px; }
     .main .block-container { padding-left: 1rem; padding-right: 1rem; }
+}
+
+/* ============================================================
+   CELULAR (≤640px) — fuerza apilado de columnas y oculta el
+   panel decorativo del login para que el formulario sea lo
+   primero visible, sin scroll extra.
+   ============================================================ */
+@media (max-width: 640px) {
+    [data-testid="stHorizontalBlock"] { flex-direction: column !important; }
+    [data-testid="stHorizontalBlock"] > div[data-testid="column"] {
+        width: 100% !important; flex: 1 1 100% !important; min-width: 100% !important;
+    }
+    .wow-login-hero { display: none !important; }
+    .wow-login-mobile-brand {
+        display: flex; align-items: center; justify-content: center;
+        gap: 8px; font-size: 22px; font-weight: 800;
+        color: var(--wow-purple-700) !important; letter-spacing: -1px;
+        margin: 4px 0 14px;
+    }
+    .main .block-container { padding-left: 0.6rem; padding-right: 0.6rem; }
+    .wow-app-header { padding: 14px 16px; }
+    .wow-app-header h1 { font-size: 15px; }
+    .wow-app-header-sub { font-size: 11px; }
+    .wow-pill { font-size: 10px; padding: 3px 9px; }
 }
 </style>
 """
