@@ -470,60 +470,64 @@ HEADER = (
 )
 
 CSS = """<style>
-.cob-header{background:linear-gradient(135deg,#4B0067,#7B1FA2 55%,#EC6608);border-radius:14px;padding:16px 22px;margin-bottom:14px;display:flex;align-items:center;gap:14px;position:relative;overflow:hidden;}
-.cob-header::before{content:"";position:absolute;right:-40px;top:-40px;width:180px;height:180px;border-radius:50%;background:radial-gradient(circle,rgba(255,255,255,.18),transparent 65%);pointer-events:none;}
-.cob-header-ico{font-size:28px;position:relative;}
-.cob-header-t{color:#fff;font-size:21px;font-weight:800;line-height:1.2;position:relative;}
-.cob-header-s{color:rgba(255,255,255,.85);font-size:12px;margin-top:2px;position:relative;}
-.cob-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px;margin:6px 0 12px;}
-.cob-kpi{background:linear-gradient(165deg,#fff 70%,#FAF8FC);border:1px solid #E5E0EA;border-top:4px solid var(--c);border-radius:12px;padding:12px 14px;box-shadow:0 1px 3px rgba(75,0,103,.06);transition:transform .15s ease,box-shadow .15s ease;}
-.cob-kpi:hover{transform:translateY(-2px);box-shadow:0 8px 18px rgba(75,0,103,.14);}
-.cob-kpi .v{font-size:26px;font-weight:800;color:#1A1521;line-height:1.1;}
-.cob-kpi .l{font-size:12px;color:#4A4153;margin-top:3px;font-weight:600;}
+.cob-header{background:linear-gradient(135deg,#4B0067,#7B1FA2 55%,#EC6608);border-radius:16px;padding:20px 26px;margin-bottom:16px;display:flex;align-items:center;gap:16px;position:relative;overflow:hidden;box-shadow:0 10px 30px rgba(75,0,103,.25);}
+.cob-header::before{content:"";position:absolute;right:-60px;top:-60px;width:260px;height:260px;border-radius:50%;background:radial-gradient(circle,rgba(255,255,255,.22),transparent 65%);pointer-events:none;}
+.cob-header::after{content:"";position:absolute;left:30%;bottom:-80px;width:200px;height:200px;border-radius:50%;background:radial-gradient(circle,rgba(255,255,255,.1),transparent 70%);pointer-events:none;}
+.cob-header-ico{font-size:34px;position:relative;background:rgba(255,255,255,.16);border-radius:14px;width:56px;height:56px;display:flex;align-items:center;justify-content:center;flex:0 0 auto;}
+.cob-header-t{color:#fff;font-size:23px;font-weight:800;line-height:1.2;position:relative;letter-spacing:-.3px;}
+.cob-header-s{color:rgba(255,255,255,.9);font-size:12.5px;margin-top:3px;position:relative;}
+.cob-kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(152px,1fr));gap:12px;margin:8px 0 16px;}
+.cob-kpi{background:#fff;border:1px solid #ECE6F2;border-radius:14px;padding:14px 16px;box-shadow:0 2px 8px rgba(75,0,103,.07);transition:transform .18s ease,box-shadow .18s ease;position:relative;overflow:hidden;}
+.cob-kpi::before{content:"";position:absolute;left:0;top:0;bottom:0;width:5px;background:var(--c);}
+.cob-kpi::after{content:"";position:absolute;right:-20px;top:-20px;width:70px;height:70px;border-radius:50%;background:var(--c);opacity:.08;}
+.cob-kpi:hover{transform:translateY(-3px);box-shadow:0 10px 26px rgba(75,0,103,.18);border-color:var(--c);}
+.cob-kpi .v{font-size:28px;font-weight:800;color:#1A1521;line-height:1.1;font-variant-numeric:tabular-nums;}
+.cob-kpi .l{font-size:12px;color:#4A4153;margin-top:4px;font-weight:700;}
 .cob-kpi .s{font-size:11px;color:#8F8898;margin-top:2px;}
-.cob-kpi .bar{height:6px;background:#EFEBF2;border-radius:99px;margin-top:8px;overflow:hidden;}
-.cob-kpi .bar i{display:block;height:100%;background:var(--c);border-radius:99px;transition:width .3s ease;}
-.cob-dash{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:12px;margin:0 0 14px;}
-.cob-panel{background:#fff;border:1px solid #E5E0EA;border-radius:12px;padding:12px 16px;transition:box-shadow .15s ease;}
-.cob-panel:hover{box-shadow:0 6px 16px rgba(75,0,103,.1);}
-.cob-panel h4{margin:0 0 10px;font-size:13px;color:#4B0067;font-weight:800;}
-.cob-stack{display:flex;height:14px;border-radius:99px;overflow:hidden;gap:2px;background:#EFEBF2;}
-.cob-stack i{display:block;height:100%;transition:width .3s ease;}
-.cob-leg{display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:9px;font-size:11.5px;color:#4A4153;}
+.cob-kpi .bar{height:7px;background:#F1ECF5;border-radius:99px;margin-top:9px;overflow:hidden;}
+.cob-kpi .bar i{display:block;height:100%;background:var(--c);border-radius:99px;transition:width .35s ease;}
+.cob-dash{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:14px;margin:0 0 16px;}
+.cob-panel{background:#fff;border:1px solid #ECE6F2;border-radius:14px;padding:16px 18px;box-shadow:0 2px 8px rgba(75,0,103,.05);transition:box-shadow .18s ease;}
+.cob-panel:hover{box-shadow:0 8px 20px rgba(75,0,103,.12);}
+.cob-panel h4{margin:0 0 12px;font-size:13.5px;color:#4B0067;font-weight:800;}
+.cob-stack{display:flex;height:16px;border-radius:99px;overflow:hidden;gap:2px;background:#F1ECF5;}
+.cob-stack i{display:block;height:100%;transition:width .35s ease;}
+.cob-leg{display:flex;flex-wrap:wrap;gap:7px 14px;margin-top:11px;font-size:11.5px;color:#4A4153;}
 .cob-leg span{display:inline-flex;align-items:center;gap:5px;}
 .cob-leg b{color:#1A1521;}
 .cob-dot{width:9px;height:9px;border-radius:3px;display:inline-block;}
-.cob-row{display:grid;grid-template-columns:34px 1fr 70px;align-items:center;gap:8px;font-size:12px;color:#4A4153;margin:5px 0;}
-.cob-row .t{height:10px;background:#EFEBF2;border-radius:99px;overflow:hidden;display:flex;gap:2px;}
+.cob-row{display:grid;grid-template-columns:36px 1fr 74px;align-items:center;gap:9px;font-size:12px;color:#4A4153;margin:6px 0;}
+.cob-row .t{height:11px;background:#F1ECF5;border-radius:99px;overflow:hidden;display:flex;gap:2px;}
 .cob-row .t i{display:block;height:100%;}
 .cob-row .n{text-align:right;color:#1A1521;font-weight:700;}
-.cob-pill{display:inline-block;padding:3px 10px;border-radius:999px;font-size:12px;font-weight:700;}
-.cob-card{background:#fff;border:1px solid #E5E0EA;border-radius:12px;padding:14px 16px;margin:8px 0;transition:box-shadow .15s ease;}
-.cob-card:hover{box-shadow:0 6px 16px rgba(75,0,103,.08);}
-.cob-grid{display:flex;gap:28px;flex-wrap:wrap;}
-.cob-grid .k{color:#6B6175;font-size:11px;text-transform:uppercase;letter-spacing:.03em;}
-.cob-grid .x{font-weight:700;font-size:14px;color:#1A1521;}
-.cob-steps{display:flex;gap:6px;flex-wrap:wrap;margin:10px 0 4px;}
-.cob-step{flex:1 1 90px;min-width:90px;border-radius:9px;padding:7px 8px;font-size:11.5px;text-align:center;
-  border:2px solid var(--c);background:var(--bg);color:var(--t);font-weight:700;transition:transform .15s ease;}
-.cob-step:hover{transform:translateY(-1px);}
-.cob-int{border:1px solid #E5E0EA;border-left:5px solid var(--c);border-radius:10px;padding:9px 12px;margin:6px 0;
-  background:#FCFBFD;font-size:13px;color:#3D3548;transition:box-shadow .15s ease;}
-.cob-int:hover{box-shadow:0 4px 12px rgba(75,0,103,.08);}
+.cob-pill{display:inline-block;padding:4px 12px;border-radius:999px;font-size:12px;font-weight:700;box-shadow:0 1px 2px rgba(0,0,0,.08);}
+.cob-card{background:#fff;border:1px solid #ECE6F2;border-radius:14px;padding:18px 20px;margin:10px 0;box-shadow:0 2px 10px rgba(75,0,103,.06);transition:box-shadow .18s ease;}
+.cob-card:hover{box-shadow:0 10px 24px rgba(75,0,103,.1);}
+.cob-grid{display:flex;gap:30px;flex-wrap:wrap;}
+.cob-grid .k{color:#6B6175;font-size:10.5px;text-transform:uppercase;letter-spacing:.05em;font-weight:700;}
+.cob-grid .x{font-weight:800;font-size:15px;color:#1A1521;margin-top:2px;}
+.cob-steps{display:flex;gap:7px;flex-wrap:wrap;margin:12px 0 6px;}
+.cob-step{flex:1 1 92px;min-width:92px;border-radius:10px;padding:9px 10px;font-size:11.5px;text-align:center;
+  border:2px solid var(--c);background:var(--bg);color:var(--t);font-weight:700;transition:transform .18s ease,box-shadow .18s ease;}
+.cob-step:hover{transform:translateY(-2px);box-shadow:0 4px 10px rgba(75,0,103,.14);}
+.cob-int{border:1px solid #ECE6F2;border-left:6px solid var(--c);border-radius:12px;padding:11px 14px;margin:8px 0;
+  background:#FCFBFD;font-size:13px;color:#3D3548;box-shadow:0 1px 4px rgba(75,0,103,.05);transition:box-shadow .18s ease;}
+.cob-int:hover{box-shadow:0 6px 16px rgba(75,0,103,.1);}
 .cob-int b{color:#1A1521;}
-.cob-int .meta{font-size:11px;color:#8F8898;margin-top:3px;}
-.cob-reclamo{display:inline-block;background:#FFF4EA;color:#D45605;border:1px solid #FDE6D2;border-radius:999px;padding:2px 10px;font-size:11px;font-weight:700;}
-.cob-sec{background:linear-gradient(90deg,#4B0067,#7B1FA2);padding:8px 14px;border-radius:8px;margin:14px 0 8px;
-  color:#fff;font-weight:700;font-size:14px;}
+.cob-int .meta{font-size:11px;color:#8F8898;margin-top:4px;}
+.cob-reclamo{display:inline-block;background:#FFF0DE;color:#D45605;border:1px solid #FDD9AC;border-radius:999px;padding:3px 11px;font-size:11px;font-weight:700;}
+.cob-sec{background:linear-gradient(90deg,#4B0067,#7B1FA2 70%,#9B3FD9);padding:10px 16px;border-radius:10px;margin:18px 0 10px;
+  color:#fff;font-weight:800;font-size:14.5px;box-shadow:0 4px 12px rgba(75,0,103,.18);letter-spacing:.1px;}
+div[data-testid="stDataFrame"]{border-radius:14px;overflow:hidden;box-shadow:0 2px 10px rgba(75,0,103,.08);border:1px solid #ECE6F2;}
 @media (max-width:640px){
-  .cob-header{padding:14px 16px;gap:10px;}
-  .cob-header-ico{font-size:22px;}
-  .cob-header-t{font-size:16px;}
+  .cob-header{padding:16px 18px;gap:12px;}
+  .cob-header-ico{font-size:26px;width:44px;height:44px;}
+  .cob-header-t{font-size:17px;}
   .cob-header-s{font-size:11px;}
   .cob-kpis{grid-template-columns:repeat(auto-fit,minmax(130px,1fr));}
-  .cob-kpi .v{font-size:21px;}
-  .cob-grid{gap:16px;}
-  .cob-step{flex:1 1 70px;min-width:70px;font-size:10.5px;padding:6px;}
+  .cob-kpi .v{font-size:22px;}
+  .cob-grid{gap:18px;}
+  .cob-step{flex:1 1 70px;min-width:70px;font-size:10.5px;padding:7px;}
 }
 </style>"""
 
@@ -923,10 +927,10 @@ def _siguiente(estado: str, n: int, motivo_cierre: str = "") -> str:
         return "🟡 Finalizar caso"
     return f"➜ Completar C{n + 1}"
 COLUMNAS_EDITABLES_TABLA = [R.COL_RESP_BO] + [R.col(c, n) for n in range(1, R.N_INT + 1) for c in R.CAMPOS]
-ETIQUETAS_CAMPO = {"FECHA": "Fecha", "HORARIO": "Horario", "MEDIO": "Medio", "TIPO CONTACTO": "Tipo",
-                   "ACCIÓN": "Resultado", "FECHA COMPROMISO": "F. compromiso",
-                   "MOTIVO DE NO PAGO": "Motivo no pago", "HAY RECLAMO": "¿Reclamo?",
-                   "CÓDIGO RECLAMO": "Cód. reclamo", "OBSERVACIÓN": "Observación"}
+ETIQUETAS_CAMPO = {"FECHA": "📅 Fecha", "HORARIO": "🕐 Horario", "MEDIO": "📞 Medio", "TIPO CONTACTO": "🎯 Tipo",
+                   "ACCIÓN": "📝 Resultado", "FECHA COMPROMISO": "📆 F. compromiso",
+                   "MOTIVO DE NO PAGO": "❓ Motivo no pago", "HAY RECLAMO": "📌 ¿Reclamo?",
+                   "CÓDIGO RECLAMO": "🔖 Cód. reclamo", "OBSERVACIÓN": "🗒️ Observación"}
 AYUDA_CAMPO = {
     "TIPO CONTACTO": "Elige primero el tipo: define qué resultados son válidos.",
     "ACCIÓN": (f"EFECTIVO: {', '.join(R.ACCIONES[R.EFECTIVO])}. "
@@ -975,11 +979,15 @@ def _config_tabla(base: pd.DataFrame, listas: dict, responsables: list[str]) -> 
                       "ACCIÓN": opciones(acciones, "ACCIÓN"),
                       "MOTIVO DE NO PAGO": opciones(listas["motivo"], "MOTIVO DE NO PAGO")}
     cfg = {
-        "Estado": st.column_config.TextColumn("Estado", width="medium"),
-        "Siguiente": st.column_config.TextColumn("Siguiente paso", width="small"),
-        "Avance": st.column_config.ProgressColumn("Avance", min_value=0, max_value=R.N_INT, format=f"%d/{R.N_INT}"),
-        "Cliente": st.column_config.TextColumn("Cliente", width="medium"),
-        R.COL_RESP_BO: st.column_config.SelectboxColumn("Responsable BO", options=responsables),
+        "Estado": st.column_config.TextColumn("📋 Estado", width="medium"),
+        "Siguiente": st.column_config.TextColumn("➜ Siguiente paso", width="small"),
+        "Avance": st.column_config.ProgressColumn("📊 Avance", min_value=0, max_value=R.N_INT, format=f"%d/{R.N_INT}"),
+        "Código": st.column_config.TextColumn("🔢 Código", width="small"),
+        "Cliente": st.column_config.TextColumn("👤 Cliente", width="medium"),
+        "Celular": st.column_config.TextColumn("📱 Celular", width="small"),
+        "Estado pago": st.column_config.TextColumn("💳 Estado pago", width="small"),
+        "Partner": st.column_config.TextColumn("🏢 Partner", width="small"),
+        R.COL_RESP_BO: st.column_config.SelectboxColumn("👔 Responsable BO", options=responsables),
     }
     for n in range(1, R.N_INT + 1):
         for c in R.CAMPOS:
