@@ -935,8 +935,11 @@ def _tabla_contactos(base: pd.DataFrame) -> pd.DataFrame:
         for c in R.CAMPOS:
             serie = base[R.col(c, n)]
             if c in R.CAMPOS_FECHA:
-                serie = pd.to_datetime(serie.map(R.parse_fecha), errors="coerce")
-            g[R.col(c, n)] = serie.values
+                # object (date/None), no pd.to_datetime: NaT se renderiza como el texto
+                # literal "None" en el DateColumn de Streamlit 1.37; None en blanco, sí.
+                g[R.col(c, n)] = serie.map(R.parse_fecha).values
+            else:
+                g[R.col(c, n)] = serie.values
     return g
 
 
