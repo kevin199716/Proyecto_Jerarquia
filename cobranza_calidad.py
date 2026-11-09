@@ -1247,27 +1247,27 @@ def _tab_indicadores(dfp: pd.DataFrame, dfa: pd.DataFrame, ctx: dict):
 
 
 def _render_vintage(dfa: pd.DataFrame, ctx: dict):
-    st.markdown('<div class="cob-sec">📊 % pagados por promotor y ciclo de facturación (BN1–BN6)</div>',
+    st.markdown('<div class="cob-sec">📊 % pagados por promotor y ciclo de facturación (VN1–VN6)</div>',
                unsafe_allow_html=True)
-    st.caption("BN1 (FPD) es el periodo más reciente ya cerrado según el corte real de facturación "
+    st.caption("VN1 (FPD) es el periodo más reciente ya cerrado según el corte real de facturación "
                "(tb_cierre_facturacion, no un día fijo del mes), anclado al periodo que tienes "
-               "seleccionado arriba — BN2 el anterior, y así hasta BN6. El mismo código de venta puede "
-               "aparecer como BN1 en un periodo y BN2 al mes siguiente: es cosecha acumulada, no un "
+               "seleccionado arriba — VN2 el anterior, y así hasta VN6. El mismo código de venta puede "
+               "aparecer como VN1 en un periodo y VN2 al mes siguiente: es cosecha acumulada, no un "
                "corte único. \"Vendedor\" es quien activó la venta (Reporting), no quien gestiona el "
                "caso en Cobranza.")
     df_rep, aviso_rep = ctx["df_rep"], ctx["aviso_rep"]
     cierres, aviso_cierres = ctx["cierres"], ctx["aviso_cierres"]
     if aviso_rep or aviso_cierres:
-        st.info(f"🛰️ BN1–BN6 no disponible: {aviso_rep or aviso_cierres}")
+        st.info(f"🛰️ VN1–VN6 no disponible: {aviso_rep or aviso_cierres}")
         return
     metricas = V.calcular_metricas_vintage(df_rep, dfa, cierres, ctx["ancla_vintage"])
     if metricas.empty:
-        st.caption("Sin activaciones que caigan dentro de BN1–BN6 todavía.")
+        st.caption("Sin activaciones que caigan dentro de VN1–VN6 todavía.")
         return
     metrica = st.selectbox("📊 Métrica", list(V.METRICAS), format_func=lambda k: V.METRICAS[k],
                            index=list(V.METRICAS).index("pagado"), key="cob_vn_metrica")
     piv = V.tabla_pivote(metricas, metrica)
-    piv.columns = ["BN1 (FPD)" if c == "VN1" else c.replace("VN", "BN") for c in piv.columns]
+    piv.columns = ["VN1 (FPD)" if c == "VN1" else c for c in piv.columns]
     fmt = "{:.1f}" if metrica == "prom_contactos" else "{:.1f}%"
     estilo = piv.style.format(fmt, na_rep="—")
     try:
@@ -1276,15 +1276,15 @@ def _render_vintage(dfa: pd.DataFrame, ctx: dict):
     except ImportError:
         pass  # sin matplotlib instalado: se ve la tabla igual, solo sin el degradado de color.
     st.dataframe(estilo, use_container_width=True)
-    st.caption("BN5/BN6 salen vacíos (—) hasta que haya suficiente historia en Reporting para esos periodos.")
+    st.caption("VN5/VN6 salen vacíos (—) hasta que haya suficiente historia en Reporting para esos periodos.")
 
     st.markdown("**🏆 Ranking de vendedores por % pagado**")
-    st.caption("Mismo origen que la tabla de arriba: suma todos los BN de este vendedor (respeta el "
+    st.caption("Mismo origen que la tabla de arriba: suma todos los VN de este vendedor (respeta el "
                "ciclo real de facturación) — no es un cálculo aparte ni otra fuente de datos.")
     ranking = V.ranking_vendedores(metricas)
     st.dataframe(
         ranking.rename(columns={"razon_social": "Dealer", "vendedor": "Vendedor",
-                                "n_casos": "Casos (BN1–BN6)", "pagado": "% Pagado"}),
+                                "n_casos": "Casos (VN1–VN6)", "pagado": "% Pagado"}),
         hide_index=True, use_container_width=True,
         column_config={"% Pagado": st.column_config.ProgressColumn("% Pagado", min_value=0, max_value=100,
                                                                     format="%.1f%%")},
@@ -1391,7 +1391,7 @@ def mostrar_cobranza(razon=None):
             return
 
     # Se lee Reporting una sola vez acá: sirve tanto para la búsqueda por DNI de vendedor
-    # (abajo) como para la tabla BN1–BN6 al pie de la matriz — nunca se duplica la llamada.
+    # (abajo) como para la tabla VN1–VN6 al pie de la matriz — nunca se duplica la llamada.
     df_rep, aviso_rep = PR.leer_base_vintage()
     cierres, aviso_cierres = PR.leer_cierres_facturacion()
     df = df.drop(columns=["dni_creador_lead", "nombre_creador_lead"], errors="ignore")
@@ -1455,7 +1455,7 @@ def mostrar_cobranza(razon=None):
     (st.success if editable and "abierto" in mensaje else st.warning if editable else st.info)(
         ("✏️ " if editable else "🔒 ") + mensaje)
 
-    # BN1 se ancla al periodo seleccionado (no a la fecha real de "hoy"): así el mismo código
+    # VN1 se ancla al periodo seleccionado (no a la fecha real de "hoy"): así el mismo código
     # de venta aparece siempre con el mismo BN mientras se mira ese periodo, sin importar
     # cuándo se abra la pantalla. Si el periodo elegido todavía no tiene corte (el vigente,
     # p. ej.), se cae a la fecha real de hoy.
