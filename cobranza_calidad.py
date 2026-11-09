@@ -1394,6 +1394,7 @@ def mostrar_cobranza(razon=None):
     # (abajo) como para la tabla BN1–BN6 al pie de la matriz — nunca se duplica la llamada.
     df_rep, aviso_rep = PR.leer_base_vintage()
     cierres, aviso_cierres = PR.leer_cierres_facturacion()
+    df = df.drop(columns=["dni_creador_lead", "nombre_creador_lead"], errors="ignore")
     if not df_rep.empty:
         df = df.merge(
             df_rep[["cod_cliente", "dni_creador_lead", "nombre_creador_lead"]].drop_duplicates("cod_cliente"),
